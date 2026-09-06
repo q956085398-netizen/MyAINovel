@@ -1,0 +1,231 @@
+:root {
+  --bg: #f5f2ec;
+  --panel: #fffdf8;
+  --ink: #2b2a26;
+  --ink-soft: #7c766a;
+  --accent: #a8432f;
+  --accent-soft: #f3e3de;
+  --line: #e3ded4;
+  --sidebar-bg: #2e2c28;
+  --sidebar-ink: #d8d3c8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+    "Noto Sans CJK SC", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 184px 1fr;
+  height: 100%;
+}
+
+/* ---------- 侧栏 ---------- */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-ink);
+  padding: 20px 12px;
+}
+
+.brand {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 6px;
+  color: #f0ece2;
+  padding: 4px 10px 18px;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-item.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  font-size: 12px;
+  color: #948d80;
+  padding: 8px 10px;
+}
+
+/* ---------- 主区 ---------- */
+
+.main {
+  overflow: auto;
+  padding: 28px 36px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.library-path {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn {
+  appearance: none;
+  font: inherit;
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: var(--ink-soft);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn.primary:hover {
+  background: #8f3826;
+}
+
+.stats {
+  color: var(--ink-soft);
+  margin: 0 0 10px;
+}
+
+/* ---------- 书目表 ---------- */
+
+.book-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.book-table th,
+.book-table td {
+  text-align: left;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.book-table thead th {
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: #faf7f0;
+}
+
+.book-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.book-table tbody tr:hover {
+  background: #faf6ee;
+}
+
+.book-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.book-name {
+  font-weight: 500;
+}
+
+/* ---------- 空态与提示 ---------- */
+
+.empty-state {
+  margin-top: 10vh;
+  text-align: center;
+  color: var(--ink);
+}
+
+.empty-state p {
+  margin: 4px 0;
+  font-size: 16px;
+}
+
+.hint {
+  color: var(--ink-soft);
+  font-size: 13px !important;
+}
+
+.error-box {
+  background: var(--accent-soft);
+  border: 1px solid #e0bdb2;
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  word-break: break-all;
+}
