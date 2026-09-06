@@ -53,7 +53,7 @@ export default function EditorPage({ book, onBack }: EditorPageProps) {
   const [metaInit, setMetaInit] = useState<{ meta: BookMeta; warning?: string }>({
     meta: emptyBookMeta(),
   });
-  const [tropePanel, setTropePanel] = useState<{
+  const [tropeDialog, setTropeDialog] = useState<{
     chapters: ChapterAnchor[];
     tropes: TropeSpan[];
     warning?: string;
@@ -150,7 +150,7 @@ export default function EditorPage({ book, onBack }: EditorPageProps) {
     } catch (e) {
       warning = `已有 .yaml 解析失败：${errMsg(e)}。保存桥段会整文件覆盖，请先确认内容。`;
     }
-    setTropePanel({ chapters, tropes, warning });
+    setTropeDialog({ chapters, tropes, warning });
   }
 
   useEffect(() => {
@@ -291,14 +291,14 @@ export default function EditorPage({ book, onBack }: EditorPageProps) {
           }}
         />
       )}
-      {tropePanel && (
+      {tropeDialog && (
         <TropeDialog
           mdPath={book.primaryMd}
-          chapters={tropePanel.chapters}
-          initial={tropePanel.tropes}
-          warning={tropePanel.warning}
-          onClose={() => setTropePanel(null)}
-          onSaved={() => setTropePanel(null)}
+          chapters={tropeDialog.chapters}
+          initial={tropeDialog.tropes}
+          warning={tropeDialog.warning}
+          onClose={() => setTropeDialog(null)}
+          onSaved={() => setTropeDialog(null)}
         />
       )}
     </div>

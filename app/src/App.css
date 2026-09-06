@@ -235,6 +235,15 @@ body {
   font-size: 12px;
 }
 
+.cell-sub-block {
+  display: block;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
 /* ---------- 全文搜索 ---------- */
 
 .search-bar {

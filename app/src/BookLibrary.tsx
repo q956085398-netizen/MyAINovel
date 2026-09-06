@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { BookEntry, SearchHit, TropeSpan } from "./types";
-import { errMsg } from "./util";
+import type { BookEntry, SearchHit } from "./types";
+import { errMsg, tropeSpanLabel } from "./util";
 
 const PATH_KEY = "gongbi.libraryPath";
 /** 与 Rust 侧 search::MAX_HITS 对应，达上限时提示截断。 */
@@ -15,12 +15,6 @@ const layoutLabel: Record<BookEntry["layout"], string> = {
 
 function formatCount(n: number): string {
   return n.toLocaleString("zh-Hans-CN");
-}
-
-function spanLabel(t: TropeSpan): string {
-  return t.startChapter === t.endChapter
-    ? `第${t.startChapter}章`
-    : `第${t.startChapter}~${t.endChapter}章`;
 }
 
 /** 片段里高亮命中词（大小写不敏感的首次出现）。 */
@@ -196,7 +190,7 @@ export default function BookLibrary({ onOpen }: BookLibraryProps) {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="全文搜索：书名、金手指、桥段、点评……"
+              placeholder="全文搜索拆书稿与标注：点评、金手指、桥段、解法……"
             />
             <button className="btn" type="submit" disabled={searching || !query.trim()}>
               {searching ? "搜索中…" : "搜索"}
@@ -261,12 +255,19 @@ export default function BookLibrary({ onOpen }: BookLibraryProps) {
                   {books.map((b) => (
                     <tr key={b.primaryMd} title="打开拆书稿" onClick={() => onOpen(b)}>
                       <td className="book-name">
-                        {b.name}
-                        {b.meta.goldenFinger && (
-                          <span className="cell-sub" title="金手指">
-                            {" "}
-                            · {b.meta.goldenFinger}
-                          </span>
+                        <div>
+                          {b.name}
+                          {b.meta.goldenFinger && (
+                            <span className="cell-sub" title="金手指">
+                              {" "}
+                              · {b.meta.goldenFinger}
+                            </span>
+                          )}
+                        </div>
+                        {b.meta.summary && (
+                          <div className="cell-sub cell-sub-block" title={b.meta.summary}>
+                            {b.meta.summary}
+                          </div>
                         )}
                       </td>
                       <td>{b.meta.trackRecord ?? "—"}</td>
@@ -326,7 +327,12 @@ export default function BookLibrary({ onOpen }: BookLibraryProps) {
                         >
                           {book.name}
                         </button>
-                        <span className="trope-span">{spanLabel(trope)}</span>
+                        <span
+                          className="trope-span"
+                          title="按正文里第几个章标题计，非正文章号"
+                        >
+                          {tropeSpanLabel(trope)}
+                        </span>
                         {trope.types.map((ty) => (
                           <span key={ty} className="tag">
                             {ty}

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::book_file::strip_bom;
+use crate::book_file::{strip_bom, sibling_yaml_path};
 use crate::library::collect_book_files;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -31,42 +31,63 @@ pub fn search_library(root: &Path, query: &str) -> Result<Vec<SearchHit>, String
     }
     let mut hits: Vec<SearchHit> = Vec::new();
     'outer: for files in collect_book_files(root)? {
-        for md in &files.mds {
-            let Ok(bytes) = fs::read(md) else {
-                continue;
-            };
-            let raw = String::from_utf8_lossy(&bytes);
-            for (idx, line) in strip_bom(&raw).lines().enumerate() {
-                if !line.to_lowercase().contains(&needle) {
-                    continue;
-                }
-                hits.push(SearchHit {
-                    book_name: files.name.clone(),
-                    primary_md: files.primary_md.clone(),
-                    line: idx as u32 + 1,
-                    snippet: snippet_of(line, query.trim()),
-                });
-                if hits.len() >= MAX_HITS {
-                    break 'outer;
-                }
+        // 主文件同名 .yaml（书级四项、桥段标注）也是这本书拆书记录的一部分。
+        let yaml = sibling_yaml_path(&files.primary_md);
+        let docs = files
+            .mds
+            .iter()
+            .chain(yaml.is_file().then_some(&yaml).into_iter());
+        for doc in docs {
+            scan_doc(doc, &files.name, &files.primary_md, &needle, &mut hits);
+            if hits.len() >= MAX_HITS {
+                break 'outer;
             }
         }
     }
     Ok(hits)
 }
 
-/// 片段：整行 trim 后压到 SNIPPET_CHARS 字内；超长行优先保留首个命中
-/// （按原文匹配，大小写不一致时从头截）的窗口，两端加省略号。
-fn snippet_of(line: &str, needle: &str) -> String {
+/// 逐行扫一个文档，命中即入列；达上限提前收手。
+fn scan_doc(
+    doc: &Path,
+    book_name: &str,
+    primary_md: &Path,
+    needle_lower: &str,
+    hits: &mut Vec<SearchHit>,
+) {
+    let Ok(bytes) = fs::read(doc) else {
+        return;
+    };
+    let raw = String::from_utf8_lossy(&bytes);
+    for (idx, line) in strip_bom(&raw).lines().enumerate() {
+        if !line.to_lowercase().contains(needle_lower) {
+            continue;
+        }
+        hits.push(SearchHit {
+            book_name: book_name.to_string(),
+            primary_md: primary_md.to_path_buf(),
+            line: idx as u32 + 1,
+            snippet: snippet_of(line, needle_lower),
+        });
+        if hits.len() >= MAX_HITS {
+            return;
+        }
+    }
+}
+
+/// 片段：整行 trim 后压到 SNIPPET_CHARS 字内；超长行把窗口锚在首个命中
+/// （大小写不敏感定位，to_lowercase 的字符数与原文在中英文场景一致，
+/// 异形折叠属极端、接受近似），两端加省略号。
+fn snippet_of(line: &str, needle_lower: &str) -> String {
     let line = line.trim();
     let total = line.chars().count();
     if total <= SNIPPET_CHARS {
         return line.to_string();
     }
-    let hit_at = line
-        .find(needle)
-        .map(|byte| line[..byte].chars().count())
-        .unwrap_or(0);
+    let lowered = line.to_lowercase();
+    let hit_at = lowered
+        .find(needle_lower)
+        .map_or(0, |byte| lowered[..byte].chars().count());
     let start = hit_at
         .saturating_sub(10)
         .min(total.saturating_sub(SNIPPET_CHARS));
@@ -120,6 +141,34 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].book_name, "书");
         assert_eq!(hits[0].snippet, "番外里有目标词");
+    }
+
+    #[test]
+    fn yaml_侧_也参与搜索() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("散书.md"), "正文里没有目标词");
+        write(&root.join("散书.yaml"), "书名: 散书\n金手指: 签到系统\n");
+
+        let hits = search_library(&root, "签到系统").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].book_name, "散书");
+        assert_eq!(hits[0].line, 2);
+        assert!(hits[0].snippet.contains("签到系统"));
+    }
+
+    #[test]
+    fn 大小写不匹配的长行_片段仍包含命中词() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let long = format!("{}NeEdLe{}", "A".repeat(100), "b".repeat(100));
+        write(&root.join("书.md"), &long);
+
+        let hits = search_library(&root, "needle").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(
+            hits[0].snippet.contains("NeEdLe"),
+            "片段应保留原文命中词：{}",
+            hits[0].snippet
+        );
     }
 
     #[test]

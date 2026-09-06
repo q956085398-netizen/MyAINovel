@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ChapterAnchor, TropeSpan } from "./types";
-import { errMsg } from "./util";
+import { errMsg, tropeSpanLabel } from "./util";
 
 /** 类型分隔符：中英文逗号/顿号/分号都可。 */
 function parseTypes(text: string): string[] {
@@ -9,12 +9,6 @@ function parseTypes(text: string): string[] {
     .split(/[,，、;；]/)
     .map((t) => t.trim())
     .filter(Boolean);
-}
-
-function spanLabel(t: TropeSpan): string {
-  return t.startChapter === t.endChapter
-    ? `第${t.startChapter}章`
-    : `第${t.startChapter}~${t.endChapter}章`;
 }
 
 interface TropeDialogProps {
@@ -162,7 +156,7 @@ export default function TropeDialog({
             <tbody>
               {list.map((t, i) => (
                 <tr key={`${t.startChapter}-${t.endChapter}-${i}`}>
-                  <td>{spanLabel(t)}</td>
+                  <td title="按正文里第几个章标题计，非正文章号">{tropeSpanLabel(t)}</td>
                   <td>
                     {t.types.map((ty) => (
                       <span key={ty} className="tag">

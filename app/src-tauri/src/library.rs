@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::book_file::{meta_from_mapping, read_yaml_mapping, BookMeta};
+use crate::book_file::{
+    meta_from_mapping, read_yaml_mapping, sibling_yaml_path, BookMeta,
+};
 use crate::trope::{tropes_from_mapping, TropeSpan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,7 +121,7 @@ fn book_entry(files: BookFiles) -> BookEntry {
         .map(|md| md_stats(md))
         .fold((0u32, 0u64), |(c, w), s| (c + s.chapters, w + s.words));
 
-    let (meta, tropes) = yaml_side(&files.primary_md);
+    let (meta, tropes) = meta_and_tropes(&files.primary_md);
     BookEntry {
         name: files.name,
         layout: files.layout,
@@ -134,20 +136,14 @@ fn book_entry(files: BookFiles) -> BookEntry {
 
 /// 主文件同名 .yaml 的书级元数据＋桥段；书库列表对损坏 yaml 降级为缺省
 /// （不因一本书的坏文件拖垮整个扫描），编辑器打开该书时会显式告警。
-fn yaml_side(primary_md: &Path) -> (BookMeta, Vec<TropeSpan>) {
-    match read_yaml_mapping(&sibling_yaml(primary_md)) {
+fn meta_and_tropes(primary_md: &Path) -> (BookMeta, Vec<TropeSpan>) {
+    match read_yaml_mapping(&sibling_yaml_path(primary_md)) {
         Ok(map) => (
             meta_from_mapping(&map),
             tropes_from_mapping(&map).unwrap_or_default(),
         ),
         Err(_) => (BookMeta::default(), Vec::new()),
     }
-}
-
-fn sibling_yaml(md: &Path) -> PathBuf {
-    let mut yaml = md.to_path_buf();
-    yaml.set_extension("yaml");
-    yaml
 }
 
 fn md_stats(md: &Path) -> MdStats {
