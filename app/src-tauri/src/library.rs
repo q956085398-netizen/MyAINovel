@@ -6,9 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::book_file::{
-    meta_from_mapping, read_yaml_mapping, sibling_yaml_path, BookMeta,
-};
+use crate::book_file::{meta_from_mapping, read_yaml_mapping, sibling_yaml_path, BookMeta};
+use crate::inspiration::LIBRARY_DIR;
 use crate::trope::{tropes_from_mapping, TropeSpan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +77,10 @@ pub(crate) fn collect_book_files(root: &Path) -> Result<Vec<BookFiles>, String> 
         }
     }
     for dir in subdirs {
+        // 「灵感库/」是卡片目录不是一本书，书库扫描与全文搜索都跳过。
+        if dir.file_name().and_then(|n| n.to_str()) == Some(LIBRARY_DIR) {
+            continue;
+        }
         if let Some(files) = folder_book_files(&dir) {
             books.push(files);
         }
@@ -251,7 +254,10 @@ mod tests {
             &root.join("《书丙》/拆书.md"),
             "第1章\n甲乙丙\n第2章\n丙乙甲",
         );
-        write(&root.join("《书丙》/拆书.yaml"), "书名: 书丙\n金手指: 签到\n");
+        write(
+            &root.join("《书丙》/拆书.yaml"),
+            "书名: 书丙\n金手指: 签到\n",
+        );
         write(&root.join("《书丙》/附件/截图.png"), "png");
 
         let books = scan_library(&root).unwrap();
@@ -302,6 +308,21 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn 灵感库目录_不算书() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("书甲.md"), "第1章");
+        write(
+            &root.join("灵感库/故事卡/外卖成神.md"),
+            "---\n标签: [故事]\n---\n\n正文",
+        );
+        write(&root.join("灵感库/未分类/随手记.md"), "一条点子");
+
+        let books = scan_library(&root).unwrap();
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].name, "书甲");
     }
 
     #[test]

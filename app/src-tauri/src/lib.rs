@@ -1,4 +1,5 @@
 mod book_file;
+mod inspiration;
 mod library;
 mod search;
 mod trope;
@@ -6,6 +7,7 @@ mod trope;
 use std::path::{Path, PathBuf};
 
 use book_file::{BookMeta, ChapterAnchor};
+use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
 use trope::TropeSpan;
 
@@ -68,6 +70,59 @@ fn search_library(root: String, query: String) -> Result<Vec<search::SearchHit>,
     search::search_library(&PathBuf::from(&root), &query)
 }
 
+#[tauri::command]
+fn scan_inspirations(root: String) -> Result<Vec<InspirationCard>, String> {
+    inspiration::scan_inspirations(Path::new(&root))
+}
+
+/// prev_path：编辑既有卡片时的旧位置；改标题/换类别会改名挪目录。
+#[tauri::command]
+fn save_inspiration_card(
+    root: String,
+    draft: CardDraft,
+    prev_path: Option<String>,
+) -> Result<InspirationCard, String> {
+    inspiration::save_card(
+        Path::new(&root),
+        &draft,
+        prev_path.as_deref().map(Path::new),
+    )
+}
+
+#[tauri::command]
+fn delete_inspiration_card(path: String) -> Result<(), String> {
+    inspiration::delete_card(Path::new(&path))
+}
+
+/// 解析旧「灵感.md」为待确认条目（只读，不改原文件）。
+#[tauri::command]
+fn import_inspiration_preview(path: String) -> Result<Vec<ImportEntry>, String> {
+    let content = book_file::read_text(Path::new(&path))?;
+    Ok(inspiration::import_preview(&content))
+}
+
+/// 确认导入：source_path 取文件名记入卡片「来源」（如「导入自 灵感.md」）。
+#[tauri::command]
+fn confirm_import_inspirations(
+    root: String,
+    entries: Vec<ImportEntry>,
+    source_path: Option<String>,
+) -> Result<Vec<String>, String> {
+    let label = source_path.as_deref().map(|p| {
+        let name = Path::new(p)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.to_string());
+        format!("导入自 {name}")
+    });
+    Ok(
+        inspiration::confirm_import(Path::new(&root), &entries, label.as_deref())?
+            .into_iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -83,7 +138,12 @@ pub fn run() {
             list_chapters,
             read_tropes,
             save_tropes,
-            search_library
+            search_library,
+            scan_inspirations,
+            save_inspiration_card,
+            delete_inspiration_card,
+            import_inspiration_preview,
+            confirm_import_inspirations
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

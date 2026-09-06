@@ -85,7 +85,7 @@ pub(crate) fn sibling_yaml_path(md_path: &Path) -> PathBuf {
     yaml
 }
 
-fn scalar_to_string(value: &Value) -> Option<String> {
+pub(crate) fn scalar_to_string(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),

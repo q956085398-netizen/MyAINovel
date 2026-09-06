@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import type { BookEntry, SearchHit } from "./types";
 import { errMsg, tropeSpanLabel } from "./util";
 
-const PATH_KEY = "gongbi.libraryPath";
 /** 与 Rust 侧 search::MAX_HITS 对应，达上限时提示截断。 */
 const MAX_HITS = 200;
 
@@ -31,13 +29,12 @@ function Highlight({ text, query }: { text: string; query: string }) {
 }
 
 interface BookLibraryProps {
+  libraryPath: string | null;
+  onChooseFolder: () => void;
   onOpen: (book: BookEntry) => void;
 }
 
-export default function BookLibrary({ onOpen }: BookLibraryProps) {
-  const [libraryPath, setLibraryPath] = useState<string | null>(
-    () => localStorage.getItem(PATH_KEY),
-  );
+export default function BookLibrary({ libraryPath, onChooseFolder, onOpen }: BookLibraryProps) {
   const [books, setBooks] = useState<BookEntry[]>([]);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,18 +63,6 @@ export default function BookLibrary({ onOpen }: BookLibraryProps) {
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);
   }, [libraryPath, scan]);
-
-  async function chooseFolder() {
-    const picked = await open({
-      directory: true,
-      multiple: false,
-      title: "选择拆书库文件夹",
-    });
-    if (typeof picked === "string") {
-      localStorage.setItem(PATH_KEY, picked);
-      setLibraryPath(picked);
-    }
-  }
 
   async function runSearch() {
     const q = query.trim();
@@ -150,7 +135,7 @@ export default function BookLibrary({ onOpen }: BookLibraryProps) {
               刷新
             </button>
           )}
-          <button className="btn primary" onClick={() => void chooseFolder()}>
+          <button className="btn primary" onClick={onChooseFolder}>
             打开库文件夹
           </button>
         </div>

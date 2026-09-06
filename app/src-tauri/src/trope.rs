@@ -350,10 +350,7 @@ mod tests {
         let root = TempDir::new().unwrap().path().to_path_buf();
         let md = root.join("书.md");
         write(&md, "");
-        write(
-            &root.join("书.yaml"),
-            "桥段:\n- 止: 4\n  类型: [打脸]\n",
-        );
+        write(&root.join("书.yaml"), "桥段:\n- 止: 4\n  类型: [打脸]\n");
 
         let err = read_tropes(&md).unwrap_err();
         assert!(err.contains("第 1 条"), "{err}");

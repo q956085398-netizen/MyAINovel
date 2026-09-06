@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::book_file::{strip_bom, sibling_yaml_path};
+use crate::book_file::{sibling_yaml_path, strip_bom};
 use crate::library::collect_book_files;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -169,6 +169,16 @@ mod tests {
             "片段应保留原文命中词：{}",
             hits[0].snippet
         );
+    }
+
+    #[test]
+    fn 灵感库目录_不参与全文搜索() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("书.md"), "正文一行");
+        write(&root.join("灵感库/故事卡/某卡.md"), "卡片正文里有目标词");
+
+        let hits = search_library(&root, "目标词").unwrap();
+        assert!(hits.is_empty());
     }
 
     #[test]

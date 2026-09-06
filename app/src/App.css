@@ -414,6 +414,210 @@ body {
   white-space: nowrap;
 }
 
+/* ---------- 子页签（拆书：书库/灵感库） ---------- */
+
+.subtabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 36px 0;
+  border-bottom: 1px solid var(--line);
+  background: #faf7f0;
+  flex-shrink: 0;
+}
+
+.subtab {
+  appearance: none;
+  font: inherit;
+  border: none;
+  background: transparent;
+  padding: 7px 16px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  border-radius: 6px 6px 0 0;
+  border-bottom: 2px solid transparent;
+}
+
+.subtab:hover {
+  color: var(--ink);
+}
+
+.subtab.active {
+  color: var(--ink);
+  font-weight: 500;
+  background: var(--panel);
+  border-bottom-color: var(--accent);
+}
+
+/* ---------- 灵感库 ---------- */
+
+.cat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.chip {
+  appearance: none;
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 12px;
+  line-height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--ink-soft);
+}
+
+.chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-item {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 16px;
+}
+
+.card-item:hover {
+  background: #faf6ee;
+}
+
+.card-title-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.card-title {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.card-title:hover {
+  color: var(--accent);
+}
+
+.card-cat {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.card-date {
+  margin-left: auto;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-core {
+  margin: 4px 0 0;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.card-source {
+  color: var(--ink-soft);
+}
+
+.card-link {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.card-preview {
+  color: var(--ink-soft);
+  margin: 6px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-body-input {
+  min-height: 220px !important;
+  font-family: inherit;
+}
+
+.links-input {
+  min-height: 48px !important;
+}
+
+.btn.danger {
+  margin-right: auto;
+  color: var(--accent);
+  border-color: #e0bdb2;
+}
+
+.trope-table select {
+  width: auto;
+  margin-top: 0;
+}
+
+.import-check {
+  width: 30px;
+}
+
+.import-title {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.import-tags {
+  max-width: 160px;
+  color: var(--ink-soft);
+}
+
+.import-preview {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-soft);
+}
+
+.import-check input,
+.trope-table select {
+  cursor: pointer;
+}
+
+.empty-state-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
 /* ---------- 编辑器 ---------- */
 
 .editor-page {
