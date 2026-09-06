@@ -1,3 +1,4 @@
+mod ai;
 mod book_file;
 mod inspiration;
 mod library;
@@ -6,6 +7,7 @@ mod trope;
 
 use std::path::{Path, PathBuf};
 
+use ai::{AiConfig, AiState, ChatSession, ChatSessionSummary, ChatStreamEvent, ChatStreamReq};
 use book_file::{BookMeta, ChapterAnchor};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
@@ -123,10 +125,62 @@ fn confirm_import_inspirations(
     )
 }
 
+// --- AI 侧边栏（设计共识 §七）：配置与会话存应用数据目录，流式对话走 Channel ---
+
+#[tauri::command]
+fn load_ai_config(app: tauri::AppHandle) -> Result<AiConfig, String> {
+    ai::load_config(&ai::config_path(&app)?)
+}
+
+#[tauri::command]
+fn save_ai_config(app: tauri::AppHandle, config: AiConfig) -> Result<(), String> {
+    ai::save_config(&ai::config_path(&app)?, &config)
+}
+
+#[tauri::command]
+fn list_chat_sessions(app: tauri::AppHandle) -> Result<Vec<ChatSessionSummary>, String> {
+    ai::list_sessions(&ai::sessions_dir(&app)?)
+}
+
+#[tauri::command]
+fn load_chat_session(app: tauri::AppHandle, id: String) -> Result<ChatSession, String> {
+    ai::load_session(&ai::sessions_dir(&app)?, &id)
+}
+
+#[tauri::command]
+fn save_chat_session(app: tauri::AppHandle, session: ChatSession) -> Result<(), String> {
+    ai::save_session(&ai::sessions_dir(&app)?, &session)
+}
+
+#[tauri::command]
+fn delete_chat_session(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    ai::delete_session(&ai::sessions_dir(&app)?, &id)
+}
+
+/// 流式对话：增量经 onEvent Channel 回推，前端以 token 配对「停止」。
+#[tauri::command]
+async fn chat_stream(
+    state: tauri::State<'_, AiState>,
+    req: ChatStreamReq,
+    token: u64,
+    on_event: tauri::ipc::Channel<ChatStreamEvent>,
+) -> Result<(), String> {
+    ai::chat_stream(&state, &req, token, |event| {
+        let _ = on_event.send(event);
+    })
+    .await
+}
+
+#[tauri::command]
+fn chat_cancel(state: tauri::State<'_, AiState>, token: u64) {
+    state.cancel(token);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(AiState::default())
         .invoke_handler(tauri::generate_handler![
             scan_library,
             read_book_md,
@@ -143,7 +197,15 @@ pub fn run() {
             save_inspiration_card,
             delete_inspiration_card,
             import_inspiration_preview,
-            confirm_import_inspirations
+            confirm_import_inspirations,
+            load_ai_config,
+            save_ai_config,
+            list_chat_sessions,
+            load_chat_session,
+            save_chat_session,
+            delete_chat_session,
+            chat_stream,
+            chat_cancel
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

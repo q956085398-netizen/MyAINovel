@@ -106,3 +106,96 @@ export interface ImportEntry {
 export function emptyCardDraft(category: CardCategory = "故事卡"): CardDraft {
   return { category, title: "", tags: [], source: null, links: [], core: null, body: "" };
 }
+
+// --- AI 侧边栏（设计共识 §七）；与 Rust 侧 ai.rs 对应（IPC 走 camelCase） ---
+
+/** 与 Rust 侧 ai.rs::AiProvider 对应。 */
+export interface AiProvider {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
+/** 与 Rust 侧 ai.rs::AiConfig 对应。 */
+export interface AiConfig {
+  providers: AiProvider[];
+  activeProviderId: string | null;
+}
+
+export type ChatRole = "system" | "user" | "assistant";
+
+/** 与 Rust 侧 ai.rs::ChatMessage 对应；meta 为编辑器命令的选区信息等 opaque 载荷。 */
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+  meta?: MessageMeta | null;
+}
+
+/** 编辑器三命令落在消息上的上下文：采纳回写按选区行号定位
+ *  （callout 插入选区末行行尾、标注按行号换算章范围；正文改动后行号可能过期，越界收敛）。 */
+export interface MessageMeta {
+  kind: AiCommandKind;
+  startLine: number;
+  endLine: number;
+}
+
+/** 与 Rust 侧 ai.rs::ChatSession 对应；id 由前端 crypto.randomUUID() 生成。 */
+export interface ChatSession {
+  id: string;
+  title: string;
+  /** Unix 秒。 */
+  createdAt: number;
+  updatedAt: number;
+  messages: ChatMessage[];
+}
+
+/** 与 Rust 侧 ai.rs::ChatSessionSummary 对应。 */
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messageCount: number;
+}
+
+/** chat_stream 的 onEvent Channel 事件；与 Rust 侧 ai.rs::ChatStreamEvent 对应。 */
+export type ChatStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; reason: string | null };
+
+/** 编辑器三命令（设计共识 §七：AI 给初稿，人确认后才落盘）。 */
+export type AiCommandKind = "梳理" | "标注" | "小结";
+
+/** 编辑器发给 AI 面板的命令种子：选区文本＋行号（1 起）。 */
+export interface AiSeed {
+  kind: AiCommandKind;
+  bookName: string;
+  text: string;
+  startLine: number;
+  endLine: number;
+  /** 小结命令带的章标题等说明。 */
+  note?: string;
+}
+
+/** AI 面板当前文档快照（由编辑器注册的桥提供）。 */
+export interface DocSnapshot {
+  bookName: string;
+  path: string;
+  content: string;
+}
+
+/** 「建议类型/解法标注」的解析结果，与 TropeSpan 字段对齐。 */
+export interface TropeSuggestion {
+  types: string[];
+  solution: string | null;
+}
+
+/** 编辑器向 AI 面板暴露的回写桥：采纳 AI 初稿的唯一落盘通道。 */
+export interface EditorBridge {
+  getDoc(): DocSnapshot | null;
+  /** 在选区末行（anchorLine，1 起）行尾插入 callout 块，返回是否成功（编辑器未就绪则 false）。 */
+  adoptCallout(kind: "点评" | "小结", text: string, anchorLine: number): boolean;
+  /** 按选区行号换算章范围，预填并打开桥段标注对话框。 */
+  adoptTrope(startLine: number, endLine: number, s: TropeSuggestion): void;
+}

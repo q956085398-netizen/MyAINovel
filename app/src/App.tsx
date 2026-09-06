@@ -1,12 +1,13 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
+import AiSidebar from "./AiSidebar";
 import BookLibrary from "./BookLibrary";
 import EditorPage from "./EditorPage";
 import Ideation from "./Ideation";
 import InspirationLibrary from "./InspirationLibrary";
 import Writing from "./Writing";
-import type { BookEntry } from "./types";
+import type { AiSeed, BookEntry, DocSnapshot, EditorBridge, TropeSuggestion } from "./types";
 
 const SECTIONS = ["拆书", "构思", "书写"] as const;
 type Section = (typeof SECTIONS)[number];
@@ -24,6 +25,14 @@ function App() {
   const [libraryPath, setLibraryPath] = useState<string | null>(() =>
     localStorage.getItem(PATH_KEY),
   );
+  // AI 侧边栏：面板常驻挂载仅隐藏切换，编辑器经 bridge 提供文档上下文与采纳回写。
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiSeed, setAiSeed] = useState<AiSeed | null>(null);
+  const bridgeRef = useRef<EditorBridge | null>(null);
+
+  const registerBridge = useCallback((bridge: EditorBridge | null) => {
+    bridgeRef.current = bridge;
+  }, []);
 
   const chooseLibraryFolder = useCallback(async () => {
     const picked = await open({
@@ -43,6 +52,25 @@ function App() {
     setLibTab("书库");
   }, []);
 
+  /** 编辑器三命令：种子进 AI 面板并展开。 */
+  const handleAiCommand = useCallback((seed: AiSeed) => {
+    setAiSeed(seed);
+    setAiOpen(true);
+  }, []);
+
+  const getDoc = useCallback((): DocSnapshot | null => bridgeRef.current?.getDoc() ?? null, []);
+
+  const adoptCallout = useCallback((kind: "点评" | "小结", text: string, anchorLine: number) => {
+    return bridgeRef.current?.adoptCallout(kind, text, anchorLine) ?? false;
+  }, []);
+
+  const adoptTrope = useCallback(
+    (startLine: number, endLine: number, s: TropeSuggestion) => {
+      bridgeRef.current?.adoptTrope(startLine, endLine, s);
+    },
+    [],
+  );
+
   // 三个板块常驻挂载、仅隐藏切换，编辑器里的未保存内容不因切板块而丢。
   return (
     <div className="app">
@@ -59,6 +87,13 @@ function App() {
             </button>
           ))}
         </nav>
+        <button
+          className={`nav-item ai-toggle ${aiOpen ? "active" : ""}`}
+          title="AI 助手侧边栏"
+          onClick={() => setAiOpen((v) => !v)}
+        >
+          AI 助手
+        </button>
         <div className="sidebar-foot">拆书积累 · 灵感沉淀 · 构思写作</div>
       </aside>
       <main className="main">
@@ -76,7 +111,13 @@ function App() {
           </div>
           <div className={`section-wrap ${libTab === "书库" ? "" : "hidden"}`}>
             {openBook ? (
-              <EditorPage key={openBook.primaryMd} book={openBook} onBack={() => setOpenBook(null)} />
+              <EditorPage
+                key={openBook.primaryMd}
+                book={openBook}
+                onBack={() => setOpenBook(null)}
+                onAiCommand={handleAiCommand}
+                registerBridge={registerBridge}
+              />
             ) : (
               <BookLibrary
                 libraryPath={libraryPath}
@@ -100,6 +141,15 @@ function App() {
           <Writing />
         </div>
       </main>
+      <AiSidebar
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+        seed={aiSeed}
+        onSeedConsumed={() => setAiSeed(null)}
+        getDoc={getDoc}
+        adoptCallout={adoptCallout}
+        adoptTrope={adoptTrope}
+      />
     </div>
   );
 }
