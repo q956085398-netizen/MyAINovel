@@ -125,17 +125,20 @@ fn md_stats(md: &Path) -> MdStats {
     }
 }
 
-/// 行首匹配默认章前缀「第X章」。仅用于书目列表统计；结构化拆章
-/// 由编辑器的显式开章动作负责（设计共识 §四），不追求此处的精确。
-fn is_chapter_heading(line: &str) -> bool {
+/// 行首「第X章」中的 X 部分（容忍标题符号与空白前缀），非章标题行返回 None。
+pub(crate) fn chapter_digits(line: &str) -> Option<&str> {
     let t = line.trim_start_matches(['#', ' ', '\t']);
-    let Some(rest) = t.strip_prefix('第') else {
+    let rest = t.strip_prefix('第')?;
+    let end = rest.find('章')?;
+    Some(&rest[..end])
+}
+
+/// 行首匹配默认章前缀「第X章」。仅用于统计与续号；结构化拆章
+/// 由编辑器的显式开章动作负责（设计共识 §四），不追求此处的精确。
+pub(crate) fn is_chapter_heading(line: &str) -> bool {
+    let Some(digits) = chapter_digits(line) else {
         return false;
     };
-    let Some(end) = rest.find('章') else {
-        return false;
-    };
-    let digits = &rest[..end];
     (1..=8).contains(&digits.chars().count())
         && digits.chars().all(|c| {
             matches!(

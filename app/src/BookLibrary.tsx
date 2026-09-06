@@ -14,7 +14,11 @@ function formatCount(n: number): string {
   return n.toLocaleString("zh-Hans-CN");
 }
 
-export default function BookLibrary() {
+interface BookLibraryProps {
+  onOpen: (book: BookEntry) => void;
+}
+
+export default function BookLibrary({ onOpen }: BookLibraryProps) {
   const [libraryPath, setLibraryPath] = useState<string | null>(
     () => localStorage.getItem(PATH_KEY),
   );
@@ -117,7 +121,7 @@ export default function BookLibrary() {
             </thead>
             <tbody>
               {books.map((b) => (
-                <tr key={b.primaryMd}>
+                <tr key={b.primaryMd} className="book-row" title="打开拆书稿" onClick={() => onOpen(b)}>
                   <td className="book-name">{b.name}</td>
                   <td>{layoutLabel[b.layout]}</td>
                   <td className="num">{formatCount(b.chapterCount)}</td>

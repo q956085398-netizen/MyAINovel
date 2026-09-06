@@ -31,9 +31,13 @@ body {
 }
 
 .app {
-  display: grid;
-  grid-template-columns: 184px 1fr;
+  display: flex;
   height: 100%;
+}
+
+.sidebar {
+  width: 184px;
+  flex-shrink: 0;
 }
 
 /* ---------- 侧栏 ---------- */
@@ -92,7 +96,26 @@ body {
 /* ---------- 主区 ---------- */
 
 .main {
-  overflow: auto;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.section-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.section-wrap.hidden {
+  display: none;
+}
+
+.page {
+  overflow-y: auto;
   padding: 28px 36px;
 }
 
@@ -200,6 +223,151 @@ body {
 
 .book-name {
   font-weight: 500;
+}
+
+.book-table tbody tr {
+  cursor: pointer;
+}
+
+/* ---------- 编辑器 ---------- */
+
+.editor-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 24px 10px;
+}
+
+.editor-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-header .page-actions {
+  margin-left: auto;
+}
+
+.dirty-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: 9px;
+  vertical-align: baseline;
+}
+
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 24px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.toolbar-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.toolbar-hint {
+  color: var(--ink-soft);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.btn.small {
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.editor-container {
+  flex: 1;
+  min-height: 0;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.editor-container .cm-editor {
+  height: 100%;
+}
+
+.editor-container .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* ---------- 弹窗 ---------- */
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(30, 28, 24, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.dialog {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 22px 26px;
+  width: 540px;
+  max-width: 92vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+}
+
+.dialog h2 {
+  margin: 0 0 14px;
+  font-size: 18px;
+}
+
+.dialog label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.dialog input,
+.dialog textarea {
+  width: 100%;
+  margin-top: 4px;
+  font: inherit;
+  color: var(--ink);
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.dialog textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.dialog .hint {
+  margin: 4px 0 12px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* ---------- 空态与提示 ---------- */
