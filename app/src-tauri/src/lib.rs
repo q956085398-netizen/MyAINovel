@@ -1,10 +1,13 @@
 mod book_file;
 mod library;
+mod search;
+mod trope;
 
 use std::path::{Path, PathBuf};
 
-use book_file::BookMeta;
+use book_file::{BookMeta, ChapterAnchor};
 use library::BookEntry;
+use trope::TropeSpan;
 
 #[tauri::command]
 fn scan_library(root: String) -> Result<Vec<BookEntry>, String> {
@@ -45,6 +48,26 @@ fn save_paste_image(md_path: String, ext: String, bytes: Vec<u8>) -> Result<Stri
     book_file::save_paste_image(Path::new(&md_path), &ext, &bytes)
 }
 
+#[tauri::command]
+fn list_chapters(content: String, template: String) -> Vec<ChapterAnchor> {
+    book_file::list_chapters(&content, &template)
+}
+
+#[tauri::command]
+fn read_tropes(md_path: String) -> Result<Vec<TropeSpan>, String> {
+    trope::read_tropes(Path::new(&md_path))
+}
+
+#[tauri::command]
+fn save_tropes(md_path: String, tropes: Vec<TropeSpan>) -> Result<(), String> {
+    trope::write_tropes(Path::new(&md_path), &tropes)
+}
+
+#[tauri::command]
+fn search_library(root: String, query: String) -> Result<Vec<search::SearchHit>, String> {
+    search::search_library(&PathBuf::from(&root), &query)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -56,7 +79,11 @@ pub fn run() {
             read_book_meta,
             save_book_meta,
             next_chapter_line,
-            save_paste_image
+            save_paste_image,
+            list_chapters,
+            read_tropes,
+            save_tropes,
+            search_library
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

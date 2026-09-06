@@ -31,6 +31,36 @@ pub fn read_text(path: &Path) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// 去掉正文开头的 BOM，避免遮蔽首行章标题。
+pub(crate) fn strip_bom(content: &str) -> &str {
+    content.strip_prefix('\u{feff}').unwrap_or(content)
+}
+
+// --- yaml 底图读写：双文件制的 .yaml 侧共用（书级元数据、桥段列表都走这里） ---
+
+/// yaml 读为映射底图：文件不存在视为空底；存在但解析失败返回 Err
+/// （调用方须先把错误亮给用户，再决定是否覆盖写）。
+pub(crate) fn read_yaml_mapping(yaml: &Path) -> Result<serde_yaml::Mapping, String> {
+    if !yaml.is_file() {
+        return Ok(serde_yaml::Mapping::new());
+    }
+    let text = read_text(yaml)?;
+    let value: Value =
+        serde_yaml::from_str(&text).map_err(|e| format!("无法解析 {}：{e}", yaml.display()))?;
+    Ok(value.as_mapping().cloned().unwrap_or_default())
+}
+
+/// 写侧用的宽松底图：任何读取/解析失败都按空底处理（保存即整文件覆盖）。
+pub(crate) fn lossy_yaml_mapping(yaml: &Path) -> serde_yaml::Mapping {
+    read_yaml_mapping(yaml).unwrap_or_default()
+}
+
+pub(crate) fn write_yaml_mapping(yaml: &Path, map: serde_yaml::Mapping) -> Result<(), String> {
+    let text =
+        serde_yaml::to_string(&Value::Mapping(map)).map_err(|e| format!("无法生成 yaml：{e}"))?;
+    write_text_atomic(yaml, &text)
+}
+
 pub fn write_text_atomic(path: &Path, content: &str) -> Result<(), String> {
     let tmp = path.with_file_name(format!(
         "{}.gongbi.tmp",
@@ -49,7 +79,7 @@ pub fn write_text_atomic(path: &Path, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn sibling_yaml_path(md_path: &Path) -> PathBuf {
+pub(crate) fn sibling_yaml_path(md_path: &Path) -> PathBuf {
     let mut yaml = md_path.to_path_buf();
     yaml.set_extension("yaml");
     yaml
@@ -104,45 +134,33 @@ fn coerce_like(old: Option<&Value>, s: &str) -> Value {
     Value::String(s.to_string())
 }
 
-pub fn read_book_meta(md_path: &Path) -> Result<BookMeta, String> {
-    let yaml = sibling_yaml_path(md_path);
-    if !yaml.is_file() {
-        return Ok(BookMeta::default());
+/// 从 yaml 底图取书级四项＋章前缀（中文键）。供书库扫描复用，一次读盘两用。
+pub(crate) fn meta_from_mapping(map: &serde_yaml::Mapping) -> BookMeta {
+    BookMeta {
+        title: mapping_get(map, "书名"),
+        track_record: mapping_get(map, "成绩"),
+        summary: mapping_get(map, "简介"),
+        golden_finger: mapping_get(map, "金手指"),
+        chapter_prefix: mapping_get(map, "章前缀"),
     }
-    let text = read_text(&yaml)?;
-    let value: Value =
-        serde_yaml::from_str(&text).map_err(|e| format!("无法解析 {}：{e}", yaml.display()))?;
-    let map = value.as_mapping();
-    Ok(BookMeta {
-        title: map.and_then(|m| mapping_get(m, "书名")),
-        track_record: map.and_then(|m| mapping_get(m, "成绩")),
-        summary: map.and_then(|m| mapping_get(m, "简介")),
-        golden_finger: map.and_then(|m| mapping_get(m, "金手指")),
-        chapter_prefix: map.and_then(|m| mapping_get(m, "章前缀")),
-    })
+}
+
+pub fn read_book_meta(md_path: &Path) -> Result<BookMeta, String> {
+    let map = read_yaml_mapping(&sibling_yaml_path(md_path))?;
+    Ok(meta_from_mapping(&map))
 }
 
 pub fn write_book_meta(md_path: &Path, meta: &BookMeta) -> Result<(), String> {
     let yaml = sibling_yaml_path(md_path);
     // 以现有 yaml 为底合并：未知键原样保留；解析失败的旧文件按空底处理
     // （前端在读到解析错误时会先警告）。
-    let base = read_text(&yaml)
-        .ok()
-        .and_then(|t| serde_yaml::from_str(&t).ok())
-        .unwrap_or(Value::Null);
-    let mut map = match base {
-        Value::Mapping(m) => m,
-        _ => serde_yaml::Mapping::new(),
-    };
+    let mut map = lossy_yaml_mapping(&yaml);
     mapping_set(&mut map, "书名", meta.title.as_deref());
     mapping_set(&mut map, "成绩", meta.track_record.as_deref());
     mapping_set(&mut map, "简介", meta.summary.as_deref());
     mapping_set(&mut map, "金手指", meta.golden_finger.as_deref());
     mapping_set(&mut map, "章前缀", meta.chapter_prefix.as_deref());
-
-    let text =
-        serde_yaml::to_string(&Value::Mapping(map)).map_err(|e| format!("无法生成 yaml：{e}"))?;
-    write_text_atomic(&yaml, &text)
+    write_yaml_mapping(&yaml, map)
 }
 
 /// 粘贴截图的落盘位置：一书一文件夹（拆书.md）用书内「附件/」；
@@ -198,18 +216,14 @@ pub fn save_paste_image(md_path: &Path, ext: &str, bytes: &[u8]) -> Result<Strin
 /// 时退回「第X章」式标题（阿拉伯章号优先，否则按章标题行数＋1）。
 /// 前缀/字数统计都是粗略启发，不追求精确（设计共识 §四）。
 pub fn next_chapter_line(content: &str, template: &str) -> String {
-    let template = if template.trim().is_empty() {
-        DEFAULT_CHAPTER_PREFIX
-    } else {
-        template
-    };
+    let template = normalized_template(template);
     let Some((pre, suf)) = template.split_once("{n}") else {
         return template.to_string();
     };
 
     let mut max_num: Option<u64> = None;
     let mut count: u64 = 0;
-    for line in content.lines() {
+    for line in strip_bom(content).lines() {
         let t = line.trim_start_matches(['#', ' ', '\t']);
         let tmpl_num = template_number(t, pre, suf);
         let is_heading = is_chapter_heading(line);
@@ -243,6 +257,51 @@ fn template_number(line: &str, pre: &str, suf: &str) -> Option<u64> {
     }
     let end = rest.find(suf)?;
     arabic_value(&rest[..end])
+}
+
+fn normalized_template(template: &str) -> &str {
+    // 只做空判回退，不裁剪：模板首尾空格可能是刻意的（如「Chapter {n}: 」）。
+    if template.trim().is_empty() {
+        DEFAULT_CHAPTER_PREFIX
+    } else {
+        template
+    }
+}
+
+/// 章标题锚点：正文里第几个章标题（ordinal，1 起）及其原始行号。
+/// 桥段标注的起止即用该序数——中文数字章号无法可靠转数值，序数对
+/// 任意前缀模板都成立；列表展示口径同为序数。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterAnchor {
+    pub ordinal: u32,
+    /// 去掉 # 前缀与首尾空白后的整行标题文本。
+    pub title: String,
+    /// 1 起行号。
+    pub line: u32,
+}
+
+/// 列出正文中的章标题锚点。带 {n} 的模板匹配「模板式＋第X章式」两类
+/// 标题（与续号同一套启发，见 next_chapter_line）；无占位符的模板按
+/// 字面前缀匹配。
+pub fn list_chapters(content: &str, template: &str) -> Vec<ChapterAnchor> {
+    let template = normalized_template(template);
+    let mut anchors: Vec<ChapterAnchor> = Vec::new();
+    for (idx, line) in strip_bom(content).lines().enumerate() {
+        let t = line.trim_start_matches(['#', ' ', '\t']);
+        let is_start = match template.split_once("{n}") {
+            Some((pre, suf)) => template_number(t, pre, suf).is_some() || is_chapter_heading(line),
+            None => t.starts_with(template),
+        };
+        if is_start {
+            anchors.push(ChapterAnchor {
+                ordinal: anchors.len() as u32 + 1,
+                title: t.trim().to_string(),
+                line: idx as u32 + 1,
+            });
+        }
+    }
+    anchors
 }
 
 fn arabic_value(digits: &str) -> Option<u64> {
@@ -438,5 +497,50 @@ mod tests {
     fn 下一章_空模板_回退默认() {
         assert_eq!(next_chapter_line("第4章", ""), "第5章");
         assert_eq!(next_chapter_line("第4章", "   "), "第5章");
+    }
+
+    #[test]
+    fn 下一章_bom_首行章号也参与续号() {
+        assert_eq!(next_chapter_line("\u{feff}第4章\n", "第{n}章"), "第5章");
+    }
+
+    #[test]
+    fn 章锚点_混合标题_按序数编号并记行号() {
+        let content = "开场白\n第1章 甲\n正文\n## 第12章：乙\n正文提第三章不算\n第三章 丙";
+        let anchors = list_chapters(content, DEFAULT_CHAPTER_PREFIX);
+        let titles: Vec<&str> = anchors.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(titles, vec!["第1章 甲", "第12章：乙", "第三章 丙"]);
+        assert_eq!(anchors[0].line, 2);
+        assert_eq!(anchors[1].line, 4);
+        assert_eq!(anchors[2].line, 6);
+    }
+
+    #[test]
+    fn 章锚点_自定义模板_兼容第x章式标题() {
+        let content = "第1章 旧式\nChapter 2: 新式";
+        let anchors = list_chapters(content, "Chapter {n}: ");
+        assert_eq!(anchors.len(), 2);
+        assert_eq!(anchors[1].title, "Chapter 2: 新式");
+    }
+
+    #[test]
+    fn 章锚点_无占位符模板_按字面前缀() {
+        let content = "【场景】开场\n普通行\n【场景】转折";
+        let anchors = list_chapters(content, "【场景】");
+        assert_eq!(anchors.len(), 2);
+        assert_eq!(anchors[1].ordinal, 2);
+        assert_eq!(anchors[1].line, 3);
+    }
+
+    #[test]
+    fn 章锚点_空文档_返回空() {
+        assert!(list_chapters("", DEFAULT_CHAPTER_PREFIX).is_empty());
+    }
+
+    #[test]
+    fn 章锚点_bom_不遮挡首行() {
+        let anchors = list_chapters("\u{feff}第一章\n正文", DEFAULT_CHAPTER_PREFIX);
+        assert_eq!(anchors.len(), 1);
+        assert_eq!(anchors[0].line, 1);
     }
 }

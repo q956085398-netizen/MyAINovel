@@ -229,6 +229,182 @@ body {
   cursor: pointer;
 }
 
+.cell-sub {
+  color: var(--ink-soft);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+/* ---------- 全文搜索 ---------- */
+
+.search-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.search-bar input {
+  flex: 1;
+  font: inherit;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.search-bar input:focus {
+  outline: none;
+  border-color: var(--ink-soft);
+}
+
+.search-results ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.hit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.hit-row:last-child {
+  border-bottom: none;
+}
+
+.hit-row:hover {
+  background: #faf6ee;
+}
+
+.hit-book {
+  font-weight: 500;
+  flex-shrink: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hit-line {
+  color: var(--ink-soft);
+  font-size: 12px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.hit-snippet {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hit-snippet mark {
+  background: #f5e4a8;
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+/* ---------- 桥段筛选 ---------- */
+
+.trope-filter {
+  margin-top: 26px;
+}
+
+.trope-filter h2 {
+  font-size: 16px;
+  margin: 0 0 10px;
+}
+
+.trope-filter-controls {
+  display: flex;
+  gap: 14px;
+  align-items: flex-end;
+  margin-bottom: 10px;
+}
+
+.trope-filter-controls label {
+  font-size: 13px;
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trope-filter-controls .grow {
+  flex: 1;
+}
+
+.trope-filter-controls select,
+.trope-filter-controls input {
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  min-width: 180px;
+}
+
+.trope-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.trope-item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 7px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+
+.link-like {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.link-like:hover {
+  text-decoration: underline;
+}
+
+.trope-span {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.tag {
+  display: inline-block;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
 /* ---------- 编辑器 ---------- */
 
 .editor-page {
@@ -353,6 +529,70 @@ body {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fff;
+}
+
+.dialog select {
+  width: 100%;
+  margin-top: 4px;
+  font: inherit;
+  color: var(--ink);
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.dialog.wide {
+  width: 780px;
+}
+
+/* ---------- 桥段标注弹窗 ---------- */
+
+.trope-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.trope-form label {
+  width: 250px;
+  margin-bottom: 0;
+}
+
+.trope-form label.grow {
+  width: auto;
+  flex: 1;
+  min-width: 220px;
+}
+
+.trope-form .btn {
+  margin-bottom: 1px;
+}
+
+.trope-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.trope-table th,
+.trope-table td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  vertical-align: baseline;
+}
+
+.trope-table thead th {
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.trope-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .dialog textarea {

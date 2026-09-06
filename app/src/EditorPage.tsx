@@ -4,10 +4,11 @@ import { EditorView, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { invoke } from "@tauri-apps/api/core";
-import type { BookEntry, BookMeta } from "./types";
+import type { BookEntry, BookMeta, ChapterAnchor, TropeSpan } from "./types";
 import { emptyBookMeta } from "./types";
 import { errMsg } from "./util";
 import BookMetaDialog from "./BookMetaDialog";
+import TropeDialog from "./TropeDialog";
 
 /** 五插入块（设计共识 §四）：Obsidian 风格 callout，纯 markdown 可读。 */
 const INSERT_BLOCKS = ["点评", "如果是我写", "原文截图", "出场人物", "小结"] as const;
@@ -52,6 +53,11 @@ export default function EditorPage({ book, onBack }: EditorPageProps) {
   const [metaInit, setMetaInit] = useState<{ meta: BookMeta; warning?: string }>({
     meta: emptyBookMeta(),
   });
+  const [tropePanel, setTropePanel] = useState<{
+    chapters: ChapterAnchor[];
+    tropes: TropeSpan[];
+    warning?: string;
+  } | null>(null);
 
   async function openNextChapter() {
     const view = viewRef.current;
@@ -121,6 +127,30 @@ export default function EditorPage({ book, onBack }: EditorPageProps) {
   function handleBack() {
     if (dirty && !window.confirm("有未保存的修改，返回将丢失，确定吗？")) return;
     onBack();
+  }
+
+  /** 桥段标注入口：章锚点按当前正文即时计算；桥段列表读同名 .yaml。 */
+  async function openTropePanel() {
+    const view = viewRef.current;
+    if (!view) return;
+    let chapters: ChapterAnchor[];
+    try {
+      chapters = await invoke<ChapterAnchor[]>("list_chapters", {
+        content: view.state.doc.toString(),
+        template: prefixRef.current,
+      });
+    } catch (e) {
+      window.alert(`章标题识别失败：${errMsg(e)}`);
+      return;
+    }
+    let tropes: TropeSpan[] = [];
+    let warning: string | undefined;
+    try {
+      tropes = await invoke<TropeSpan[]>("read_tropes", { mdPath: book.primaryMd });
+    } catch (e) {
+      warning = `已有 .yaml 解析失败：${errMsg(e)}。保存桥段会整文件覆盖，请先确认内容。`;
+    }
+    setTropePanel({ chapters, tropes, warning });
   }
 
   useEffect(() => {
@@ -225,6 +255,9 @@ export default function EditorPage({ book, onBack }: EditorPageProps) {
           <button className="btn" disabled={!ready} onClick={() => setMetaOpen(true)}>
             书级资料
           </button>
+          <button className="btn" disabled={!ready} onClick={() => void openTropePanel()}>
+            桥段标注
+          </button>
           <button className="btn primary" disabled={!ready} onClick={() => void openNextChapter()}>
             开下一章
           </button>
@@ -256,6 +289,16 @@ export default function EditorPage({ book, onBack }: EditorPageProps) {
             setMetaInit({ meta: m });
             setMetaOpen(false);
           }}
+        />
+      )}
+      {tropePanel && (
+        <TropeDialog
+          mdPath={book.primaryMd}
+          chapters={tropePanel.chapters}
+          initial={tropePanel.tropes}
+          warning={tropePanel.warning}
+          onClose={() => setTropePanel(null)}
+          onSaved={() => setTropePanel(null)}
         />
       )}
     </div>

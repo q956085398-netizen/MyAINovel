@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::book_file::{meta_from_mapping, read_yaml_mapping, BookMeta};
+use crate::trope::{tropes_from_mapping, TropeSpan};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Layout {
@@ -22,9 +25,12 @@ pub struct BookEntry {
     pub layout: Layout,
     pub primary_md: PathBuf,
     pub md_count: u32,
-    pub yaml_path: Option<PathBuf>,
     pub chapter_count: u32,
     pub word_count: u64,
+    /// 同名 .yaml 的书级四项＋章前缀；无 yaml 或损坏时为缺省（编辑器打开会告警）。
+    pub meta: BookMeta,
+    /// 同名 .yaml 的桥段标注列表；无 yaml 或损坏时为空。
+    pub tropes: Vec<TropeSpan>,
 }
 
 struct MdStats {
@@ -32,10 +38,25 @@ struct MdStats {
     words: u64,
 }
 
+/// 一本书在盘上的全部 .md 与主文件（书库扫描与全文搜索共用同一套布局识别）。
+pub(crate) struct BookFiles {
+    pub(crate) name: String,
+    pub(crate) layout: Layout,
+    pub(crate) mds: Vec<PathBuf>,
+    pub(crate) primary_md: PathBuf,
+}
+
 pub fn scan_library(root: &Path) -> Result<Vec<BookEntry>, String> {
+    Ok(collect_book_files(root)?
+        .into_iter()
+        .map(book_entry)
+        .collect())
+}
+
+pub(crate) fn collect_book_files(root: &Path) -> Result<Vec<BookFiles>, String> {
     let entries =
         fs::read_dir(root).map_err(|e| format!("无法读取文件夹 {}：{e}", root.display()))?;
-    let mut books: Vec<BookEntry> = Vec::new();
+    let mut books: Vec<BookFiles> = Vec::new();
     let mut subdirs: Vec<PathBuf> = Vec::new();
 
     for entry in entries.flatten() {
@@ -46,32 +67,24 @@ pub fn scan_library(root: &Path) -> Result<Vec<BookEntry>, String> {
         if path.is_dir() {
             subdirs.push(path);
         } else if has_md_extension(&path) {
-            books.push(scattered_book(&path));
+            books.push(BookFiles {
+                name: file_stem_of(&path),
+                layout: Layout::Scattered,
+                mds: vec![path.clone()],
+                primary_md: path,
+            });
         }
     }
     for dir in subdirs {
-        if let Some(book) = folder_book(&dir) {
-            books.push(book);
+        if let Some(files) = folder_book_files(&dir) {
+            books.push(files);
         }
     }
     books.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(books)
 }
 
-fn scattered_book(md: &Path) -> BookEntry {
-    let stats = md_stats(md);
-    BookEntry {
-        name: file_stem_of(md),
-        layout: Layout::Scattered,
-        primary_md: md.to_path_buf(),
-        md_count: 1,
-        yaml_path: sibling_yaml(md),
-        chapter_count: stats.chapters,
-        word_count: stats.words,
-    }
-}
-
-fn folder_book(dir: &Path) -> Option<BookEntry> {
+fn folder_book_files(dir: &Path) -> Option<BookFiles> {
     let mut mds: Vec<PathBuf> = Vec::new();
     let entries = fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
@@ -91,22 +104,50 @@ fn folder_book(dir: &Path) -> Option<BookEntry> {
         .unwrap_or(&mds[0])
         .clone();
 
-    let (chapters, words) = mds
+    Some(BookFiles {
+        name: dir.file_name()?.to_string_lossy().into_owned(),
+        layout: Layout::FolderBook,
+        mds,
+        primary_md: primary,
+    })
+}
+
+fn book_entry(files: BookFiles) -> BookEntry {
+    let (chapters, words) = files
+        .mds
         .iter()
         .map(|md| md_stats(md))
         .fold((0u32, 0u64), |(c, w), s| (c + s.chapters, w + s.words));
 
-    let yaml_path = sibling_yaml(&primary);
-
-    Some(BookEntry {
-        name: dir.file_name()?.to_string_lossy().into_owned(),
-        layout: Layout::FolderBook,
-        primary_md: primary,
-        md_count: mds.len() as u32,
-        yaml_path,
+    let (meta, tropes) = yaml_side(&files.primary_md);
+    BookEntry {
+        name: files.name,
+        layout: files.layout,
+        primary_md: files.primary_md,
+        md_count: files.mds.len() as u32,
         chapter_count: chapters,
         word_count: words,
-    })
+        meta,
+        tropes,
+    }
+}
+
+/// 主文件同名 .yaml 的书级元数据＋桥段；书库列表对损坏 yaml 降级为缺省
+/// （不因一本书的坏文件拖垮整个扫描），编辑器打开该书时会显式告警。
+fn yaml_side(primary_md: &Path) -> (BookMeta, Vec<TropeSpan>) {
+    match read_yaml_mapping(&sibling_yaml(primary_md)) {
+        Ok(map) => (
+            meta_from_mapping(&map),
+            tropes_from_mapping(&map).unwrap_or_default(),
+        ),
+        Err(_) => (BookMeta::default(), Vec::new()),
+    }
+}
+
+fn sibling_yaml(md: &Path) -> PathBuf {
+    let mut yaml = md.to_path_buf();
+    yaml.set_extension("yaml");
+    yaml
 }
 
 fn md_stats(md: &Path) -> MdStats {
@@ -149,12 +190,6 @@ pub(crate) fn is_chapter_heading(line: &str) -> bool {
         })
 }
 
-fn sibling_yaml(md: &Path) -> Option<PathBuf> {
-    let mut yaml = md.to_path_buf();
-    yaml.set_extension("yaml");
-    yaml.is_file().then_some(yaml)
-}
-
 fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
@@ -186,10 +221,13 @@ mod tests {
     }
 
     #[test]
-    fn 散文件布局_根目录_md_即书_同名_yaml_识别() {
+    fn 散文件布局_根目录_md_即书_携带_yaml_侧数据() {
         let root = TempDir::new().unwrap().path().to_path_buf();
         write(&root.join("书甲.md"), "# 第1章\n正文\n## 第2章\n正文");
-        write(&root.join("书甲.yaml"), "title: 书甲");
+        write(
+            &root.join("书甲.yaml"),
+            "书名: 书甲\n成绩: 均订2万\n桥段:\n- 起: 1\n  止: 2\n  类型: [掉马甲]\n",
+        );
         write(&root.join("书乙.md"), "第一章\n第二章\n第三章");
 
         let books = scan_library(&root).unwrap();
@@ -199,21 +237,25 @@ mod tests {
         assert_eq!(甲.layout, Layout::Scattered);
         assert_eq!(甲.chapter_count, 2);
         assert_eq!(甲.md_count, 1);
-        assert!(甲.yaml_path.as_deref().unwrap().ends_with("书甲.yaml"));
+        assert_eq!(甲.meta.title.as_deref(), Some("书甲"));
+        assert_eq!(甲.meta.track_record.as_deref(), Some("均订2万"));
+        assert_eq!(甲.tropes.len(), 1);
+        assert_eq!(甲.tropes[0].types, vec!["掉马甲".to_string()]);
 
         let 乙 = books.iter().find(|b| b.name == "书乙").unwrap();
         assert_eq!(乙.chapter_count, 3);
-        assert!(乙.yaml_path.is_none());
+        assert_eq!(乙.meta, BookMeta::default());
+        assert!(乙.tropes.is_empty());
     }
 
     #[test]
-    fn 一书一文件夹_识别_主文件取_拆书_md() {
+    fn 一书一文件夹_识别_主文件取_拆书_md_读其_yaml() {
         let root = TempDir::new().unwrap().path().to_path_buf();
         write(
             &root.join("《书丙》/拆书.md"),
             "第1章\n甲乙丙\n第2章\n丙乙甲",
         );
-        write(&root.join("《书丙》/拆书.yaml"), "title: 书丙");
+        write(&root.join("《书丙》/拆书.yaml"), "书名: 书丙\n金手指: 签到\n");
         write(&root.join("《书丙》/附件/截图.png"), "png");
 
         let books = scan_library(&root).unwrap();
@@ -222,9 +264,24 @@ mod tests {
         assert_eq!(book.name, "《书丙》");
         assert_eq!(book.layout, Layout::FolderBook);
         assert!(book.primary_md.ends_with("拆书.md"));
-        assert!(book.yaml_path.as_deref().unwrap().ends_with("拆书.yaml"));
+        assert_eq!(book.meta.title.as_deref(), Some("书丙"));
+        assert_eq!(book.meta.golden_finger.as_deref(), Some("签到"));
         assert_eq!(book.chapter_count, 2);
         assert_eq!(book.word_count, 12); // 附件 png 不计入
+    }
+
+    #[test]
+    fn 损坏_yaml_该书降级为缺省_不拖垮扫描() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("坏书.md"), "第1章");
+        write(&root.join("坏书.yaml"), "{{{{不是 yaml");
+        write(&root.join("好书.md"), "第1章");
+
+        let books = scan_library(&root).unwrap();
+        assert_eq!(books.len(), 2);
+        let 坏 = books.iter().find(|b| b.name == "坏书").unwrap();
+        assert_eq!(坏.meta, BookMeta::default());
+        assert!(坏.tropes.is_empty());
     }
 
     #[test]
