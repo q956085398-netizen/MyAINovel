@@ -32,13 +32,12 @@ struct MdStats {
     words: u64,
 }
 
-pub fn scan_library(root: &Path) -> Vec<BookEntry> {
+pub fn scan_library(root: &Path) -> Result<Vec<BookEntry>, String> {
+    let entries =
+        fs::read_dir(root).map_err(|e| format!("无法读取文件夹 {}：{e}", root.display()))?;
     let mut books: Vec<BookEntry> = Vec::new();
     let mut subdirs: Vec<PathBuf> = Vec::new();
 
-    let Ok(entries) = fs::read_dir(root) else {
-        return books;
-    };
     for entry in entries.flatten() {
         let path = entry.path();
         if is_hidden(&path) {
@@ -56,7 +55,7 @@ pub fn scan_library(root: &Path) -> Vec<BookEntry> {
         }
     }
     books.sort_by(|a, b| a.name.cmp(&b.name));
-    books
+    Ok(books)
 }
 
 fn scattered_book(md: &Path) -> BookEntry {
@@ -97,12 +96,14 @@ fn folder_book(dir: &Path) -> Option<BookEntry> {
         .map(|md| md_stats(md))
         .fold((0u32, 0u64), |(c, w), s| (c + s.chapters, w + s.words));
 
+    let yaml_path = sibling_yaml(&primary);
+
     Some(BookEntry {
         name: dir.file_name()?.to_string_lossy().into_owned(),
         layout: Layout::FolderBook,
         primary_md: primary,
         md_count: mds.len() as u32,
-        yaml_path: mds.iter().find_map(|md| sibling_yaml(md)),
+        yaml_path,
         chapter_count: chapters,
         word_count: words,
     })
@@ -188,7 +189,7 @@ mod tests {
         write(&root.join("书甲.yaml"), "title: 书甲");
         write(&root.join("书乙.md"), "第一章\n第二章\n第三章");
 
-        let books = scan_library(&root);
+        let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 2);
 
         let 甲 = books.iter().find(|b| b.name == "书甲").unwrap();
@@ -212,7 +213,7 @@ mod tests {
         write(&root.join("《书丙》/拆书.yaml"), "title: 书丙");
         write(&root.join("《书丙》/附件/截图.png"), "png");
 
-        let books = scan_library(&root);
+        let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 1);
         let book = &books[0];
         assert_eq!(book.name, "《书丙》");
@@ -229,7 +230,7 @@ mod tests {
         write(&root.join("散书.md"), "第1章");
         write(&root.join("《夹书》/拆书.md"), "第1章");
 
-        let books = scan_library(&root);
+        let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 2);
         assert_eq!(
             books
@@ -253,7 +254,7 @@ mod tests {
         write(&root.join("附件/图.png"), "png");
         write(&root.join("素材/note.txt"), "杂项");
 
-        assert!(scan_library(&root).is_empty());
+        assert!(scan_library(&root).unwrap().is_empty());
     }
 
     #[test]
@@ -262,7 +263,7 @@ mod tests {
         write(&root.join(".obsidian/app.json"), "{}");
         write(&root.join(".草稿.md"), "第1章");
 
-        assert!(scan_library(&root).is_empty());
+        assert!(scan_library(&root).unwrap().is_empty());
     }
 
     #[test]
@@ -271,7 +272,7 @@ mod tests {
         write(&root.join("书丁/前情.md"), "第一章\n一二三");
         write(&root.join("书丁/拆书.md"), "第二章\n四五六");
 
-        let books = scan_library(&root);
+        let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 1);
         let book = &books[0];
         assert_eq!(book.name, "书丁");
@@ -286,7 +287,7 @@ mod tests {
         let root = TempDir::new().unwrap().path().to_path_buf();
         write(&root.join("旧书.MD"), "第1章");
 
-        let books = scan_library(&root);
+        let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 1);
         assert_eq!(books[0].name, "旧书");
     }
@@ -294,7 +295,13 @@ mod tests {
     #[test]
     fn 空目录_返回空() {
         let root = TempDir::new().unwrap();
-        assert!(scan_library(root.path()).is_empty());
+        assert!(scan_library(root.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn 根目录不存在_报错而非空列表() {
+        let missing = TempDir::new().unwrap().path().join("不存在的子目录");
+        assert!(scan_library(&missing).is_err());
     }
 
     #[test]
@@ -314,7 +321,7 @@ mod tests {
         let root = TempDir::new().unwrap().path().to_path_buf();
         write(&root.join("记事本.md"), "\u{feff}第一章\n正文");
 
-        let books = scan_library(&root);
+        let books = scan_library(&root).unwrap();
         assert_eq!(books[0].chapter_count, 1);
     }
 }

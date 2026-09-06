@@ -29,7 +29,7 @@ export default function BookLibrary() {
       setBooks(await invoke<BookEntry[]>("scan_library", { root: path }));
     } catch (e) {
       setBooks([]);
-      setError(String(e));
+      setError(`扫描失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setScanning(false);
     }
