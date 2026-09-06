@@ -1,26 +1,26 @@
 //! 拆书稿文件操作：正文读写、书级元数据（双文件制的 .yaml 侧）、
-//! 粘贴截图落盘、下一章前缀计算。写入均走临时文件＋改名，尽量原子（ADR 0002）。
+//! 粘贴截图落盘、下一章前缀计算。写入均走临时文件＋改名（ADR 0002）。
+//!
+//! BookMeta 走 Tauri IPC（camelCase JSON）；yaml 侧键为中文且合并保留
+//! 未知键——用户在 Obsidian 手补的字段不能被「书级资料」保存抹掉。
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_yaml::Value;
 
 use crate::library::{chapter_digits, is_chapter_heading};
 
 /// 书级元数据 v0：字段按设计共识 §四的书级四项＋章前缀模板。
-/// yaml 键用中文，文件在 Obsidian 里直接可读；最终 schema 由工单 #13 定稿。
+/// 最终 schema 由工单 #13 定稿。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BookMeta {
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "书名")]
     pub title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "成绩")]
-    pub score: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "简介")]
+    pub track_record: Option<String>,
     pub summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "金手指")]
     pub golden_finger: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "章前缀")]
     pub chapter_prefix: Option<String>,
 }
 
@@ -41,10 +41,7 @@ pub fn write_text_atomic(path: &Path, content: &str) -> Result<(), String> {
     if let Err(e) = fs::write(&tmp, content) {
         return Err(format!("无法写入临时文件 {}：{e}", tmp.display()));
     }
-    // Windows 的 rename 不能覆盖已有文件，先删目标；窗口极小，v1 接受。
-    if path.exists() {
-        let _ = fs::remove_file(path);
-    }
+    // std 的 rename 在 Windows 上带 REPLACE_EXISTING，可直接覆盖。
     if let Err(e) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
         return Err(format!("无法保存文件 {}：{e}", path.display()));
@@ -58,27 +55,102 @@ fn sibling_yaml_path(md_path: &Path) -> PathBuf {
     yaml
 }
 
+fn scalar_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+fn mapping_get(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
+    map.get(Value::String(key.to_string()))
+        .and_then(scalar_to_string)
+}
+
+fn mapping_set(map: &mut serde_yaml::Mapping, key: &str, value: Option<&str>) {
+    let k = Value::String(key.to_string());
+    match value {
+        Some(s) => {
+            let v = coerce_like(map.get(&k), s);
+            map.insert(k, v);
+        }
+        None => {
+            map.remove(&k);
+        }
+    }
+}
+
+/// 新值与旧值同形时保持标量类型：yaml 里的「成绩: 20000」
+/// 不会因为走了一趟表单就变成带引号的 '20000'。
+fn coerce_like(old: Option<&Value>, s: &str) -> Value {
+    match old {
+        Some(Value::Number(_)) => {
+            if let Ok(i) = s.parse::<i64>() {
+                return Value::Number(i.into());
+            }
+            if let Ok(f) = s.parse::<f64>() {
+                return Value::Number(f.into());
+            }
+        }
+        Some(Value::Bool(_)) => {
+            if let Ok(b) = s.parse::<bool>() {
+                return Value::Bool(b);
+            }
+        }
+        _ => {}
+    }
+    Value::String(s.to_string())
+}
+
 pub fn read_book_meta(md_path: &Path) -> Result<BookMeta, String> {
     let yaml = sibling_yaml_path(md_path);
     if !yaml.is_file() {
         return Ok(BookMeta::default());
     }
     let text = read_text(&yaml)?;
-    serde_yaml::from_str(&text).map_err(|e| format!("无法解析 {}：{e}", yaml.display()))
+    let value: Value =
+        serde_yaml::from_str(&text).map_err(|e| format!("无法解析 {}：{e}", yaml.display()))?;
+    let map = value.as_mapping();
+    Ok(BookMeta {
+        title: map.and_then(|m| mapping_get(m, "书名")),
+        track_record: map.and_then(|m| mapping_get(m, "成绩")),
+        summary: map.and_then(|m| mapping_get(m, "简介")),
+        golden_finger: map.and_then(|m| mapping_get(m, "金手指")),
+        chapter_prefix: map.and_then(|m| mapping_get(m, "章前缀")),
+    })
 }
 
 pub fn write_book_meta(md_path: &Path, meta: &BookMeta) -> Result<(), String> {
-    let text = serde_yaml::to_string(meta).map_err(|e| format!("无法生成 yaml：{e}"))?;
-    write_text_atomic(&sibling_yaml_path(md_path), &text)
+    let yaml = sibling_yaml_path(md_path);
+    // 以现有 yaml 为底合并：未知键原样保留；解析失败的旧文件按空底处理
+    // （前端在读到解析错误时会先警告）。
+    let base = read_text(&yaml)
+        .ok()
+        .and_then(|t| serde_yaml::from_str(&t).ok())
+        .unwrap_or(Value::Null);
+    let mut map = match base {
+        Value::Mapping(m) => m,
+        _ => serde_yaml::Mapping::new(),
+    };
+    mapping_set(&mut map, "书名", meta.title.as_deref());
+    mapping_set(&mut map, "成绩", meta.track_record.as_deref());
+    mapping_set(&mut map, "简介", meta.summary.as_deref());
+    mapping_set(&mut map, "金手指", meta.golden_finger.as_deref());
+    mapping_set(&mut map, "章前缀", meta.chapter_prefix.as_deref());
+
+    let text =
+        serde_yaml::to_string(&Value::Mapping(map)).map_err(|e| format!("无法生成 yaml：{e}"))?;
+    write_text_atomic(&yaml, &text)
 }
 
 /// 粘贴截图的落盘位置：一书一文件夹（拆书.md）用书内「附件/」；
 /// 根目录散文件的 .md 与其他书同层，各建「附件/<书名>/」避免混放。
-fn attachment_dir(md_path: &Path) -> PathBuf {
-    let parent = md_path.parent().unwrap_or_else(|| Path::new("."));
+fn attachment_subdir(md_path: &Path) -> PathBuf {
     match md_path.file_name().and_then(|n| n.to_str()) {
-        Some("拆书.md") => parent.join("附件"),
-        _ => parent.join("附件").join(file_stem_of(md_path)),
+        Some("拆书.md") => PathBuf::from("附件"),
+        _ => PathBuf::from("附件").join(file_stem_of(md_path)),
     }
 }
 
@@ -91,7 +163,11 @@ fn file_stem_of(path: &Path) -> String {
 /// 保存一张剪贴板图片，返回可直接嵌入 markdown 的相对路径（正斜杠）。
 /// 文件名「截图-N.ext」按目录内现有编号递增，保证唯一。
 pub fn save_paste_image(md_path: &Path, ext: &str, bytes: &[u8]) -> Result<String, String> {
-    let dir = attachment_dir(md_path);
+    let sub = attachment_subdir(md_path);
+    let dir = md_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(&sub);
     fs::create_dir_all(&dir).map_err(|e| format!("无法创建附件文件夹 {}：{e}", dir.display()))?;
 
     let mut n: u32 = 0;
@@ -115,36 +191,58 @@ pub fn save_paste_image(md_path: &Path, ext: &str, bytes: &[u8]) -> Result<Strin
     let file_name = format!("截图-{n}.{ext}");
     fs::write(dir.join(&file_name), bytes).map_err(|e| format!("无法写入附件 {file_name}：{e}"))?;
 
-    let rel = match md_path.file_name().and_then(|n| n.to_str()) {
-        Some("拆书.md") => Path::new("附件").join(&file_name),
-        _ => Path::new("附件")
-            .join(file_stem_of(md_path))
-            .join(&file_name),
-    };
-    Ok(rel.to_string_lossy().replace('\\', "/"))
+    Ok(sub.join(&file_name).to_string_lossy().replace('\\', "/"))
 }
 
-/// 下一章前缀：取正文中最大阿拉伯章号＋1；没有阿拉伯章号时按
-/// 章标题行数＋1 兜底（中文数字章号的书从计数续写）。
+/// 下一章前缀：优先按模板自身匹配到的最大编号续号；模板没匹配到过
+/// 时退回「第X章」式标题（阿拉伯章号优先，否则按章标题行数＋1）。
+/// 前缀/字数统计都是粗略启发，不追求精确（设计共识 §四）。
 pub fn next_chapter_line(content: &str, template: &str) -> String {
     let template = if template.trim().is_empty() {
         DEFAULT_CHAPTER_PREFIX
     } else {
         template
     };
-    let mut max_arabic: Option<u64> = None;
+    let Some((pre, suf)) = template.split_once("{n}") else {
+        return template.to_string();
+    };
+
+    let mut max_num: Option<u64> = None;
     let mut count: u64 = 0;
     for line in content.lines() {
-        if !is_chapter_heading(line) {
-            continue;
-        }
-        count += 1;
-        if let Some(digits) = chapter_digits(line).and_then(arabic_value) {
-            max_arabic = Some(max_arabic.map_or(digits, |m: u64| m.max(digits)));
+        let t = line.trim_start_matches(['#', ' ', '\t']);
+        let tmpl_num = template_number(t, pre, suf);
+        let is_heading = is_chapter_heading(line);
+        if tmpl_num.is_some() || is_heading {
+            count += 1;
+            let num = tmpl_num.or_else(|| {
+                if is_heading {
+                    chapter_digits(line).and_then(arabic_value)
+                } else {
+                    None
+                }
+            });
+            if let Some(v) = num {
+                max_num = Some(max_num.map_or(v, |m: u64| m.max(v)));
+            }
         }
     }
-    let n = max_arabic.map_or(count + 1, |m| m + 1);
-    template.replace("{n}", &n.to_string())
+    let n = max_num.map_or(count + 1, |m| m + 1);
+    format!("{pre}{n}{suf}")
+}
+
+/// 行首按模板前缀匹配章号；后缀为空时取行首连续（全角）数字。
+fn template_number(line: &str, pre: &str, suf: &str) -> Option<u64> {
+    let rest = line.strip_prefix(pre)?;
+    if suf.is_empty() {
+        let digits: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || ('０'..='９').contains(c))
+            .collect();
+        return arabic_value(&digits);
+    }
+    let end = rest.find(suf)?;
+    arabic_value(&rest[..end])
 }
 
 fn arabic_value(digits: &str) -> Option<u64> {
@@ -183,6 +281,22 @@ mod tests {
     }
 
     #[test]
+    fn 元数据_ipc_走_camelCase() {
+        let meta = BookMeta {
+            title: Some("书名甲".into()),
+            track_record: Some("均订 2 万".into()),
+            golden_finger: Some("每日签到".into()),
+            chapter_prefix: Some("第{n}章".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(json.contains("\"trackRecord\""));
+        assert!(json.contains("\"goldenFinger\""));
+        let back: BookMeta = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, meta);
+    }
+
+    #[test]
     fn 元数据_缺省为空_写入后往返() {
         let root = TempDir::new().unwrap().path().to_path_buf();
         let md = root.join("书.md");
@@ -192,10 +306,10 @@ mod tests {
 
         let meta = BookMeta {
             title: Some("书名甲".into()),
-            score: Some("均订 2 万".into()),
+            track_record: Some("均订 2 万".into()),
             summary: Some("少年得金手指".into()),
             golden_finger: Some("每日签到".into()),
-            chapter_prefix: Some("第{n}章-卷{v}".into()),
+            chapter_prefix: Some("第{n}章".into()),
         };
         write_book_meta(&md, &meta).unwrap();
 
@@ -204,6 +318,43 @@ mod tests {
         assert!(yaml_text.contains("金手指: 每日签到"));
 
         assert_eq!(read_book_meta(&md).unwrap(), meta);
+    }
+
+    #[test]
+    fn 元数据_保留未知键与数字标量() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("书.md");
+        write(&md, "");
+        write(
+            &root.join("书.yaml"),
+            "书名: 旧名\n成绩: 20000\n自定义键: 保留我\n",
+        );
+
+        let meta = read_book_meta(&md).unwrap();
+        assert_eq!(meta.title.as_deref(), Some("旧名"));
+        assert_eq!(meta.track_record.as_deref(), Some("20000"));
+
+        let mut updated = meta.clone();
+        updated.title = Some("新名".into());
+        write_book_meta(&md, &updated).unwrap();
+
+        let yaml_text = fs::read_to_string(root.join("书.yaml")).unwrap();
+        assert!(yaml_text.contains("自定义键: 保留我"));
+        assert!(yaml_text.contains("书名: 新名"));
+        assert!(yaml_text.contains("成绩: 20000"));
+    }
+
+    #[test]
+    fn 元数据_清空字段_移除键() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("书.md");
+        write(&md, "");
+        write(&root.join("书.yaml"), "书名: 旧名\n自定义键: 保留我\n");
+
+        write_book_meta(&md, &BookMeta::default()).unwrap();
+        let yaml_text = fs::read_to_string(root.join("书.yaml")).unwrap();
+        assert!(!yaml_text.contains("书名:"));
+        assert!(yaml_text.contains("自定义键: 保留我"));
     }
 
     #[test]
@@ -268,6 +419,19 @@ mod tests {
     #[test]
     fn 下一章_自定义模板() {
         assert_eq!(next_chapter_line("第9章", "Chapter {n}: "), "Chapter 10: ");
+    }
+
+    #[test]
+    fn 下一章_自定义模板_按模板自身续号() {
+        assert_eq!(
+            next_chapter_line("Chapter 1: 开\nChapter 9: 续", "Chapter {n}: "),
+            "Chapter 10: "
+        );
+    }
+
+    #[test]
+    fn 下一章_模板无占位符_原样返回() {
+        assert_eq!(next_chapter_line("x", "【场景】"), "【场景】");
     }
 
     #[test]

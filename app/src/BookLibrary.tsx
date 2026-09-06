@@ -121,7 +121,7 @@ export default function BookLibrary({ onOpen }: BookLibraryProps) {
             </thead>
             <tbody>
               {books.map((b) => (
-                <tr key={b.primaryMd} className="book-row" title="打开拆书稿" onClick={() => onOpen(b)}>
+                <tr key={b.primaryMd} title="打开拆书稿" onClick={() => onOpen(b)}>
                   <td className="book-name">{b.name}</td>
                   <td>{layoutLabel[b.layout]}</td>
                   <td className="num">{formatCount(b.chapterCount)}</td>

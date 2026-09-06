@@ -9,10 +9,13 @@ import { emptyBookMeta } from "./types";
 import { errMsg } from "./util";
 import BookMetaDialog from "./BookMetaDialog";
 
-const DEFAULT_CHAPTER_PREFIX = "第{n}章";
-
 /** 五插入块（设计共识 §四）：Obsidian 风格 callout，纯 markdown 可读。 */
 const INSERT_BLOCKS = ["点评", "如果是我写", "原文截图", "出场人物", "小结"] as const;
+
+/** 章前缀只在前端暂存；空值由 Rust 侧回退默认「第{n}章」，单一事实源。 */
+function normalizePrefix(prefix: string | null | undefined): string {
+  return prefix?.trim() ?? "";
+}
 
 const editorTheme = EditorView.theme({
   "&": { height: "100%", fontSize: "15px" },
@@ -40,7 +43,7 @@ interface EditorPageProps {
 export default function EditorPage({ book, onBack }: EditorPageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const prefixRef = useRef(DEFAULT_CHAPTER_PREFIX);
+  const prefixRef = useRef("");
   const savingRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -141,7 +144,7 @@ export default function EditorPage({ book, onBack }: EditorPageProps) {
         metaWarn = `已有 .yaml 解析失败：${errMsg(e)}。在「书级资料」保存会整文件覆盖，请先确认内容。`;
       }
       if (cancelled || !containerRef.current) return;
-      prefixRef.current = meta.chapterPrefix?.trim() || DEFAULT_CHAPTER_PREFIX;
+      prefixRef.current = normalizePrefix(meta.chapterPrefix);
       setMetaInit({ meta, warning: metaWarn });
 
       view = new EditorView({
@@ -249,7 +252,7 @@ export default function EditorPage({ book, onBack }: EditorPageProps) {
           warning={metaInit.warning}
           onClose={() => setMetaOpen(false)}
           onSaved={(m) => {
-            prefixRef.current = m.chapterPrefix?.trim() || DEFAULT_CHAPTER_PREFIX;
+            prefixRef.current = normalizePrefix(m.chapterPrefix);
             setMetaInit({ meta: m });
             setMetaOpen(false);
           }}

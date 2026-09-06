@@ -1,14 +1,14 @@
 mod book_file;
 mod library;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use book_file::BookMeta;
 use library::BookEntry;
 
 #[tauri::command]
 fn scan_library(root: String) -> Result<Vec<BookEntry>, String> {
-    let path = std::path::PathBuf::from(&root);
+    let path = PathBuf::from(&root);
     if !path.is_dir() {
         return Err(format!("不是有效的文件夹：{root}"));
     }

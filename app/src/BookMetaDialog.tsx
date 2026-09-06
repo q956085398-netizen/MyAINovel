@@ -12,7 +12,7 @@ interface BookMetaDialogProps {
 }
 
 /** 书级资料（设计共识 §四）：书名/成绩/简介/金手指＋章前缀模板。
- *  保存写入同名 .yaml（双文件制，懒生成）。 */
+ *  保存写入同名 .yaml（双文件制，懒生成；Rust 侧合并保留未知键）。 */
 export default function BookMetaDialog({
   mdPath,
   initial,
@@ -20,22 +20,26 @@ export default function BookMetaDialog({
   onClose,
   onSaved,
 }: BookMetaDialogProps) {
-  const [title, setTitle] = useState(initial.title ?? "");
-  const [score, setScore] = useState(initial.score ?? "");
-  const [summary, setSummary] = useState(initial.summary ?? "");
-  const [goldenFinger, setGoldenFinger] = useState(initial.goldenFinger ?? "");
-  const [chapterPrefix, setChapterPrefix] = useState(initial.chapterPrefix ?? "");
+  const [form, setForm] = useState<BookMeta>({ ...initial });
   const [saving, setSaving] = useState(false);
+
+  function setField(key: keyof BookMeta, value: string) {
+    setForm((f) => ({ ...f, [key]: value || null }));
+  }
 
   async function save() {
     if (saving) return;
     setSaving(true);
+    const trimmed = (s: string | null): string | null => {
+      const t = s?.trim();
+      return t ? t : null;
+    };
     const meta: BookMeta = {
-      title: title.trim() || null,
-      score: score.trim() || null,
-      summary: summary.trim() || null,
-      goldenFinger: goldenFinger.trim() || null,
-      chapterPrefix: chapterPrefix.trim() || null,
+      title: trimmed(form.title),
+      trackRecord: trimmed(form.trackRecord),
+      summary: trimmed(form.summary),
+      goldenFinger: trimmed(form.goldenFinger),
+      chapterPrefix: trimmed(form.chapterPrefix),
     };
     try {
       await invoke("save_book_meta", { mdPath, meta });
@@ -59,37 +63,37 @@ export default function BookMetaDialog({
         {warning && <div className="error-box">{warning}</div>}
         <label>
           书名
-          <input value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input value={form.title ?? ""} onChange={(e) => setField("title", e.target.value)} />
         </label>
         <label>
           成绩
           <input
-            value={score}
-            onChange={(e) => setScore(e.target.value)}
+            value={form.trackRecord ?? ""}
+            onChange={(e) => setField("trackRecord", e.target.value)}
             placeholder="如：均订、月票、完结字数"
           />
         </label>
         <label>
           简介
           <textarea
-            value={summary}
-            onChange={(e) => setSummary(e.target.value)}
+            value={form.summary ?? ""}
+            onChange={(e) => setField("summary", e.target.value)}
             placeholder="一两句话讲这本书卖什么"
           />
         </label>
         <label>
           金手指
           <input
-            value={goldenFinger}
-            onChange={(e) => setGoldenFinger(e.target.value)}
+            value={form.goldenFinger ?? ""}
+            onChange={(e) => setField("goldenFinger", e.target.value)}
             placeholder="主角的超常能力或信息优势"
           />
         </label>
         <label>
           章前缀模板
           <input
-            value={chapterPrefix}
-            onChange={(e) => setChapterPrefix(e.target.value)}
+            value={form.chapterPrefix ?? ""}
+            onChange={(e) => setField("chapterPrefix", e.target.value)}
             placeholder="第{n}章（{n} 为章号占位）"
           />
         </label>

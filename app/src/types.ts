@@ -11,15 +11,15 @@ export interface BookEntry {
   wordCount: number;
 }
 
-/** 与 Rust 侧 book_file::BookMeta 对应（serde camelCase，yaml 键为中文）。 */
+/** 与 Rust 侧 book_file::BookMeta 对应（IPC 走 camelCase；yaml 落盘键为中文）。 */
 export interface BookMeta {
   title: string | null;
-  score: string | null;
+  trackRecord: string | null;
   summary: string | null;
   goldenFinger: string | null;
   chapterPrefix: string | null;
 }
 
 export function emptyBookMeta(): BookMeta {
-  return { title: null, score: null, summary: null, goldenFinger: null, chapterPrefix: null };
+  return { title: null, trackRecord: null, summary: null, goldenFinger: null, chapterPrefix: null };
 }
