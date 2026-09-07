@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   DocSnapshot,
   TropeSuggestion,
+  Vocabulary,
 } from "./types";
 
 /** 普通对话的默认系统提示（ADR 0003：只做梳理、建议、提炼、激发灵感这类助手活）。 */
@@ -11,7 +12,13 @@ export const DEFAULT_SYSTEM_PROMPT =
   "你是「工笔」（个人网文创作工具）里的写作助手，帮用户拆书、找灵感、构思剧情。" +
   "回答用中文，简明直接，多用要点。";
 
-const COMMAND_PROMPTS: Record<AiCommandKind, (seed: AiSeed) => { system: string; user: string }> = {
+/** 词表进标注提示词的类型上限：防词表长大后提示词膨胀。 */
+const VOCAB_PROMPT_LIMIT = 60;
+
+const COMMAND_PROMPTS: Record<
+  AiCommandKind,
+  (seed: AiSeed, vocab?: Vocabulary | null) => { system: string; user: string }
+> = {
   梳理: (seed) => ({
     system:
       "你是「工笔」的拆书助手，只处理用户自己写下的拆书记录。请梳理用户选中的内容，" +
@@ -19,11 +26,15 @@ const COMMAND_PROMPTS: Record<AiCommandKind, (seed: AiSeed) => { system: string;
       "拉扯、兑现、善后、启下，指出哪些拍已有、哪些缺）；三、可改进点。",
     user: `请梳理以下选中的拆书记录（来自《${seed.bookName}》）：\n\n${seed.text}`,
   }),
-  标注: (seed) => ({
+  标注: (seed, vocab) => ({
     system:
       "你是「工笔」的拆书助手。阅读用户选中的拆书记录，判断其中包含的桥段「类型」" +
-      "（爽点类型，如：掉马甲、打脸、扮猪吃虎、逆袭、鉴宝）与「解法」（该类型下的具体" +
-      "写法与花样）。输出必须严格只有两行，格式如下，不要任何其他内容：\n" +
+      "（爽点类型）与「解法」（该类型下的具体写法与花样）。" +
+      (vocab && vocab.types.length > 0
+        ? `优先从词表已有的类型中选取：${vocab.types.slice(0, VOCAB_PROMPT_LIMIT).join("、")}；` +
+          "确有新类型再自造。"
+        : "类型如：掉马甲、打脸、扮猪吃虎、逆袭、鉴宝。") +
+      "输出必须严格只有两行，格式如下，不要任何其他内容：\n" +
       "类型：类型A、类型B\n解法：一句话描述具体写法",
     user: `请判断以下选中内容（来自《${seed.bookName}》）的桥段类型与解法：\n\n${seed.text}`,
   }),
@@ -35,9 +46,13 @@ const COMMAND_PROMPTS: Record<AiCommandKind, (seed: AiSeed) => { system: string;
   }),
 };
 
-/** 三命令的用户消息（进会话历史）与系统提示（每次请求时组装）。 */
-export function buildCommandMessages(seed: AiSeed): { system: string; user: string } {
-  return COMMAND_PROMPTS[seed.kind](seed);
+/** 三命令的用户消息（进会话历史）与系统提示（每次请求时组装）。
+ *  vocab 仅标注命令使用：让 AI 优先复用既有类型词，避免增殖（工单 #10）。 */
+export function buildCommandMessages(
+  seed: AiSeed,
+  vocab?: Vocabulary | null,
+): { system: string; user: string } {
+  return COMMAND_PROMPTS[seed.kind](seed, vocab);
 }
 
 /** 解析「建议类型/解法标注」的回复；容忍 markdown 加粗与空白。解析不出类型则返回 null。 */

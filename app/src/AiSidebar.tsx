@@ -18,6 +18,7 @@ import type {
   DocSnapshot,
   MessageMeta,
   TropeSuggestion,
+  Vocabulary,
 } from "./types";
 import { errMsg, oneLinePreview } from "./util";
 import ProviderSettingsDialog from "./ProviderSettingsDialog";
@@ -25,6 +26,8 @@ import ProviderSettingsDialog from "./ProviderSettingsDialog";
 interface AiSidebarProps {
   open: boolean;
   onClose: () => void;
+  /** 库根：标注命令组提示词前加载词表，让 AI 优先复用既有类型词。 */
+  libraryPath: string | null;
   /** 编辑器命令种子：带选区与行号，面板消费后回调清空。 */
   seed: AiSeed | null;
   onSeedConsumed: () => void;
@@ -43,6 +46,7 @@ function nowSec(): number {
 export default function AiSidebar({
   open,
   onClose,
+  libraryPath,
   seed,
   onSeedConsumed,
   getDoc,
@@ -223,14 +227,26 @@ export default function AiSidebar({
       return;
     }
     seedRef.current = seed;
-    const { system, user } = buildCommandMessages(seed);
-    const meta: MessageMeta = {
-      kind: seed.kind,
-      startLine: seed.startLine,
-      endLine: seed.endLine,
-    };
     onSeedConsumed();
-    void send(user, meta, system);
+    void (async () => {
+      // 标注命令带词表（每次现取，词表在 Obsidian 里手改也即时生效）。
+      let vocab: Vocabulary | null = null;
+      if (seed.kind === "标注" && libraryPath) {
+        try {
+          vocab = await invoke<Vocabulary>("load_vocab", { root: libraryPath });
+        } catch (e) {
+          // 词表损坏要亮出来（spec：显式报错），但不挡命令本身。
+          setError(`词表加载失败：${errMsg(e)}（标注命令继续，类型提示用通用示例）`);
+        }
+      }
+      const { system, user } = buildCommandMessages(seed, vocab);
+      const meta: MessageMeta = {
+        kind: seed.kind,
+        startLine: seed.startLine,
+        endLine: seed.endLine,
+      };
+      void send(user, meta, system);
+    })();
     // seed 由用户动作驱动、send 闭包读取即时不依赖其稳定性。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed, config]);

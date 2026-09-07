@@ -4,6 +4,7 @@ mod inspiration;
 mod library;
 mod search;
 mod trope;
+mod vocabulary;
 
 use std::path::{Path, PathBuf};
 
@@ -12,6 +13,7 @@ use book_file::{BookMeta, ChapterAnchor};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
 use trope::TropeSpan;
+use vocabulary::Vocabulary;
 
 #[tauri::command]
 fn scan_library(root: String) -> Result<Vec<BookEntry>, String> {
@@ -65,6 +67,17 @@ fn read_tropes(md_path: String) -> Result<Vec<TropeSpan>, String> {
 #[tauri::command]
 fn save_tropes(md_path: String, tropes: Vec<TropeSpan>) -> Result<(), String> {
     trope::write_tropes(Path::new(&md_path), &tropes)
+}
+
+/// 类型/解法词表（工单 #10）：库根「词表.yaml」＋库内已用词的合成提示；
+/// 首次调用若词表文件不存在会落盘类型种子。
+#[tauri::command]
+fn load_vocab(root: String) -> Result<Vocabulary, String> {
+    let path = PathBuf::from(&root);
+    if !path.is_dir() {
+        return Err(format!("不是有效的文件夹：{root}"));
+    }
+    vocabulary::load_vocab(&path)
 }
 
 #[tauri::command]
@@ -192,6 +205,7 @@ pub fn run() {
             list_chapters,
             read_tropes,
             save_tropes,
+            load_vocab,
             search_library,
             scan_inspirations,
             save_inspiration_card,

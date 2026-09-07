@@ -149,6 +149,11 @@ fn meta_and_tropes(primary_md: &Path) -> (BookMeta, Vec<TropeSpan>) {
     }
 }
 
+/// 词表聚合用：主文件同名 yaml 的桥段列表，损坏降级为空（提示尽力而为）。
+pub(crate) fn tropes_lossy(primary_md: &Path) -> Vec<TropeSpan> {
+    meta_and_tropes(primary_md).1
+}
+
 fn md_stats(md: &Path) -> MdStats {
     let Ok(bytes) = fs::read(md) else {
         return MdStats {

@@ -114,6 +114,7 @@ function App() {
               <EditorPage
                 key={openBook.primaryMd}
                 book={openBook}
+                libraryPath={libraryPath}
                 onBack={() => setOpenBook(null)}
                 onAiCommand={handleAiCommand}
                 registerBridge={registerBridge}
@@ -144,6 +145,7 @@ function App() {
       <AiSidebar
         open={aiOpen}
         onClose={() => setAiOpen(false)}
+        libraryPath={libraryPath}
         seed={aiSeed}
         onSeedConsumed={() => setAiSeed(null)}
         getDoc={getDoc}

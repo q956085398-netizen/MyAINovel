@@ -8,6 +8,13 @@ export interface TropeSpan {
   solution: string | null;
 }
 
+/** 与 Rust 侧 vocabulary.rs::Vocabulary 对应。合成提示 =
+ *  词表.yaml 的词（文件序在前）＋库内已用词（按使用次数降序），去重。 */
+export interface Vocabulary {
+  types: string[];
+  solutions: string[];
+}
+
 /** 与 Rust 侧 book_file::ChapterAnchor 对应。 */
 export interface ChapterAnchor {
   ordinal: number;

@@ -67,6 +67,8 @@ function insertAtLineEnd(view: EditorView, insert: string) {
 
 interface EditorPageProps {
   book: BookEntry;
+  /** 库根：桥段标注面板加载词表提示用。 */
+  libraryPath: string | null;
   onBack: () => void;
   /** 三命令出口：把选区种子递给 App 层的 AI 面板。 */
   onAiCommand: (seed: AiSeed) => void;
@@ -76,7 +78,13 @@ interface EditorPageProps {
 
 /** 拆书编辑器：前缀推进（Ctrl+Enter）、五插入块、截图粘贴、Ctrl+S 保存。
  *  父组件以 key=primaryMd 挂载，一本书一次生命周期。 */
-export default function EditorPage({ book, onBack, onAiCommand, registerBridge }: EditorPageProps) {
+export default function EditorPage({
+  book,
+  libraryPath,
+  onBack,
+  onAiCommand,
+  registerBridge,
+}: EditorPageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const prefixRef = useRef("");
@@ -446,6 +454,7 @@ export default function EditorPage({ book, onBack, onAiCommand, registerBridge }
       {tropeDialog && (
         <TropeDialog
           mdPath={book.primaryMd}
+          libraryPath={libraryPath}
           chapters={tropeDialog.chapters}
           initial={tropeDialog.tropes}
           warning={tropeDialog.warning}
