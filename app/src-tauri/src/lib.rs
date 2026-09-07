@@ -9,7 +9,7 @@ mod vocabulary;
 use std::path::{Path, PathBuf};
 
 use ai::{AiConfig, AiState, ChatSession, ChatSessionSummary, ChatStreamEvent, ChatStreamReq};
-use book_file::{BookMeta, ChapterAnchor};
+use book_file::{BookMeta, ChapterAnchor, MdContent, SaveResult};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
 use trope::TropeSpan;
@@ -24,14 +24,21 @@ fn scan_library(root: String) -> Result<Vec<BookEntry>, String> {
     library::scan_library(&path)
 }
 
+/// 正文读入带版本指纹（ADR 0004）：保存时带回对账，防 Obsidian 抢写被静默覆盖。
 #[tauri::command]
-fn read_book_md(path: String) -> Result<String, String> {
-    book_file::read_text(Path::new(&path))
+fn read_book_md(path: String) -> Result<MdContent, String> {
+    book_file::read_book_md(Path::new(&path))
 }
 
+/// base＝载入时的指纹；盘上不符判冲突（force＝用户确认覆盖）。
 #[tauri::command]
-fn save_book_md(path: String, content: String) -> Result<(), String> {
-    book_file::write_text_atomic(Path::new(&path), &content)
+fn save_book_md(
+    path: String,
+    content: String,
+    base: Option<String>,
+    force: bool,
+) -> Result<SaveResult, String> {
+    book_file::save_book_md(Path::new(&path), &content, base.as_deref(), force)
 }
 
 #[tauri::command]

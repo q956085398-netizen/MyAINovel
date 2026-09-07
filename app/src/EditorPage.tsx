@@ -11,6 +11,8 @@ import type {
   BookMeta,
   ChapterAnchor,
   EditorBridge,
+  MdContent,
+  SaveResult,
   TropeSuggestion,
   TropeSpan,
 } from "./types";
@@ -88,6 +90,8 @@ export default function EditorPage({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const prefixRef = useRef("");
+  /** 盘上正文的版本指纹（ADR 0004）：载入/保存成功后更新，保存时带回对账。 */
+  const fingerprintRef = useRef<string | null>(null);
   const savingRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -147,17 +151,53 @@ export default function EditorPage({
     return true;
   }
 
-  async function save() {
-    const view = viewRef.current;
-    if (!view || savingRef.current) return;
+  async function save(force = false) {
+    if (savingRef.current) return;
     savingRef.current = true;
     try {
-      await invoke("save_book_md", { path: book.primaryMd, content: view.state.doc.toString() });
-      setDirty(false);
+      await persist(force);
     } catch (e) {
       window.alert(`保存失败：${errMsg(e)}`);
     } finally {
       savingRef.current = false;
+    }
+  }
+
+  /** 保存本体（门闩由 save 持有）：落盘或进入冲突裁决。 */
+  async function persist(force: boolean) {
+    const view = viewRef.current;
+    if (!view) return;
+    const result = await invoke<SaveResult>("save_book_md", {
+      path: book.primaryMd,
+      content: view.state.doc.toString(),
+      base: fingerprintRef.current,
+      force,
+    });
+    if (result.status === "saved") {
+      fingerprintRef.current = result.fingerprint;
+      setDirty(false);
+      return;
+    }
+    if (
+      window.confirm(
+        "保存被拦下：文件在保存前已被其他程序修改（可能是在 Obsidian 里编辑过）。\n\n" +
+          "「确定」＝重新加载盘上内容（放弃编辑器里未保存的修改）；\n" +
+          "「取消」＝留在编辑器，可选择是否用当前内容覆盖盘上文件。",
+      )
+    ) {
+      try {
+        const doc = await invoke<MdContent>("read_book_md", { path: book.primaryMd });
+        const v = viewRef.current;
+        if (!v) return;
+        v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: doc.content } });
+        fingerprintRef.current = doc.fingerprint;
+        setDirty(false);
+      } catch (e) {
+        window.alert(`重新加载失败：${errMsg(e)}`);
+      }
+    } else if (window.confirm("要用编辑器里的当前内容覆盖盘上文件吗？\n（盘上被外部修改的内容将丢失）")) {
+      // 直接走 persist(true)（force 不可能再冲突），不经 save 以免撞门闩。
+      await persist(true);
     }
   }
 
@@ -294,8 +334,11 @@ export default function EditorPage({
 
     void (async () => {
       let content: string;
+      let fingerprint: string;
       try {
-        content = await invoke<string>("read_book_md", { path: book.primaryMd });
+        const doc = await invoke<MdContent>("read_book_md", { path: book.primaryMd });
+        content = doc.content;
+        fingerprint = doc.fingerprint;
       } catch (e) {
         if (!cancelled) setLoadError(`读取拆书稿失败：${errMsg(e)}`);
         return;
@@ -310,6 +353,7 @@ export default function EditorPage({
       }
       if (cancelled || !containerRef.current) return;
       prefixRef.current = normalizePrefix(meta.chapterPrefix);
+      fingerprintRef.current = fingerprint;
       setMetaInit({ meta, warning: metaWarn });
 
       view = new EditorView({

@@ -1,5 +1,6 @@
 //! 拆书稿文件操作：正文读写、书级元数据（双文件制的 .yaml 侧）、
-//! 粘贴截图落盘、下一章前缀计算。写入均走临时文件＋改名（ADR 0002）。
+//! 粘贴截图落盘、下一章前缀计算。写入均走临时文件＋改名、长活缓冲
+//! 覆盖保存带版本指纹对账（ADR 0004）。
 //!
 //! BookMeta 走 Tauri IPC（camelCase JSON）；yaml 侧键为中文且合并保留
 //! 未知键——用户在 Obsidian 手补的字段不能被「书级资料」保存抹掉。
@@ -26,9 +27,76 @@ pub struct BookMeta {
 
 pub const DEFAULT_CHAPTER_PREFIX: &str = "第{n}章";
 
+fn read_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    fs::read(path).map_err(|e| format!("无法读取文件 {}：{e}", path.display()))
+}
+
 pub fn read_text(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|e| format!("无法读取文件 {}：{e}", path.display()))?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    Ok(String::from_utf8_lossy(&read_bytes(path)?).into_owned())
+}
+
+// --- 正文长活缓冲的版本指纹（ADR 0004）：读带出、存带回、不符即拦 ---
+
+/// 正文内容＋载入时的版本指纹。指纹是内容哈希的字符串形态，
+/// 前端当不透明令牌保管、保存时原样带回（避开 u64 超 JS 安全整数）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MdContent {
+    pub content: String,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum SaveResult {
+    Saved { fingerprint: String },
+    Conflict,
+}
+
+/// 内容指纹：字节数混入的 FNV-1a 64。用于覆盖保存前的对账（不是
+/// 密码学场景），长度混入让「同哈希不同长」的构造只剩理论可能。
+fn content_fingerprint(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325 ^ u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    for &b in bytes {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// 带指纹读正文：指纹算在原始字节上，盘上内容不变则不变。
+pub fn read_book_md(path: &Path) -> Result<MdContent, String> {
+    let bytes = read_bytes(path)?;
+    Ok(MdContent {
+        fingerprint: content_fingerprint(&bytes).to_string(),
+        content: String::from_utf8_lossy(&bytes).into_owned(),
+    })
+}
+
+/// 带对账的覆盖保存（ADR 0004）：盘上指纹与 base 不符（外部程序改过、
+/// 删过，或载入时不存在而期间被创建）一律判冲突拒绝写盘；force 跳过
+/// 对账直接覆盖。保存成功返回新内容自身的指纹，供连续保存续带。
+pub fn save_book_md(
+    path: &Path,
+    content: &str,
+    base: Option<&str>,
+    force: bool,
+) -> Result<SaveResult, String> {
+    if !force {
+        let matches_base = match fs::read(path) {
+            Ok(bytes) => base.is_some_and(|b| *b == content_fingerprint(&bytes).to_string()),
+            // 载入时不存在（base 无指纹）而文件被外部创建，同样判冲突。
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => base.is_none(),
+            Err(e) => return Err(format!("无法读取文件 {}：{e}", path.display())),
+        };
+        if !matches_base {
+            return Ok(SaveResult::Conflict);
+        }
+    }
+    write_text_atomic(path, content)?;
+    Ok(SaveResult::Saved {
+        fingerprint: content_fingerprint(content.as_bytes()).to_string(),
+    })
 }
 
 /// 去掉正文开头的 BOM，避免遮蔽首行章标题。
@@ -337,6 +405,112 @@ mod tests {
         write_text_atomic(&md, "第一章\n新内容").unwrap();
         assert_eq!(read_text(&md).unwrap(), "第一章\n新内容");
         assert!(!root.join("书.md.gongbi.tmp").exists());
+    }
+
+    #[test]
+    fn 指纹_ipc_走_camelCase_与标签形态() {
+        let json = serde_json::to_string(&MdContent {
+            content: "正文".into(),
+            fingerprint: "42".into(),
+        })
+        .unwrap();
+        assert!(json.contains("\"fingerprint\""));
+
+        let saved = serde_json::to_string(&SaveResult::Saved {
+            fingerprint: "7".into(),
+        })
+        .unwrap();
+        assert!(saved.contains("\"status\":\"saved\""));
+        assert!(saved.contains("\"fingerprint\":\"7\""));
+        let conflict = serde_json::to_string(&SaveResult::Conflict).unwrap();
+        assert!(conflict.contains("\"status\":\"conflict\""));
+    }
+
+    #[test]
+    fn 保存_指纹相符_落盘并返回新指纹() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("书.md");
+        write(&md, "旧内容");
+
+        let loaded = read_book_md(&md).unwrap();
+        assert_eq!(loaded.content, "旧内容");
+
+        let result = save_book_md(&md, "新内容", Some(&loaded.fingerprint), false).unwrap();
+        let SaveResult::Saved { fingerprint } = result else {
+            panic!("指纹相符不该判冲突");
+        };
+        assert_eq!(read_text(&md).unwrap(), "新内容");
+        // 连续保存不误报：带着上一次返回的新指纹再存。
+        assert_eq!(
+            save_book_md(&md, "再改", Some(&fingerprint), false).unwrap(),
+            SaveResult::Saved {
+                fingerprint: read_book_md(&md).unwrap().fingerprint
+            }
+        );
+    }
+
+    #[test]
+    fn 保存_外部改过_判冲突不写盘() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("书.md");
+        write(&md, "旧内容");
+
+        let loaded = read_book_md(&md).unwrap();
+        write(&md, "Obsidian 抢先保存的内容");
+
+        assert_eq!(
+            save_book_md(&md, "我的修改", Some(&loaded.fingerprint), false).unwrap(),
+            SaveResult::Conflict
+        );
+        assert_eq!(read_text(&md).unwrap(), "Obsidian 抢先保存的内容");
+    }
+
+    #[test]
+    fn 保存_force_跳过对账直接覆盖() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("书.md");
+        write(&md, "外部内容");
+
+        let result = save_book_md(&md, "以我为准", None, true).unwrap();
+        assert!(matches!(result, SaveResult::Saved { .. }));
+        assert_eq!(read_text(&md).unwrap(), "以我为准");
+    }
+
+    #[test]
+    fn 保存_文件被外部删除_判冲突() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("书.md");
+        write(&md, "旧内容");
+
+        let loaded = read_book_md(&md).unwrap();
+        fs::remove_file(&md).unwrap();
+
+        assert_eq!(
+            save_book_md(&md, "我的修改", Some(&loaded.fingerprint), false).unwrap(),
+            SaveResult::Conflict
+        );
+    }
+
+    #[test]
+    fn 保存_载入时不存在() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        fs::create_dir_all(&root).unwrap();
+        let md = root.join("新书.md");
+
+        // 新文件首存：base 无指纹，正常落盘。
+        assert!(matches!(
+            save_book_md(&md, "第一笔", None, false).unwrap(),
+            SaveResult::Saved { .. }
+        ));
+        assert_eq!(read_text(&md).unwrap(), "第一笔");
+
+        // 载入时不存在、期间被外部创建：base 仍无指纹也判冲突。
+        let md2 = root.join("被抢注.md");
+        write(&md2, "别人的");
+        assert_eq!(
+            save_book_md(&md2, "我的", None, false).unwrap(),
+            SaveResult::Conflict
+        );
     }
 
     #[test]

@@ -1,5 +1,17 @@
 export type Layout = "scattered" | "folder-book";
 
+/** 与 Rust 侧 book_file::MdContent 对应；fingerprint 为内容指纹的
+ *  不透明令牌（字符串形态避开 u64 超 JS 安全整数），保存时带回对账（ADR 0004）。 */
+export interface MdContent {
+  content: string;
+  fingerprint: string;
+}
+
+/** 与 Rust 侧 book_file::SaveResult 对应（serde 按状态打标签）。 */
+export type SaveResult =
+  | { status: "saved"; fingerprint: string }
+  | { status: "conflict" };
+
 /** 与 Rust 侧 trope.rs::TropeSpan 对应。起止为章标题序数（第几个章标题，1 起）。 */
 export interface TropeSpan {
   startChapter: number;
