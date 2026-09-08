@@ -7,11 +7,14 @@ import type {
   CardDraft,
   ImportEntry,
   InspirationCard,
+  ProjectEntry,
 } from "./types";
 import { CARD_CATEGORIES, emptyCardDraft } from "./types";
 import { errMsg, oneLinePreview } from "./util";
 import CardDialog from "./CardDialog";
 import ImportDialog from "./ImportDialog";
+import TransmuteDialog from "./TransmuteDialog";
+import type { ProjectTab } from "./ProjectPage";
 
 function formatCount(n: number): string {
   return n.toLocaleString("zh-Hans-CN");
@@ -29,6 +32,10 @@ interface InspirationLibraryProps {
   libraryPath: string | null;
   onChooseFolder: () => void;
   onOpenBook: (book: BookEntry) => void;
+  /** 「关联」里的项目去向（《书名》/单元名）→ 打开该项目的指定页签。 */
+  onOpenProject: (project: ProjectEntry, tab?: ProjectTab) => void;
+  /** 转生时没有项目可去：切到「构思」板块新建。 */
+  onGoIdeation: () => void;
 }
 
 /** 灵感库（设计共识 §六）：九类卡片＋未分类，一卡一文件存于库根
@@ -37,6 +44,8 @@ export default function InspirationLibrary({
   libraryPath,
   onChooseFolder,
   onOpenBook,
+  onOpenProject,
+  onGoIdeation,
 }: InspirationLibraryProps) {
   const [cards, setCards] = useState<InspirationCard[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -51,6 +60,7 @@ export default function InspirationLibrary({
   const [importing, setImporting] = useState<{ sourcePath: string; entries: ImportEntry[] } | null>(
     null,
   );
+  const [transmuting, setTransmuting] = useState<InspirationCard | null>(null);
 
   const scan = useCallback(async (root: string) => {
     setScanning(true);
@@ -69,7 +79,8 @@ export default function InspirationLibrary({
     if (libraryPath) void scan(libraryPath);
   }, [libraryPath, scan]);
 
-  /** 关联跳转：卡片标题 → 打开卡片；书名（文件夹名或 yaml 书名）→ 打开拆书稿。 */
+  /** 关联跳转：卡片标题 → 打开卡片；「《书名》/单元名」（转生去向）→ 打开
+   *  项目的「单元」页；拆书稿书名 → 打开拆书稿。 */
   async function openLink(text: string) {
     if (!libraryPath) return;
     const t = text.trim();
@@ -79,13 +90,25 @@ export default function InspirationLibrary({
       return;
     }
     try {
+      const slash = t.indexOf("/");
+      if (slash > 0) {
+        const title = t.slice(0, slash).trim().replace(/^《|》$/g, "");
+        const projects = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
+        const project = projects.find(
+          (p) => p.title === title || p.name === title || p.name === `《${title}》`,
+        );
+        if (project) {
+          onOpenProject(project, "单元");
+          return;
+        }
+      }
       const books = await invoke<BookEntry[]>("scan_library", { root: libraryPath });
       const book = books.find((b) => b.name === t || b.meta.title === t);
       if (book) {
         onOpenBook(book);
-      } else {
-        window.alert(`没有找到「${t}」对应的灵感卡片或拆书稿。`);
+        return;
       }
+      window.alert(`没有找到「${t}」对应的灵感卡片、构思项目或拆书稿。`);
     } catch (e) {
       window.alert(`查找关联失败：${errMsg(e)}`);
     }
@@ -285,6 +308,17 @@ export default function InspirationLibrary({
                       {oneLinePreview(card.body, 120)}
                     </p>
                   )}
+                  {card.category === "故事卡" && (
+                    <div className="card-actions">
+                      <button
+                        className="btn small"
+                        title="新建到某个构思项目：核心矛盾与类型预填，正文只给骨架"
+                        onClick={() => setTransmuting(card)}
+                      >
+                        转生为单元
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -305,6 +339,20 @@ export default function InspirationLibrary({
           onDeleted={() => {
             setEditing(null);
             void scan(libraryPath);
+          }}
+        />
+      )}
+
+      {transmuting && libraryPath && (
+        <TransmuteDialog
+          libraryPath={libraryPath}
+          card={transmuting}
+          onClose={() => setTransmuting(null)}
+          onGoIdeation={onGoIdeation}
+          onDone={(project) => {
+            setTransmuting(null);
+            void scan(libraryPath);
+            onOpenProject(project, "单元");
           }}
         />
       )}

@@ -597,12 +597,12 @@ pub fn promote_contradiction(contradiction_path: &Path) -> Result<NoteEntry, Str
         ));
     }
 
-    let mut unit = NoteDraft::new(NoteKind::Unit, source.name.clone());
-    unit.core = source.core.clone();
-    unit.types = source.types.clone();
-    unit.body = UNIT_TEMPLATE.to_string();
-    let created = save_note(project, &unit, None)?;
-
+    let created = save_unit_draft(
+        project,
+        source.name.clone(),
+        source.core.clone(),
+        source.types.clone(),
+    )?;
     let mut updated = NoteDraft::new(NoteKind::Contradiction, source.name.clone());
     updated.core = source.core.clone();
     updated.types = source.types.clone();
@@ -614,8 +614,74 @@ pub fn promote_contradiction(contradiction_path: &Path) -> Result<NoteEntry, Str
     Ok(created)
 }
 
-// --- 类型圈.md ---
+/// 故事卡转生单元草稿（工单 #9，docs/spec/故事卡转生.md）：卡片标题→单元名、
+/// 一句话核心→核心矛盾、标签→类型，正文给与「矛盾提为单元」同一份骨架；
+/// 卡片「关联」追加「《书名》/单元名」单向记去向（不设硬引用、无同步）。
+/// 先记去向再建单元：建单元失败只留一条失效软链，重试即自愈（同名检查在
+/// 写入之前，重试不会被同名挡住）；反过来会在失败时留下无人记账的单元。
+pub fn transmute_story_card(
+    root: &Path,
+    card_path: &Path,
+    project: &Path,
+) -> Result<NoteEntry, String> {
+    let card = crate::inspiration::read_card(card_path);
+    if card.category != crate::inspiration::CardCategory::Story {
+        return Err(format!(
+            "「{}」是{}，只有故事卡能转生为单元",
+            card.title,
+            card.category.name()
+        ));
+    }
+    if !project.is_dir() {
+        return Err(format!("不是有效的项目文件夹：{}", project.display()));
+    }
+    let parent_name = project
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str());
+    if parent_name != Some(PROJECTS_DIR) {
+        return Err(format!("{} 不在 项目/ 下", project.display()));
+    }
 
+    let name = crate::inspiration::sanitize_title(&card.title)?;
+    let unit_path = notes_dir(project, NoteKind::Unit).join(format!("{name}.md"));
+    if unit_path.exists() {
+        return Err(format!(
+            "项目里已有同名单元「{name}」，先改名或删掉旧单元再转生"
+        ));
+    }
+
+    // 项目.yaml 缺失或损坏时用文件夹名兜底——去向只是备注，不因元数据坏掉挡住转生。
+    let title = read_project_meta(project)
+        .ok()
+        .and_then(|m| m.title)
+        .unwrap_or_else(|| {
+            project
+                .file_name()
+                .map(|n| strip_book_marks(&n.to_string_lossy()))
+                .unwrap_or_default()
+        });
+    crate::inspiration::append_link(root, &card, &format!("《{title}》/{name}"))?;
+
+    save_unit_draft(project, name, card.core.clone(), card.tags.clone())
+}
+
+/// 建单元草稿：核心矛盾/类型预填，正文给同一份骨架——「矛盾提为单元」与
+/// 「故事卡转生」两条路径共用，产物同形（spec：单一事实源）。
+fn save_unit_draft(
+    project: &Path,
+    name: String,
+    core: Option<String>,
+    types: Vec<String>,
+) -> Result<NoteEntry, String> {
+    let mut unit = NoteDraft::new(NoteKind::Unit, name);
+    unit.core = core;
+    unit.types = types;
+    unit.body = UNIT_TEMPLATE.to_string();
+    save_note(project, &unit, None)
+}
+
+// --- 类型圈.md ---
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Circle {
@@ -1545,6 +1611,80 @@ mod tests {
         let unit_path = notes_dir(&dir, NoteKind::Unit).join("通缉身份.md");
         let err = promote_contradiction(&unit_path).unwrap_err();
         assert!(err.contains("构思/矛盾"), "{err}");
+    }
+
+    #[test]
+    fn 故事卡转生_预填字段_卡片关联记去向_未知键保留() {
+        let root = root();
+        let dir = project(&root);
+        write(&dir.join("项目.yaml"), "书名: 大魏读书人\n");
+        let card_path = root.join("灵感库/故事卡/外卖小哥的末世签到.md");
+        write(
+            &card_path,
+            "---\n标签:\n- 末世\n- 掉马甲\n一句话核心: 外卖员得签到系统，末世囤物资被当扫地僧\n来源: 拆《大奉打更人》有感\n关联:\n- 《大奉打更人》\n我的私货: 手补的键\n---\n正文展开。\n",
+        );
+
+        let unit = transmute_story_card(&root, &card_path, &dir).unwrap();
+        assert_eq!(unit.kind, NoteKind::Unit);
+        assert_eq!(unit.name, "外卖小哥的末世签到");
+        assert_eq!(
+            unit.core.as_deref(),
+            Some("外卖员得签到系统，末世囤物资被当扫地僧")
+        );
+        assert_eq!(unit.types, vec!["末世", "掉马甲"]);
+        assert!(unit.body.contains("## 桥段安排"));
+        assert!(unit.path.is_file());
+
+        let card = crate::inspiration::read_card(&card_path);
+        assert_eq!(
+            card.links,
+            vec!["《大奉打更人》", "《大魏读书人》/外卖小哥的末世签到"]
+        );
+        assert!(card.body.contains("正文展开"), "卡片正文不因转生被动");
+        let raw = fs::read_to_string(&card_path).unwrap();
+        assert!(raw.contains("我的私货"), "手补未知键不丢：{raw}");
+
+        // 再转一次：同名单元已存在，报错让人裁决。
+        let err = transmute_story_card(&root, &card_path, &dir).unwrap_err();
+        assert!(err.contains("同名单元"), "{err}");
+    }
+
+    #[test]
+    fn 故事卡转生_无项目yaml书名兜底_重转不重复记关联() {
+        let root = root();
+        let dir = project(&root); // 无 项目.yaml：书名取文件夹名去《》
+        fs::create_dir_all(&dir).unwrap();
+        let card_path = root.join("灵感库/故事卡/某卡.md");
+        write(&card_path, "---\n一句话核心: 核心\n---\n");
+
+        let unit = transmute_story_card(&root, &card_path, &dir).unwrap();
+        assert_eq!(unit.name, "某卡");
+        let card = crate::inspiration::read_card(&card_path);
+        assert_eq!(card.links, vec!["《大魏读书人》/某卡"]);
+
+        // 删掉单元再转一次：去向已在，不重复记。
+        fs::remove_file(&unit.path).unwrap();
+        transmute_story_card(&root, &card_path, &dir).unwrap();
+        let card = crate::inspiration::read_card(&card_path);
+        assert_eq!(card.links.len(), 1, "{:?}", card.links);
+    }
+
+    #[test]
+    fn 故事卡转生_非故事卡与项目外一律拒绝() {
+        let root = root();
+        let dir = project(&root);
+        fs::create_dir_all(&dir).unwrap();
+        let role_card = root.join("灵感库/角色卡/某人.md");
+        write(&role_card, "---\n---\n");
+        let err = transmute_story_card(&root, &role_card, &dir).unwrap_err();
+        assert!(err.contains("只有故事卡"), "{err}");
+
+        let card = root.join("灵感库/故事卡/某卡.md");
+        write(&card, "---\n---\n");
+        let outside = root.join("别处/《书》");
+        fs::create_dir_all(&outside).unwrap();
+        let err = transmute_story_card(&root, &card, &outside).unwrap_err();
+        assert!(err.contains("项目/"), "{err}");
     }
 
     #[test]

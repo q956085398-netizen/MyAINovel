@@ -228,6 +228,20 @@ fn promote_contradiction(path: String) -> Result<NoteEntry, String> {
     project::promote_contradiction(Path::new(&path))
 }
 
+/// 故事卡转生单元草稿：建单元、卡片「关联」记去向（工单 #9）。
+#[tauri::command]
+fn transmute_story_card(
+    root: String,
+    card_path: String,
+    project: String,
+) -> Result<NoteEntry, String> {
+    project::transmute_story_card(
+        Path::new(&root),
+        Path::new(&card_path),
+        Path::new(&project),
+    )
+}
+
 // --- AI 侧边栏（设计共识 §七）：配置与会话存应用数据目录，流式对话走 Channel ---
 
 #[tauri::command]
@@ -315,6 +329,7 @@ pub fn run() {
             save_arrangement,
             check_arrangement,
             promote_contradiction,
+            transmute_story_card,
             load_ai_config,
             save_ai_config,
             list_chat_sessions,

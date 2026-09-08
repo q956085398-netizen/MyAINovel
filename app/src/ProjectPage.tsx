@@ -16,7 +16,9 @@ import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
 
 const TABS = ["类型圈", "矛盾", "单元", "排布", "人物", "世界观", "开头"] as const;
-type Tab = (typeof TABS)[number];
+/** 项目页签；跨板块跳转（灵感库关联 → 项目）也用它指路。 */
+export type ProjectTab = (typeof TABS)[number];
+type Tab = ProjectTab;
 
 const NOTE_TABS: NoteKind[] = ["矛盾", "单元", "人物", "世界观", "开头"];
 
@@ -27,6 +29,8 @@ function isNoteTab(tab: Tab): tab is NoteKind {
 interface ProjectPageProps {
   project: ProjectEntry;
   libraryPath: string | null;
+  /** 打开时落在哪个页签（默认「类型圈」）；仅挂载时生效。 */
+  initialTab?: ProjectTab;
   onBack: () => void;
   /** 项目内容变了：让上层刷新项目列表的计数。 */
   onChanged: () => void;
@@ -37,10 +41,11 @@ interface ProjectPageProps {
 export default function ProjectPage({
   project,
   libraryPath,
+  initialTab,
   onBack,
   onChanged,
 }: ProjectPageProps) {
-  const [tab, setTab] = useState<Tab>("类型圈");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "类型圈");
   const [meta, setMeta] = useState<ProjectMeta>(emptyProjectMeta());
   const [metaWarning, setMetaWarning] = useState<string | undefined>();
   const [metaOpen, setMetaOpen] = useState(false);

@@ -7,7 +7,15 @@ import EditorPage from "./EditorPage";
 import Ideation from "./Ideation";
 import InspirationLibrary from "./InspirationLibrary";
 import Writing from "./Writing";
-import type { AiSeed, BookEntry, DocSnapshot, EditorBridge, TropeSuggestion } from "./types";
+import type { ProjectTab } from "./ProjectPage";
+import type {
+  AiSeed,
+  BookEntry,
+  DocSnapshot,
+  EditorBridge,
+  ProjectEntry,
+  TropeSuggestion,
+} from "./types";
 
 const SECTIONS = ["拆书", "构思", "书写"] as const;
 type Section = (typeof SECTIONS)[number];
@@ -28,6 +36,12 @@ function App() {
   // AI 侧边栏：面板常驻挂载仅隐藏切换，编辑器经 bridge 提供文档上下文与采纳回写。
   const [aiOpen, setAiOpen] = useState(false);
   const [aiSeed, setAiSeed] = useState<AiSeed | null>(null);
+  // 灵感库 → 构思项目的跳转请求（故事卡转生的去向、「关联」里的项目引用）；
+  // 携带刚扫到的项目快照，不依赖构思板块自己的列表是否新鲜。
+  const [ideationJump, setIdeationJump] = useState<{
+    project: ProjectEntry;
+    tab?: ProjectTab;
+  } | null>(null);
   const bridgeRef = useRef<EditorBridge | null>(null);
 
   const registerBridge = useCallback((bridge: EditorBridge | null) => {
@@ -51,6 +65,14 @@ function App() {
     setOpenBook(book);
     setLibTab("书库");
   }, []);
+
+  /** 从灵感库跳构思项目（故事卡转生的去向）：切到构思板块并打开该项目。 */
+  const openProjectFromInspiration = useCallback((project: ProjectEntry, tab?: ProjectTab) => {
+    setSection("构思");
+    setIdeationJump({ project, tab });
+  }, []);
+
+  const consumeIdeationJump = useCallback(() => setIdeationJump(null), []);
 
   /** 编辑器三命令：种子进 AI 面板并展开。 */
   const handleAiCommand = useCallback((seed: AiSeed) => {
@@ -132,11 +154,18 @@ function App() {
               libraryPath={libraryPath}
               onChooseFolder={chooseLibraryFolder}
               onOpenBook={openBookFromInspiration}
+              onOpenProject={openProjectFromInspiration}
+              onGoIdeation={() => setSection("构思")}
             />
           </div>
         </div>
         <div className={`section-wrap ${section === "构思" ? "" : "hidden"}`}>
-          <Ideation libraryPath={libraryPath} onChooseFolder={chooseLibraryFolder} />
+          <Ideation
+            libraryPath={libraryPath}
+            onChooseFolder={chooseLibraryFolder}
+            jump={ideationJump}
+            onJumpConsumed={consumeIdeationJump}
+          />
         </div>
         <div className={`section-wrap ${section === "书写" ? "" : "hidden"}`}>
           <Writing />

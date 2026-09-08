@@ -174,7 +174,7 @@ pub fn scan_inspirations(root: &Path) -> Result<Vec<InspirationCard>, String> {
     let mut paths: Vec<PathBuf> = Vec::new();
     collect_card_paths(&dir, &mut paths);
     paths.sort();
-    Ok(paths.iter().map(|p| parse_card(p)).collect())
+    Ok(paths.iter().map(|p| read_card(p)).collect())
 }
 
 /// 收集「灵感库/」下的卡片：类别子目录一层＋库根散文件
@@ -204,7 +204,8 @@ fn collect_card_paths(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn parse_card(path: &Path) -> InspirationCard {
+/// 按路径读一张卡片（类别取自父目录名）；扫描、保存、跨板块转生共用。
+pub fn read_card(path: &Path) -> InspirationCard {
     let category = path
         .parent()
         .and_then(|p| p.file_name())
@@ -302,11 +303,36 @@ pub fn save_card(
         }
     }
     write_frontmatter(&path, map, &draft.body)?;
-    Ok(parse_card(&path))
+    Ok(read_card(&path))
 }
 
 pub fn delete_card(path: &Path) -> Result<(), String> {
     fs::remove_file(path).map_err(|e| format!("无法删除卡片 {}：{e}", path.display()))
+}
+
+/// 在卡片「关联」里追加一条去向（trim 后同值不重复），返回更新后的卡片。
+/// 单向记账：只改卡片侧，不反向写任何硬引用（#4 纪律）。
+pub fn append_link(
+    root: &Path,
+    card: &InspirationCard,
+    link: &str,
+) -> Result<InspirationCard, String> {
+    let link = link.trim();
+    if card.links.iter().any(|l| l.trim() == link) {
+        return Ok(card.clone());
+    }
+    let mut links = card.links.clone();
+    links.push(link.to_string());
+    let draft = CardDraft {
+        category: card.category,
+        title: card.title.clone(),
+        tags: card.tags.clone(),
+        source: card.source.clone(),
+        links,
+        core: card.core.clone(),
+        body: card.body.clone(),
+    };
+    save_card(root, &draft, Some(&card.path))
 }
 
 /// 确认导入：预览条目逐张落盘（标题冲突自动续号），返回新卡路径。
@@ -333,7 +359,7 @@ pub fn confirm_import(
 }
 
 /// 卡片标题的文件名净化；错误文案说「标题」而不是泛泛的「名称」。
-fn sanitize_title(title: &str) -> Result<String, String> {
+pub(crate) fn sanitize_title(title: &str) -> Result<String, String> {
     sanitize_file_name(title).map_err(|_| "卡片标题不能为空（或只剩符号）".to_string())
 }
 

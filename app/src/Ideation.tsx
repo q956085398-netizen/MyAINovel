@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ProjectEntry } from "./types";
 import { errMsg, formatCount } from "./util";
-import ProjectPage from "./ProjectPage";
+import ProjectPage, { type ProjectTab } from "./ProjectPage";
 
 function summary(p: ProjectEntry): string {
   const parts = [
@@ -20,15 +20,26 @@ function summary(p: ProjectEntry): string {
 interface IdeationProps {
   libraryPath: string | null;
   onChooseFolder: () => void;
+  /** 从灵感库跳来：打开该项目（可落到某个页签），打开后清空。
+   *  带的是跳转方刚扫到的项目快照，不受本板块列表新鲜度影响。 */
+  jump: { project: ProjectEntry; tab?: ProjectTab } | null;
+  onJumpConsumed: () => void;
 }
 
 /** 构思板块：库根「项目/」下一书一文件夹（工单 #4）。
  *  拆书与构思互不相认，只经「词表.yaml ＋ 灵感库」通行。 */
-export default function Ideation({ libraryPath, onChooseFolder }: IdeationProps) {
+export default function Ideation({
+  libraryPath,
+  onChooseFolder,
+  jump,
+  onJumpConsumed,
+}: IdeationProps) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<ProjectEntry | null>(null);
+  const [open, setOpen] = useState<{ project: ProjectEntry; tab?: ProjectTab; seq: number } | null>(
+    null,
+  );
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -40,7 +51,11 @@ export default function Ideation({ libraryPath, onChooseFolder }: IdeationProps)
       const list = await invoke<ProjectEntry[]>("scan_projects", { root });
       setProjects(list);
       // 打开着的项目也换成最新快照，页内计数（导航徽标）跟着刷新。
-      setOpen((cur) => (cur ? list.find((p) => p.dir === cur.dir) ?? cur : cur));
+      setOpen((cur) => {
+        if (!cur) return cur;
+        const fresh = list.find((p) => p.dir === cur.project.dir);
+        return fresh ? { ...cur, project: fresh } : cur;
+      });
     } catch (e) {
       setProjects([]);
       setError(`扫描失败：${errMsg(e)}`);
@@ -52,6 +67,14 @@ export default function Ideation({ libraryPath, onChooseFolder }: IdeationProps)
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);
   }, [libraryPath, scan]);
+
+  // 跨板块跳转：直接开跳转方带来的项目快照，不等本板块自己的列表。
+  // seq 递增让「再次跳到同一个项目」也重挂载——页签只在新挂载时生效。
+  useEffect(() => {
+    if (!jump) return;
+    setOpen((cur) => ({ project: jump.project, tab: jump.tab, seq: (cur?.seq ?? 0) + 1 }));
+    onJumpConsumed();
+  }, [jump, onJumpConsumed]);
 
   async function create() {
     if (!libraryPath || busy) return;
@@ -66,7 +89,7 @@ export default function Ideation({ libraryPath, onChooseFolder }: IdeationProps)
       setCreating(false);
       setNewTitle("");
       await scan(libraryPath);
-      setOpen(project);
+      setOpen({ project, seq: 0 });
     } catch (e) {
       window.alert(`新建项目失败：${errMsg(e)}`);
     } finally {
@@ -77,9 +100,10 @@ export default function Ideation({ libraryPath, onChooseFolder }: IdeationProps)
   if (open) {
     return (
       <ProjectPage
-        key={open.dir}
-        project={open}
+        key={`${open.project.dir}#${open.seq}`}
+        project={open.project}
         libraryPath={libraryPath}
+        initialTab={open.tab}
         onBack={() => {
           setOpen(null);
           if (libraryPath) void scan(libraryPath);
@@ -158,7 +182,11 @@ export default function Ideation({ libraryPath, onChooseFolder }: IdeationProps)
             {projects.map((p) => (
               <div key={p.dir} className="card-item">
                 <div className="card-title-row">
-                  <button className="card-title" title="打开项目" onClick={() => setOpen(p)}>
+                  <button
+                    className="card-title"
+                    title="打开项目"
+                    onClick={() => setOpen({ project: p, seq: 0 })}
+                  >
                     {p.title}
                   </button>
                   {p.name !== p.title && p.name !== `《${p.title}》` && (
