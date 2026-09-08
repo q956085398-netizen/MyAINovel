@@ -182,6 +182,16 @@ mod tests {
     }
 
     #[test]
+    fn 项目目录_不参与全文搜索() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("书.md"), "正文一行");
+        write(&root.join("项目/《我的书》/正文/0001 章.md"), "目标词在正文里");
+        write(&root.join("项目/随手记.md"), "目标词也在项目散文件里");
+
+        assert!(search_library(&root, "目标词").unwrap().is_empty());
+    }
+
+    #[test]
     fn 大小写不敏感() {
         let root = TempDir::new().unwrap().path().to_path_buf();
         write(&root.join("书.md"), "Golden Finger 出现");

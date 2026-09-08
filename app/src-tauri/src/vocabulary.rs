@@ -236,6 +236,23 @@ mod tests {
     }
 
     #[test]
+    fn 项目目录_不参与聚合() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("词表.yaml"), "类型: []\n");
+        write(&root.join("书甲.md"), "第1章");
+        // 项目/ 根下摆一份带桥段 yaml 的 .md：没有跳过规则时它会被当成
+        // 一本叫「项目」的书、其桥段类型就会进提示（本测试的牙）。
+        write(&root.join("项目/随手记.md"), "构思杂记");
+        write(
+            &root.join("项目/随手记.yaml"),
+            "桥段:\n- 起: 1\n  止: 2\n  类型: [不该被聚合]\n",
+        );
+
+        let vocab = load_vocab(&root).unwrap();
+        assert!(vocab.types.is_empty());
+    }
+
+    #[test]
     fn 损坏词表_报错且不覆盖() {
         let root = TempDir::new().unwrap().path().to_path_buf();
         write(&root.join("词表.yaml"), "{{{{不是 yaml");

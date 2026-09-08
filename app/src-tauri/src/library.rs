@@ -10,6 +10,11 @@ use crate::book_file::{meta_from_mapping, read_yaml_mapping, sibling_yaml_path, 
 use crate::inspiration::LIBRARY_DIR;
 use crate::trope::{tropes_from_mapping, TropeSpan};
 
+/// 构思项目在库根下的目录名；书库扫描、全文搜索、词表聚合（共用本模块的
+/// 书文件收集）跳过该目录——拆书与构思只经「词表.yaml ＋ 灵感库」通行，
+/// 见 docs/spec/构思数据模型.md。
+pub const PROJECTS_DIR: &str = "项目";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Layout {
@@ -77,8 +82,12 @@ pub(crate) fn collect_book_files(root: &Path) -> Result<Vec<BookFiles>, String> 
         }
     }
     for dir in subdirs {
-        // 「灵感库/」是卡片目录不是一本书，书库扫描与全文搜索都跳过。
-        if dir.file_name().and_then(|n| n.to_str()) == Some(LIBRARY_DIR) {
+        // 「灵感库/」是卡片目录、「项目/」是构思工程，都不是一本书。
+        if dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n == LIBRARY_DIR || n == PROJECTS_DIR)
+        {
             continue;
         }
         if let Some(files) = folder_book_files(&dir) {
@@ -324,6 +333,20 @@ mod tests {
             "---\n标签: [故事]\n---\n\n正文",
         );
         write(&root.join("灵感库/未分类/随手记.md"), "一条点子");
+
+        let books = scan_library(&root).unwrap();
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].name, "书甲");
+    }
+
+    #[test]
+    fn 项目目录_不算书() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("书甲.md"), "第1章");
+        write(&root.join("项目/《我的书》/项目.yaml"), "书名: 我的书\n");
+        write(&root.join("项目/《我的书》/正文/0001 初入江湖.md"), "第1章 初入江湖");
+        // 项目/ 根下的散 .md 也不该被当成一本叫「项目」的书。
+        write(&root.join("项目/随手记.md"), "不属于拆书");
 
         let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 1);
