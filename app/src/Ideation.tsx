@@ -24,6 +24,8 @@ interface IdeationProps {
    *  带的是跳转方刚扫到的项目快照，不受本板块列表新鲜度影响。 */
   jump: { project: ProjectEntry; tab?: ProjectTab } | null;
   onJumpConsumed: () => void;
+  /** 伏笔看板点章：跳到书写板块打开该章。 */
+  onOpenChapter: (projectDir: string, ordinal: number, quote: string) => void;
 }
 
 /** 构思板块：库根「项目/」下一书一文件夹（工单 #4）。
@@ -33,6 +35,7 @@ export default function Ideation({
   onChooseFolder,
   jump,
   onJumpConsumed,
+  onOpenChapter,
 }: IdeationProps) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -104,6 +107,7 @@ export default function Ideation({
         project={open.project}
         libraryPath={libraryPath}
         initialTab={open.tab}
+        onOpenChapter={onOpenChapter}
         onBack={() => {
           setOpen(null);
           if (libraryPath) void scan(libraryPath);

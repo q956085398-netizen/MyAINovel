@@ -1701,3 +1701,157 @@ body {
 .range-sep {
   color: var(--ink-soft);
 }
+
+/* --- 伏笔（工单 #6，docs/spec/伏笔系统.md） --- */
+
+.foreshadow-group {
+  margin-top: 18px;
+}
+
+.foreshadow-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.foreshadow-group-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.foreshadow-group-head .hint {
+  margin: 0;
+  font-weight: 400;
+}
+
+.foreshadow-anchor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.foreshadow-quote {
+  color: var(--ink-soft);
+}
+
+.foreshadow-quote.block {
+  margin: 6px 0 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--line);
+  background: #faf7f0;
+  border-radius: 0 6px 6px 0;
+}
+
+.foreshadow-note {
+  color: var(--accent);
+}
+
+.link-btn {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-btn:hover {
+  color: var(--ink);
+}
+
+.card-title.static {
+  cursor: default;
+}
+
+.card-title.static:hover {
+  color: var(--ink);
+}
+
+.card-cat.danger {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.select.small {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(43, 42, 38, 0.16);
+}
+
+.context-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cm-foreshadow-planted {
+  text-decoration: underline dashed var(--accent);
+  text-underline-offset: 3px;
+}
+
+.cm-foreshadow-recovered {
+  text-decoration: underline solid var(--accent);
+  text-underline-offset: 3px;
+}
+
+.foreshadow-side-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.foreshadow-side-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}

@@ -14,6 +14,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ChapterEntry,
+  Foreshadow,
   MdContent,
   ProjectEntry,
   ProjectMeta,
@@ -32,6 +33,8 @@ import {
   todayKey,
   upsertFrontmatterStatus,
 } from "./chapterFile";
+import { findQuote } from "./foreshadowAnchor";
+import { ForeshadowCollectDialog, ForeshadowNameDialog } from "./ForeshadowDialog";
 import { baseEditorTheme } from "./editorTheme";
 
 /** 自动保存防抖：停笔约 3 秒落盘（用户拍板「自动保存为主」）。 */
@@ -43,6 +46,48 @@ const editorTheme = baseEditorTheme({ fontSize: "17px", paddingBottom: "40vh" })
 
 const typewriterCompartment = new Compartment();
 const dimCompartment = new Compartment();
+const foreshadowCompartment = new Compartment();
+
+/** 伏笔引文装饰（工单 #6）：正文零污染——装饰只画在编辑器里，
+ *  引文匹配走 findQuote（与 Rust 同一规则）；失配的引文不装饰。 */
+interface ForeshadowMark {
+  name: string;
+  state: string;
+  quote: string;
+  /** 回收记录＝实线，埋设＝虚线。 */
+  recovered: boolean;
+}
+
+function foreshadowExtension(marks: ForeshadowMark[]): Extension {
+  const build = (view: EditorView): DecorationSet => {
+    if (marks.length === 0) return Decoration.none;
+    const text = view.state.doc.toString();
+    const ranges: Range<Decoration>[] = [];
+    for (const m of marks) {
+      const hit = findQuote(text, m.quote);
+      if (!hit) continue;
+      ranges.push(
+        Decoration.mark({
+          class: m.recovered ? "cm-foreshadow-recovered" : "cm-foreshadow-planted",
+          attributes: { title: `伏笔：${m.name} · ${m.state}` },
+        }).range(hit.from, hit.to),
+      );
+    }
+    return Decoration.set(ranges, true);
+  };
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = build(view);
+      }
+      update(u: ViewUpdate) {
+        if (u.docChanged) this.decorations = build(u.view);
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
+}
 
 /** 打字机滚动：选区变化后把光标行滚到视口中央。 */
 function typewriterExtension(): Extension {
@@ -111,6 +156,8 @@ interface WritingPageProps {
   project: ProjectEntry;
   /** 书写板块当前是否在前台：切走时立即保存（板块常驻挂载，不卸载）。 */
   active: boolean;
+  /** 从伏笔看板跳来：打开该章并选中引文（仅挂载时生效）。 */
+  locate?: { ordinal: number; quote: string } | null;
   onBack: () => void;
   /** 正文有变化：让上层刷新项目列表的计数。 */
   onChanged: () => void;
@@ -118,7 +165,13 @@ interface WritingPageProps {
 
 /** 写作页（工单 #5，docs/spec/书写编辑器.md）：章节列表＋单章编辑器＋
  *  状态栏＋联动侧栏。自动保存穿指纹闸（ADR 0004），写盘前留历史版本。 */
-export default function WritingPage({ project, active, onBack, onChanged }: WritingPageProps) {
+export default function WritingPage({
+  project,
+  active,
+  locate,
+  onBack,
+  onChanged,
+}: WritingPageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const extensionsRef = useRef<Extension[] | null>(null);
@@ -131,6 +184,7 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
   const autosaveRef = useRef<number | null>(null);
   const countsTimerRef = useRef<number | null>(null);
   const statsRef = useRef<WritingStats>(emptyWritingStats());
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -153,6 +207,14 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
     selected: string | null;
     preview: string;
   }>(null);
+  // 伏笔（工单 #6）：项目全量列表＋当前正文（侧栏判「引文失配」用）。
+  const foreshadowsRef = useRef<Foreshadow[]>([]);
+  const [foreshadows, setForeshadows] = useState<Foreshadow[]>([]);
+  const [docText, setDocText] = useState("");
+  const [menu, setMenu] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [annotate, setAnnotate] = useState<{ quote: string } | null>(null);
+  const [collect, setCollect] = useState<{ quote: string } | null>(null);
+  const [foreshadowBusy, setForeshadowBusy] = useState(false);
 
   // ---------- 编辑器装配 ----------
 
@@ -161,6 +223,8 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
     const s = chapterStats(content);
     setCounts((c) => ({ ...c, billed: s.wordCount, han: s.hanCount }));
     setStatus(readChapterStatus(content));
+    // 侧栏的「引文失配」跟着正文走（与装饰同一套 findQuote）。
+    setDocText(content);
   }
 
   function refreshSelection(view: EditorView) {
@@ -216,6 +280,7 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
       highlightActiveLine(),
       typewriterCompartment.of(prefs.typewriter ? typewriterExtension() : []),
       dimCompartment.of(prefs.dimming ? dimmingExtension() : []),
+      foreshadowCompartment.of([]),
       EditorView.updateListener.of((u) => {
         if (u.docChanged) {
           dirtyRef.current = true;
@@ -249,7 +314,7 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
           },
         ]),
       ),
-      EditorView.domEventHandlers({ paste: handlePaste }),
+      EditorView.domEventHandlers({ paste: handlePaste, contextmenu: handleContextMenu }),
     ];
   }
 
@@ -277,8 +342,10 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
     baselineRef.current = s.wordCount;
     setCounts({ billed: s.wordCount, han: s.hanCount, sel: 0 });
     setStatus(readChapterStatus(content));
+    setDocText(content);
     dirtyRef.current = false;
     setDirty(false);
+    applyForeshadowMarks();
   }
 
   // ---------- 读写 ----------
@@ -304,6 +371,133 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
     } catch {
       setUnit(null);
     }
+  }
+
+  // ---------- 伏笔（工单 #6，docs/spec/伏笔系统.md） ----------
+
+  async function loadForeshadows(): Promise<Foreshadow[]> {
+    try {
+      const list = await invoke<Foreshadow[]>("read_foreshadows", { project: project.dir });
+      foreshadowsRef.current = list;
+      setForeshadows(list);
+      return list;
+    } catch (e) {
+      // 伏笔.yaml 损坏：显式提示，但不挡写作（伏笔只是旁路数据）。
+      foreshadowsRef.current = [];
+      setForeshadows([]);
+      window.alert(`读取伏笔失败：${errMsg(e)}`);
+      return [];
+    }
+  }
+
+  /** 当前章的全部锚点（埋设＋回收），供装饰与侧栏共用。 */
+  function chapterMarks(): ForeshadowMark[] {
+    const ordinal = currentRef.current?.ordinal;
+    if (ordinal === null || ordinal === undefined) return [];
+    const marks: ForeshadowMark[] = [];
+    for (const f of foreshadowsRef.current) {
+      for (const a of f.planted) {
+        if (a.chapter === ordinal) {
+          marks.push({ name: f.name, state: f.state, quote: a.quote, recovered: false });
+        }
+      }
+      for (const r of f.recovered) {
+        if (r.chapter === ordinal) {
+          marks.push({ name: f.name, state: f.state, quote: r.quote, recovered: true });
+        }
+      }
+    }
+    return marks;
+  }
+
+  /** 重建正文装饰（切章、伏笔增删、恢复历史版本后都要来一发）。 */
+  function applyForeshadowMarks() {
+    viewRef.current?.dispatch({
+      effects: foreshadowCompartment.reconfigure(foreshadowExtension(chapterMarks())),
+    });
+  }
+
+  /** 在正文里选中引文并滚到中间；找不到返回 false（失配）。 */
+  function locateQuote(quote: string): boolean {
+    const view = viewRef.current;
+    if (!view) return false;
+    const hit = findQuote(view.state.doc.toString(), quote);
+    if (!hit) return false;
+    view.dispatch({
+      selection: { anchor: hit.from, head: hit.to },
+      effects: EditorView.scrollIntoView(hit.from, { y: "center" }),
+    });
+    view.focus();
+    return true;
+  }
+
+  /** 当前章的章序；未编号（文件名没有数字前缀）时提示并返回 null——
+   *  伏笔锚点以章序数落盘，未编号章没法标。 */
+  function requireOrdinal(): number | null {
+    const ordinal = currentRef.current?.ordinal;
+    if (ordinal === null || ordinal === undefined) {
+      window.alert("这一章的文件名没有章号，先给它编号（重编号）再标伏笔。");
+      return null;
+    }
+    return ordinal;
+  }
+
+  async function annotateForeshadow(name: string) {
+    const ordinal = requireOrdinal();
+    const view = viewRef.current;
+    if (ordinal === null || !view || !annotate) return;
+    setForeshadowBusy(true);
+    try {
+      const list = await invoke<Foreshadow[]>("annotate_foreshadow", {
+        project: project.dir,
+        name,
+        chapter: ordinal,
+        quote: annotate.quote,
+      });
+      foreshadowsRef.current = list;
+      setForeshadows(list);
+      setAnnotate(null);
+      applyForeshadowMarks();
+    } catch (e) {
+      window.alert(`设为伏笔失败：${errMsg(e)}`);
+    } finally {
+      setForeshadowBusy(false);
+    }
+  }
+
+  async function recoverForeshadow(name: string, kind: string, note: string) {
+    const ordinal = requireOrdinal();
+    if (ordinal === null || !collect) return;
+    setForeshadowBusy(true);
+    try {
+      const list = await invoke<Foreshadow[]>("recover_foreshadow", {
+        project: project.dir,
+        name,
+        chapter: ordinal,
+        quote: collect.quote,
+        kind,
+        note: note.trim() || null,
+      });
+      foreshadowsRef.current = list;
+      setForeshadows(list);
+      setCollect(null);
+      applyForeshadowMarks();
+    } catch (e) {
+      window.alert(`回收伏笔失败：${errMsg(e)}`);
+    } finally {
+      setForeshadowBusy(false);
+    }
+  }
+
+  /** 右键菜单：有选区才出（设为伏笔／回收伏笔），不抢编辑器默认菜单。 */
+  function handleContextMenu(event: MouseEvent, view: EditorView): boolean {
+    const sel = view.state.selection.main;
+    if (sel.empty) return false;
+    const text = view.state.doc.sliceString(sel.from, sel.to).trim();
+    if (!text) return false;
+    event.preventDefault();
+    setMenu({ x: event.clientX, y: event.clientY, text });
+    return true;
   }
 
   async function openChapter(entry: ChapterEntry): Promise<boolean> {
@@ -627,6 +821,7 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
       } catch {
         // 统计读不了：从零起算。
       }
+      await loadForeshadows();
       let list: ChapterEntry[] = [];
       try {
         list = await rescan();
@@ -638,8 +833,13 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
       const remembered = localStorage.getItem(chapterKey(project.dir));
       const numbered = list.filter((c) => c.ordinal !== null);
       const pick =
-        list.find((c) => c.path === remembered) ?? numbered[numbered.length - 1] ?? list[0];
+        (locate ? list.find((c) => c.ordinal === locate.ordinal) : undefined) ??
+        list.find((c) => c.path === remembered) ??
+        numbered[numbered.length - 1] ??
+        list[0];
       if (pick) await openChapter(pick);
+      // 从伏笔看板跳来：载入后选中引文（找不到就停在文末，失配在看板里已标）。
+      if (locate?.quote) locateQuote(locate.quote);
       if (!cancelled) setReady(true);
     })();
     return () => {
@@ -663,12 +863,42 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
     return () => window.removeEventListener("keydown", onKey);
   }, [immersive]);
 
-  // 切出书写板块：立即落盘；切回来：焦点还给编辑器（板块常驻挂载，不卸载）。
+  // 切出书写板块：立即落盘；切回来：焦点还给编辑器（板块常驻挂载，不卸载），
+  // 并重读伏笔（构思侧看板可能刚改过状态/删过条目）。
   useEffect(() => {
-    if (active) viewRef.current?.focus();
-    else if (dirtyRef.current) void saveNow(false);
+    if (active) {
+      viewRef.current?.focus();
+      void loadForeshadows().then(applyForeshadowMarks);
+    } else if (dirtyRef.current) {
+      void saveNow(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
+
+  // 右键菜单：点别处或 Esc 关掉（菜单内的 mousedown 不算「别处」）。
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  const chapterOrdinal = current?.ordinal ?? null;
+  const chapterPlanted = foreshadows.flatMap((f) =>
+    f.planted.filter((a) => a.chapter === chapterOrdinal).map((a) => ({ f, a })),
+  );
+  const chapterRecovered = foreshadows.flatMap((f) =>
+    f.recovered.filter((r) => r.chapter === chapterOrdinal).map((r) => ({ f, r })),
+  );
 
   const totalWords = chapters.reduce(
     (sum, c) => sum + (current && c.path === current.path ? counts.billed : c.wordCount),
@@ -837,6 +1067,46 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
                   : "本章还没归入单元。到「构思 → 单元」里给单元填上起章/止章，这里就会显示它所在的位置。"}
               </p>
             )}
+
+            {(chapterPlanted.length > 0 || chapterRecovered.length > 0) && (
+              <>
+                <h2 className="sidebar-title">本章伏笔</h2>
+                <ul className="foreshadow-side-list">
+                  {chapterPlanted.map(({ f, a }, i) => (
+                    <li key={`p${i}`}>
+                      <button
+                        className="link-btn"
+                        title="选中正文里的引文"
+                        onClick={() => locateQuote(a.quote)}
+                      >
+                        {f.name}
+                      </button>
+                      <span className="card-cat">{f.state}</span>
+                      {a.quote && <span className="foreshadow-quote">「{a.quote}」</span>}
+                      {findQuote(docText, a.quote) === null && (
+                        <span className="card-cat danger">引文失配</span>
+                      )}
+                    </li>
+                  ))}
+                  {chapterRecovered.map(({ f, r }, i) => (
+                    <li key={`r${i}`}>
+                      <button
+                        className="link-btn"
+                        title="选中正文里的引文"
+                        onClick={() => locateQuote(r.quote)}
+                      >
+                        {f.name}
+                      </button>
+                      <span className="card-cat">回收 · {r.kind}</span>
+                      {r.quote && <span className="foreshadow-quote">「{r.quote}」</span>}
+                      {findQuote(docText, r.quote) === null && (
+                        <span className="card-cat danger">引文失配</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </aside>
         )}
       </div>
@@ -979,6 +1249,57 @@ export default function WritingPage({ project, active, onBack, onChanged }: Writ
             </div>
           </div>
         </div>
+      )}
+
+      {menu && (
+        <div
+          ref={menuRef}
+          className="context-menu"
+          style={{ left: menu.x, top: menu.y }}
+        >
+          <button
+            className="context-item"
+            onClick={() => {
+              setMenu(null);
+              if (requireOrdinal() === null) return;
+              setAnnotate({ quote: menu.text });
+            }}
+          >
+            设为伏笔
+          </button>
+          <button
+            className="context-item"
+            onClick={() => {
+              setMenu(null);
+              if (requireOrdinal() === null) return;
+              setCollect({ quote: menu.text });
+            }}
+          >
+            回收伏笔
+          </button>
+        </div>
+      )}
+
+      {annotate && (
+        <ForeshadowNameDialog
+          title="设为伏笔"
+          label="伏笔名"
+          hint="选中这段文字会成为这条伏笔的锚点；同名伏笔会自动追加一条埋设，不新建。"
+          initial={annotate.quote.slice(0, 12)}
+          busy={foreshadowBusy}
+          onCancel={() => setAnnotate(null)}
+          onSubmit={(name) => void annotateForeshadow(name)}
+        />
+      )}
+
+      {collect && (
+        <ForeshadowCollectDialog
+          quote={collect.quote}
+          foreshadows={foreshadows}
+          busy={foreshadowBusy}
+          onCancel={() => setCollect(null)}
+          onSubmit={(name, kind, note) => void recoverForeshadow(name, kind, note)}
+        />
       )}
     </div>
   );

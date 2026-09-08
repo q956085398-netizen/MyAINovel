@@ -42,6 +42,12 @@ function App() {
     project: ProjectEntry;
     tab?: ProjectTab;
   } | null>(null);
+  // 构思（伏笔看板）→ 书写的跳转请求：打开该项目的这一章并选中引文。
+  const [writingJump, setWritingJump] = useState<{
+    projectDir: string;
+    ordinal: number;
+    quote: string;
+  } | null>(null);
   const bridgeRef = useRef<EditorBridge | null>(null);
 
   const registerBridge = useCallback((bridge: EditorBridge | null) => {
@@ -73,6 +79,17 @@ function App() {
   }, []);
 
   const consumeIdeationJump = useCallback(() => setIdeationJump(null), []);
+
+  /** 伏笔看板点章：切到书写板块，打开该章并选中引文。 */
+  const openChapterFromIdeation = useCallback(
+    (projectDir: string, ordinal: number, quote: string) => {
+      setSection("书写");
+      setWritingJump({ projectDir, ordinal, quote });
+    },
+    [],
+  );
+
+  const consumeWritingJump = useCallback(() => setWritingJump(null), []);
 
   /** 编辑器三命令：种子进 AI 面板并展开。 */
   const handleAiCommand = useCallback((seed: AiSeed) => {
@@ -165,6 +182,7 @@ function App() {
             onChooseFolder={chooseLibraryFolder}
             jump={ideationJump}
             onJumpConsumed={consumeIdeationJump}
+            onOpenChapter={openChapterFromIdeation}
           />
         </div>
         <div className={`section-wrap ${section === "书写" ? "" : "hidden"}`}>
@@ -172,6 +190,8 @@ function App() {
             libraryPath={libraryPath}
             active={section === "书写"}
             onChooseFolder={chooseLibraryFolder}
+            jump={writingJump}
+            onJumpConsumed={consumeWritingJump}
           />
         </div>
       </main>

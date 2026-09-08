@@ -1,6 +1,7 @@
 mod ai;
 mod book_file;
 mod chapter;
+mod foreshadow;
 mod inspiration;
 mod library;
 mod project;
@@ -13,6 +14,7 @@ use std::path::{Path, PathBuf};
 use ai::{AiConfig, AiState, ChatSession, ChatSessionSummary, ChatStreamEvent, ChatStreamReq};
 use book_file::{BookMeta, ChapterAnchor, MdContent, SaveResult};
 use chapter::{ChapterEntry, SnapshotEntry, UnitBrief, WritingStats};
+use foreshadow::{Foreshadow, ForeshadowView};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
 use project::{
@@ -309,6 +311,67 @@ fn find_unit_for_chapter(project: String, ordinal: u32) -> Result<Option<UnitBri
     chapter::find_unit_for_chapter(Path::new(&project), ordinal)
 }
 
+// --- 伏笔系统（工单 #6，docs/spec/伏笔系统.md）：项目根 伏笔.yaml ---
+
+#[tauri::command]
+fn read_foreshadows(project: String) -> Result<Vec<Foreshadow>, String> {
+    foreshadow::read_foreshadows(Path::new(&project))
+}
+
+/// 看板：伏笔 ＋ 现扫正文算出的未收章数/超期/引文失配（无索引，ADR 0002）。
+#[tauri::command]
+fn foreshadow_board(project: String) -> Result<Vec<ForeshadowView>, String> {
+    foreshadow::foreshadow_board(Path::new(&project))
+}
+
+#[tauri::command]
+fn add_foreshadow(project: String, name: String) -> Result<Vec<Foreshadow>, String> {
+    foreshadow::add_pending_foreshadow(Path::new(&project), &name)
+}
+
+#[tauri::command]
+fn annotate_foreshadow(
+    project: String,
+    name: String,
+    chapter: u32,
+    quote: String,
+) -> Result<Vec<Foreshadow>, String> {
+    foreshadow::annotate_foreshadow(Path::new(&project), &name, chapter, &quote)
+}
+
+#[tauri::command]
+fn recover_foreshadow(
+    project: String,
+    name: String,
+    chapter: u32,
+    quote: String,
+    kind: String,
+    note: Option<String>,
+) -> Result<Vec<Foreshadow>, String> {
+    foreshadow::recover_foreshadow(
+        Path::new(&project),
+        &name,
+        chapter,
+        &quote,
+        &kind,
+        note.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn set_foreshadow_state(
+    project: String,
+    name: String,
+    state: String,
+) -> Result<Vec<Foreshadow>, String> {
+    foreshadow::set_foreshadow_state(Path::new(&project), &name, &state)
+}
+
+#[tauri::command]
+fn delete_foreshadow(project: String, name: String) -> Result<Vec<Foreshadow>, String> {
+    foreshadow::delete_foreshadow(Path::new(&project), &name)
+}
+
 fn writing_stats_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     let dir = app
@@ -427,6 +490,13 @@ pub fn run() {
             read_chapter_snapshot,
             save_chapter_paste_image,
             find_unit_for_chapter,
+            read_foreshadows,
+            foreshadow_board,
+            add_foreshadow,
+            annotate_foreshadow,
+            recover_foreshadow,
+            set_foreshadow_state,
+            delete_foreshadow,
             load_writing_stats,
             save_writing_stats,
             load_ai_config,

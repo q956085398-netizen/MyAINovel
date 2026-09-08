@@ -12,10 +12,11 @@ import { emptyProjectMeta } from "./types";
 import { errMsg, formatCount } from "./util";
 import ArrangementView from "./ArrangementView";
 import CircleView from "./CircleView";
+import ForeshadowBoard from "./ForeshadowBoard";
 import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
 
-const TABS = ["类型圈", "矛盾", "单元", "排布", "人物", "世界观", "开头"] as const;
+const TABS = ["类型圈", "矛盾", "单元", "伏笔", "排布", "人物", "世界观", "开头"] as const;
 /** 项目页签；跨板块跳转（灵感库关联 → 项目）也用它指路。 */
 export type ProjectTab = (typeof TABS)[number];
 type Tab = ProjectTab;
@@ -34,9 +35,11 @@ interface ProjectPageProps {
   onBack: () => void;
   /** 项目内容变了：让上层刷新项目列表的计数。 */
   onChanged: () => void;
+  /** 伏笔看板点章：跳到书写板块打开该章。 */
+  onOpenChapter: (projectDir: string, ordinal: number, quote: string) => void;
 }
 
-/** 构思项目页（工单 #4 的文件布局）：类型圈 / 矛盾池 / 单元 / 排布 /
+/** 构思项目页（工单 #4 的文件布局）：类型圈 / 矛盾池 / 单元 / 伏笔 / 排布 /
  *  人物 / 世界观 / 开头。正文由「书写」板块承接（工单 #5）。 */
 export default function ProjectPage({
   project,
@@ -44,6 +47,7 @@ export default function ProjectPage({
   initialTab,
   onBack,
   onChanged,
+  onOpenChapter,
 }: ProjectPageProps) {
   const [tab, setTab] = useState<Tab>(initialTab ?? "类型圈");
   const [meta, setMeta] = useState<ProjectMeta>(emptyProjectMeta());
@@ -169,6 +173,9 @@ export default function ProjectPage({
               {t === "单元" && project.unitCount > 0 && (
                 <span className="nav-badge">{project.unitCount}</span>
               )}
+              {t === "伏笔" && project.foreshadowCount > 0 && (
+                <span className="nav-badge">{project.foreshadowCount}</span>
+              )}
               {t === "人物" && project.characterCount > 0 && (
                 <span className="nav-badge">{project.characterCount}</span>
               )}
@@ -183,7 +190,7 @@ export default function ProjectPage({
           <div className="project-nav-foot">
             正文 {formatCount(project.chapterCount)} 章 · {formatCount(project.wordCount)} 字
             <br />
-            书写编辑器由工单 #5 定稿后落地
+            正文在「书写」板块编辑（一章一文件）
           </div>
         </nav>
 
@@ -196,6 +203,14 @@ export default function ProjectPage({
               vocab={vocab}
               onChanged={refreshAll}
               onPromoted={() => setTab("单元")}
+            />
+          )}
+          {tab === "伏笔" && (
+            <ForeshadowBoard
+              project={project.dir}
+              chapterPrefix={meta.chapterPrefix}
+              onChanged={refreshAll}
+              onOpenChapter={(ordinal, quote) => onOpenChapter(project.dir, ordinal, quote)}
             />
           )}
           {tab === "排布" &&

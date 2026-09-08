@@ -80,6 +80,8 @@ export interface ProjectEntry {
   characterCount: number;
   worldviewCount: number;
   openingCount: number;
+  /** 伏笔条数（伏笔.yaml）。 */
+  foreshadowCount: number;
 }
 
 /** 与 Rust 侧 project::PlotLine 对应（yaml 落盘键为「名/色」）。 */
@@ -251,6 +253,53 @@ export function emptyWritingStats(): WritingStats {
 export const CHAPTER_STATUS_VALUES = ["草稿", "完稿"];
 export const STATUS_DRAFT = "草稿";
 export const STATUS_DONE = "完稿";
+
+// --- 伏笔系统（工单 #6，docs/spec/伏笔系统.md）；与 Rust 侧 foreshadow.rs 对应 ---
+
+/** 埋设锚点：章序数（第几个章标题，1 起）＋选中引文（正文零污染）。 */
+export interface ForeshadowAnchor {
+  chapter: number;
+  quote: string;
+}
+
+/** 回收记录：类型＝阶段｜终结。 */
+export interface ForeshadowRecovery {
+  chapter: number;
+  quote: string;
+  kind: string;
+  note: string | null;
+}
+
+/** 伏笔条目（项目根 伏笔.yaml，应用受管、整表重写）。 */
+export interface Foreshadow {
+  name: string;
+  /** 待埋｜已埋｜部分收｜已收｜弃用（约定值只提示不校验）。 */
+  state: string;
+  planted: ForeshadowAnchor[];
+  recovered: ForeshadowRecovery[];
+}
+
+/** 看板条目：派生字段（未收章数、超期、引文失配）。 */
+export interface ForeshadowView {
+  name: string;
+  state: string;
+  planted: (ForeshadowAnchor & { stale: boolean })[];
+  recovered: (ForeshadowRecovery & { stale: boolean })[];
+  /** 距当前最大章序已过多少章未收（仅已埋/部分收有值）。 */
+  uncollectedChapters: number | null;
+  overdue: boolean;
+}
+
+export const FORESHADOW_STATES = ["待埋", "已埋", "部分收", "已收", "弃用"] as const;
+export const FORESHADOW_STATE_PENDING = "待埋";
+export const FORESHADOW_STATE_PLANTED = "已埋";
+export const FORESHADOW_STATE_PARTIAL = "部分收";
+export const FORESHADOW_STATE_DONE = "已收";
+export const FORESHADOW_STATE_DROPPED = "弃用";
+export const FORESHADOW_RECOVERY_KINDS = ["阶段", "终结"] as const;
+export const FORESHADOW_RECOVERY_FINAL = "终结";
+/** 超期阈值（与 Rust 侧 foreshadow::OVERDUE_CHAPTERS 一致）。 */
+export const FORESHADOW_OVERDUE_CHAPTERS = 20;
 
 export function emptyBookMeta(): BookMeta {
   return { title: null, trackRecord: null, summary: null, goldenFinger: null, chapterPrefix: null };

@@ -21,15 +21,29 @@ interface WritingProps {
   /** 书写板块是否在前台（切走时写作页立即落盘）。 */
   active: boolean;
   onChooseFolder: () => void;
+  /** 从伏笔看板跳来：打开该项目的这一章并选中引文；消费后清空。 */
+  jump: { projectDir: string; ordinal: number; quote: string } | null;
+  onJumpConsumed: () => void;
 }
 
 /** 书写板块（工单 #5，docs/spec/书写编辑器.md）：日常码字工具。
  *  项目与构思共用「项目/」布局，这里只写 正文/。 */
-export default function Writing({ libraryPath, active, onChooseFolder }: WritingProps) {
+export default function Writing({
+  libraryPath,
+  active,
+  onChooseFolder,
+  jump,
+  onJumpConsumed,
+}: WritingProps) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<ProjectEntry | null>(null);
+  const [open, setOpen] = useState<{
+    project: ProjectEntry;
+    /** 重挂载序号：跳转同一个项目也要重开（locate 只在挂载时生效）。 */
+    seq: number;
+    locate: { ordinal: number; quote: string } | null;
+  } | null>(null);
   /** 只在本板块首次扫盘时自动回到上次的项目。 */
   const autoOpenRef = useRef(true);
 
@@ -43,7 +57,7 @@ export default function Writing({ libraryPath, active, onChooseFolder }: Writing
         autoOpenRef.current = false;
         const last = localStorage.getItem(LAST_PROJECT_KEY);
         const pick = list.find((p) => p.dir === last);
-        if (pick) setOpen(pick);
+        if (pick) setOpen({ project: pick, seq: 0, locate: null });
       }
     } catch (e) {
       setProjects([]);
@@ -57,17 +71,50 @@ export default function Writing({ libraryPath, active, onChooseFolder }: Writing
     if (libraryPath) void scan(libraryPath);
   }, [libraryPath, scan]);
 
+  // 伏笔看板跳来：现扫一次拿到最新项目快照，按序打开目标章。
+  useEffect(() => {
+    if (!jump || !libraryPath) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
+        if (cancelled) return;
+        setProjects(list);
+        const project = list.find((p) => p.dir === jump.projectDir);
+        if (project) {
+          localStorage.setItem(LAST_PROJECT_KEY, project.dir);
+          setOpen((cur) => ({
+            project,
+            seq: (cur?.seq ?? 0) + 1,
+            locate: { ordinal: jump.ordinal, quote: jump.quote },
+          }));
+        } else {
+          window.alert("没找到这个项目（可能已被移动或删除）。");
+        }
+      } catch (e) {
+        if (!cancelled) window.alert(`打开项目失败：${errMsg(e)}`);
+      } finally {
+        if (!cancelled) onJumpConsumed();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jump]);
+
   function openProject(project: ProjectEntry) {
     localStorage.setItem(LAST_PROJECT_KEY, project.dir);
-    setOpen(project);
+    setOpen((cur) => ({ project, seq: (cur?.seq ?? 0) + 1, locate: null }));
   }
 
   if (open) {
     return (
       <WritingPage
-        key={open.dir}
-        project={open}
+        key={`${open.project.dir}#${open.seq}`}
+        project={open.project}
         active={active}
+        locate={open.locate}
         onBack={() => {
           setOpen(null);
           if (libraryPath) void scan(libraryPath);

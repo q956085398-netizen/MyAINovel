@@ -24,7 +24,7 @@ export function bodyAfterFrontmatter(content: string): string {
 
 /** Unicode White_Space 集（与 Rust `char::is_whitespace` 对齐：JS 的
  *  `\s` 含 U+FEFF、不含 U+0085，直接用会算出不同的数）。 */
-const WHITE_SPACE = new Set([
+export const WHITE_SPACE = new Set([
   0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004,
   0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
 ]);
@@ -138,13 +138,18 @@ export function upsertFrontmatterStatus(
   return { from: first.end, to: first.end, insert: `\n状态: ${status}` };
 }
 
+/** 章号文案：按项目章前缀渲染（`第7章`）。 */
+export function chapterHead(ordinal: number, prefix: string | null): string {
+  const template = prefix?.trim() || "第{n}章";
+  return template.includes("{n}")
+    ? template.replace("{n}", String(ordinal))
+    : `${template}${ordinal}`;
+}
+
 /** 列表与顶栏的章号文案：按项目章前缀渲染（`第7章 初入江湖`）。 */
 export function chapterLabel(entry: ChapterEntry, prefix: string | null): string {
   if (entry.ordinal === null) return entry.fileName.replace(/\.md$/i, "");
-  const template = prefix?.trim() || "第{n}章";
-  const head = template.includes("{n}")
-    ? template.replace("{n}", String(entry.ordinal))
-    : `${template}${entry.ordinal}`;
+  const head = chapterHead(entry.ordinal, prefix);
   return entry.title ? `${head} ${entry.title}` : `${head}（无标题）`;
 }
 
