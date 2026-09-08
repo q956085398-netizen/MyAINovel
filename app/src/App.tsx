@@ -136,7 +136,7 @@ function App() {
           </div>
         </div>
         <div className={`section-wrap ${section === "构思" ? "" : "hidden"}`}>
-          <Ideation />
+          <Ideation libraryPath={libraryPath} onChooseFolder={chooseLibraryFolder} />
         </div>
         <div className={`section-wrap ${section === "书写" ? "" : "hidden"}`}>
           <Writing />

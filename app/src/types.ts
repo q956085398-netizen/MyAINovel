@@ -63,6 +63,132 @@ export interface BookMeta {
   chapterPrefix: string | null;
 }
 
+// --- 构思项目（工单 #4，docs/spec/构思数据模型.md）；与 Rust 侧 project.rs 对应 ---
+
+/** 与 Rust 侧 project::ProjectEntry 对应（IPC 走 camelCase）。 */
+export interface ProjectEntry {
+  /** 项目文件夹路径，即项目身份。 */
+  dir: string;
+  /** 文件夹名（应用新建时带《》）。 */
+  name: string;
+  /** 书名：项目.yaml 的「书名」，缺省＝文件夹名去《》。 */
+  title: string;
+  chapterCount: number;
+  wordCount: number;
+  unitCount: number;
+  contradictionCount: number;
+  characterCount: number;
+  worldviewCount: number;
+  openingCount: number;
+}
+
+/** 与 Rust 侧 project::PlotLine 对应（yaml 落盘键为「名/色」）。 */
+export interface PlotLine {
+  name: string;
+  color: string | null;
+}
+
+/** 与 Rust 侧 project::ProjectMeta 对应（yaml 落盘键为中文）。 */
+export interface ProjectMeta {
+  title: string | null;
+  chapterPrefix: string | null;
+  plotLines: PlotLine[];
+  maps: string[];
+}
+
+export function emptyProjectMeta(): ProjectMeta {
+  return { title: null, chapterPrefix: null, plotLines: [], maps: [] };
+}
+
+/** 与 Rust 侧 project::NoteKind 对应（serde 值即中文类别名，也是构思下的目录名）。 */
+export type NoteKind = "矛盾" | "单元" | "人物" | "世界观" | "开头";
+
+export const NOTE_KINDS: NoteKind[] = ["矛盾", "单元", "人物", "世界观", "开头"];
+
+/** 与 Rust 侧 project::NoteDraft 对应（IPC 走 camelCase）；
+ *  五类共用一张宽表，落盘时只写本类别的键。 */
+export interface NoteDraft {
+  kind: NoteKind;
+  /** 标题＝文件名（矛盾/单元名、人名、词条名、版本名）。 */
+  name: string;
+  /** 矛盾＝一句话核心；单元＝核心矛盾。 */
+  core: string | null;
+  types: string[];
+  source: string | null;
+  links: string[];
+  /** 矛盾＝池中｜已成单元｜弃用；开头＝备选｜选定（约定值只提示不校验）。 */
+  status: string | null;
+  group: string | null;
+  aliases: string[];
+  /** 世界观＝力量体系｜地理｜势力｜其他。 */
+  category: string | null;
+  body: string;
+}
+
+export function emptyNoteDraft(kind: NoteKind, name = ""): NoteDraft {
+  return {
+    kind,
+    name,
+    core: null,
+    types: [],
+    source: null,
+    links: [],
+    status: null,
+    group: null,
+    aliases: [],
+    category: null,
+    body: "",
+  };
+}
+
+/** 与 Rust 侧 project::NoteEntry 对应；path 即笔记身份。 */
+export interface NoteEntry extends NoteDraft {
+  path: string;
+}
+
+/** 与 Rust 侧 project::Circle 对应（构思/类型圈.md）。 */
+export interface Circle {
+  types: string[];
+  body: string;
+}
+
+/** 与 Rust 侧 project::ArrangementItem 对应；下标即未知键（手补的行内
+ *  字段，原样带回，不在界面上编辑）。 */
+export interface ArrangementItem {
+  unit: string;
+  line: string | null;
+  map: string | null;
+  /** 升级｜战斗（2:1 体检用）。 */
+  upgradeBattle: string | null;
+  /** 紧绷｜舒缓（张弛交替用）。 */
+  pace: string | null;
+  /** 手补的行内未知键（原样带回，不在界面上编辑）。 */
+  [extra: string]: string | null | undefined;
+}
+
+/** 与 Rust 侧 project::MapCount 对应。 */
+export interface MapCount {
+  map: string;
+  count: number;
+}
+
+/** 与 Rust 侧 project::ArrangementCheck 对应（派生视图，只提示不拦截）。 */
+export interface ArrangementCheck {
+  ratioHint: string;
+  paceHints: string[];
+  refHints: string[];
+  missingUnits: string[];
+  unarrangedUnits: string[];
+  mapCounts: MapCount[];
+}
+
+/** 排布属性的约定值（只提示不校验，词表同款纪律）。 */
+export const UPGRADE_BATTLE_VALUES = ["升级", "战斗"];
+export const PACE_VALUES = ["紧绷", "舒缓"];
+export const WORLDVIEW_CATEGORIES = ["力量体系", "地理", "势力", "其他"];
+export const OPENING_STATUS_VALUES = ["备选", "选定"];
+export const CONTRADICTION_STATUS_VALUES = ["池中", "已成单元", "弃用"];
+
 export function emptyBookMeta(): BookMeta {
   return { title: null, trackRecord: null, summary: null, goldenFinger: null, chapterPrefix: null };
 }

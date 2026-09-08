@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_yaml::Value;
+use serde_yaml::{Mapping, Value};
 
 use crate::library::{chapter_digits, is_chapter_heading};
 
@@ -153,6 +153,198 @@ pub(crate) fn sibling_yaml_path(md_path: &Path) -> PathBuf {
     yaml
 }
 
+// --- 扫描与文件名的共用小工具（书库、灵感库、构思项目三处同一套约定） ---
+
+/// 点名以「.」开头的文件/目录：扫描一律跳过（Obsidian 的 .obsidian 等）。
+pub(crate) fn is_hidden(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with('.'))
+}
+
+pub(crate) fn has_md_extension(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+}
+
+/// 目标文件名被占用时续号（标题-2、标题-3……）；self_path 即目标时
+/// 不续（编辑既有文件不算冲突）。
+pub(crate) fn unique_file_path(
+    dir: &Path,
+    file_name: &str,
+    self_path: Option<&Path>,
+) -> PathBuf {
+    let first = dir.join(file_name);
+    if !first.exists() || Some(first.as_path()) == self_path {
+        return first;
+    }
+    let stem = first
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "未命名".to_string());
+    for n in 2.. {
+        let candidate = dir.join(format!("{stem}-{n}.md"));
+        if !candidate.exists() || Some(candidate.as_path()) == self_path {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+/// Windows 非法文件名字符替换为下划线、去尾部点与空格、限长 80 字；
+/// 净化后没有任何字母/数字/汉字（空白、纯符号）报错。
+pub(crate) fn sanitize_file_name(raw: &str) -> Result<String, String> {
+    let mut t: String = raw
+        .trim()
+        .chars()
+        .map(|c| match c {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\t' => '_',
+            c if (c as u32) < 0x20 => '_',
+            c => c,
+        })
+        .collect();
+    while t.ends_with(['.', ' ']) {
+        t.pop();
+    }
+    let t: String = t.chars().take(80).collect();
+    if t.is_empty() || !t.chars().any(|c| c.is_alphanumeric()) {
+        return Err("名称不能为空（或只剩符号）".to_string());
+    }
+    Ok(t)
+}
+
+// --- yaml 映射的读写小工具（书级 yaml、项目 yaml、frontmatter 共用） ---
+
+/// 取标量键：去空白，空串按无处理（手写的 yaml 常见空值）。
+pub(crate) fn map_scalar(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
+    map.get(Value::String(key.to_string()))
+        .and_then(scalar_to_string)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 取列表键：yaml 列表逐项取标量；单个标量按分隔符拆（手写常见）。
+pub(crate) fn map_list(map: &serde_yaml::Mapping, key: &str) -> Vec<String> {
+    let Some(value) = map.get(Value::String(key.to_string())) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    match value {
+        Value::Sequence(seq) => {
+            for v in seq {
+                if let Some(s) = scalar_to_string(v) {
+                    push_split(&mut out, &s);
+                }
+            }
+        }
+        scalar => {
+            if let Some(s) = scalar_to_string(scalar) {
+                push_split(&mut out, &s);
+            }
+        }
+    }
+    out
+}
+
+pub(crate) fn set_map_scalar(map: &mut Mapping, key: &str, value: Option<&str>) {
+    let k = Value::String(key.to_string());
+    match value.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => {
+            map.insert(k, Value::String(s.to_string()));
+        }
+        None => {
+            map.remove(&k);
+        }
+    }
+}
+
+pub(crate) fn set_map_list(map: &mut Mapping, key: &str, values: &[String]) {
+    let k = Value::String(key.to_string());
+    let cleaned: Vec<Value> = values
+        .iter()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .map(|v| Value::String(v.to_string()))
+        .collect();
+    if cleaned.is_empty() {
+        map.remove(&k);
+    } else {
+        map.insert(k, Value::Sequence(cleaned));
+    }
+}
+
+/// 分隔符拆值并入列表（去重、保序）。
+pub(crate) fn push_split(out: &mut Vec<String>, s: &str) {
+    for part in s.split(['、', '，', ',', '；', ';', ' ', '\t']) {
+        let p = part.trim();
+        if !p.is_empty() && !out.iter().any(|t| t == p) {
+            out.push(p.to_string());
+        }
+    }
+}
+
+// --- frontmatter 笔记文件（灵感卡、构思笔记共用）：yaml 头 + 自由正文 ---
+
+/// frontmatter 块（起始 `---` 行到下一个 `---` 行）；不完整时返回 None。
+/// 返回（yaml 文本带尾换行，正文文本）。
+pub(crate) fn split_frontmatter(raw: &str) -> Option<(String, String)> {
+    let mut lines = raw.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    let mut yaml_lines: Vec<&str> = Vec::new();
+    let mut body_lines: Option<Vec<&str>> = None;
+    for line in lines {
+        match body_lines.as_mut() {
+            None => {
+                if line.trim() == "---" {
+                    body_lines = Some(Vec::new());
+                } else {
+                    yaml_lines.push(line);
+                }
+            }
+            Some(body) => body.push(line),
+        }
+    }
+    let body_lines = body_lines?;
+    let yaml = if yaml_lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", yaml_lines.join("\n"))
+    };
+    let body = body_lines.join("\n");
+    let body = body.strip_prefix('\n').unwrap_or(&body).to_string();
+    Some((yaml, body))
+}
+
+/// 读文件的 frontmatter 映射；文件不存在、无 frontmatter 或解析失败返回 None
+/// （调用方按空底处理，保存即重建——与灵感卡同一策略）。
+pub(crate) fn frontmatter_mapping(path: &Path) -> Option<Mapping> {
+    let raw = read_text(path).ok()?;
+    let (yaml_text, _) = split_frontmatter(strip_bom(&raw))?;
+    match serde_yaml::from_str::<Value>(&yaml_text) {
+        Ok(Value::Mapping(map)) => Some(map),
+        _ => None,
+    }
+}
+
+/// 写 frontmatter＋正文：`---\nyaml---\n\n正文`；映射为空时只写正文
+/// （避免落盘一个空的 `{}` 块）。整文件原子写（ADR 0004）。
+pub(crate) fn write_frontmatter(path: &Path, map: Mapping, body: &str) -> Result<(), String> {
+    let body = body.trim_start_matches('\n');
+    if map.is_empty() {
+        return write_text_atomic(path, body);
+    }
+    let yaml_text =
+        serde_yaml::to_string(&Value::Mapping(map)).map_err(|e| format!("无法生成 yaml：{e}"))?;
+    let content = if body.trim().is_empty() {
+        format!("---\n{yaml_text}---\n")
+    } else {
+        format!("---\n{yaml_text}---\n\n{body}")
+    };
+    write_text_atomic(path, &content)
+}
+
 pub(crate) fn scalar_to_string(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.clone()),
@@ -162,7 +354,7 @@ pub(crate) fn scalar_to_string(value: &Value) -> Option<String> {
     }
 }
 
-fn mapping_get(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
+fn meta_scalar(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
     map.get(Value::String(key.to_string()))
         .and_then(scalar_to_string)
 }
@@ -205,11 +397,11 @@ fn coerce_like(old: Option<&Value>, s: &str) -> Value {
 /// 从 yaml 底图取书级四项＋章前缀（中文键）。供书库扫描复用，一次读盘两用。
 pub(crate) fn meta_from_mapping(map: &serde_yaml::Mapping) -> BookMeta {
     BookMeta {
-        title: mapping_get(map, "书名"),
-        track_record: mapping_get(map, "成绩"),
-        summary: mapping_get(map, "简介"),
-        golden_finger: mapping_get(map, "金手指"),
-        chapter_prefix: mapping_get(map, "章前缀"),
+        title: meta_scalar(map, "书名"),
+        track_record: meta_scalar(map, "成绩"),
+        summary: meta_scalar(map, "简介"),
+        golden_finger: meta_scalar(map, "金手指"),
+        chapter_prefix: meta_scalar(map, "章前缀"),
     }
 }
 

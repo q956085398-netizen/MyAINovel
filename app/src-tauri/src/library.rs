@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::book_file::{meta_from_mapping, read_yaml_mapping, sibling_yaml_path, BookMeta};
+use crate::book_file::{
+    has_md_extension, is_hidden, meta_from_mapping, read_yaml_mapping, sibling_yaml_path, BookMeta,
+};
 use crate::inspiration::LIBRARY_DIR;
 use crate::trope::{tropes_from_mapping, TropeSpan};
 
@@ -201,17 +203,6 @@ pub(crate) fn is_chapter_heading(line: &str) -> bool {
                     | '七' | '八' | '九' | '两' | '十' | '百' | '千' | '万'
             )
         })
-}
-
-fn is_hidden(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| n.starts_with('.'))
-}
-
-fn has_md_extension(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
 }
 
 fn file_stem_of(path: &Path) -> String {

@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import { emptyBookMeta } from "./types";
 import { errMsg } from "./util";
+import { baseEditorTheme } from "./editorTheme";
 import BookMetaDialog from "./BookMetaDialog";
 import TropeDialog from "./TropeDialog";
 
@@ -51,11 +52,7 @@ function chapterOrdinalForLine(chapters: ChapterAnchor[], line: number): number 
   return chapterIndexForLine(chapters, line) + 1;
 }
 
-const editorTheme = EditorView.theme({
-  "&": { height: "100%", fontSize: "15px" },
-  ".cm-scroller": { fontFamily: "inherit", overflow: "auto" },
-  ".cm-content": { paddingBottom: "30vh" },
-});
+const editorTheme = baseEditorTheme({ fontSize: "15px", paddingBottom: "30vh" });
 
 function insertAtLineEnd(view: EditorView, insert: string) {
   const pos = view.state.selection.main.head;

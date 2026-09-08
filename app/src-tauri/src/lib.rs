@@ -2,6 +2,7 @@ mod ai;
 mod book_file;
 mod inspiration;
 mod library;
+mod project;
 mod search;
 mod trope;
 mod vocabulary;
@@ -12,6 +13,10 @@ use ai::{AiConfig, AiState, ChatSession, ChatSessionSummary, ChatStreamEvent, Ch
 use book_file::{BookMeta, ChapterAnchor, MdContent, SaveResult};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
+use project::{
+    ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
+    ProjectMeta,
+};
 use trope::TropeSpan;
 use vocabulary::Vocabulary;
 
@@ -145,6 +150,84 @@ fn confirm_import_inspirations(
     )
 }
 
+// --- 构思项目（工单 #4，docs/spec/构思数据模型.md）：项目/ 下一书一文件夹 ---
+
+#[tauri::command]
+fn scan_projects(root: String) -> Result<Vec<ProjectEntry>, String> {
+    project::scan_projects(Path::new(&root))
+}
+
+#[tauri::command]
+fn create_project(root: String, title: String) -> Result<ProjectEntry, String> {
+    project::create_project(Path::new(&root), &title)
+}
+
+#[tauri::command]
+fn read_project_meta(project: String) -> Result<ProjectMeta, String> {
+    project::read_project_meta(Path::new(&project))
+}
+
+#[tauri::command]
+fn save_project_meta(project: String, meta: ProjectMeta) -> Result<(), String> {
+    project::write_project_meta(Path::new(&project), &meta)
+}
+
+#[tauri::command]
+fn scan_notes(project: String, kind: NoteKind) -> Result<Vec<NoteEntry>, String> {
+    project::scan_notes(Path::new(&project), kind)
+}
+
+/// prev_path：编辑既有笔记时的旧位置；改名会挪文件。
+#[tauri::command]
+fn save_note(
+    project: String,
+    draft: NoteDraft,
+    prev_path: Option<String>,
+) -> Result<NoteEntry, String> {
+    project::save_note(
+        Path::new(&project),
+        &draft,
+        prev_path.as_deref().map(Path::new),
+    )
+}
+
+#[tauri::command]
+fn delete_note(path: String) -> Result<(), String> {
+    project::delete_note(Path::new(&path))
+}
+
+#[tauri::command]
+fn read_circle(project: String) -> Result<Circle, String> {
+    project::read_circle(Path::new(&project))
+}
+
+#[tauri::command]
+fn save_circle(project: String, circle: Circle) -> Result<(), String> {
+    project::save_circle(Path::new(&project), &circle)
+}
+
+#[tauri::command]
+fn read_arrangement(project: String) -> Result<Vec<ArrangementItem>, String> {
+    project::read_arrangement(Path::new(&project))
+}
+
+#[tauri::command]
+fn save_arrangement(project: String, items: Vec<ArrangementItem>) -> Result<(), String> {
+    project::save_arrangement(Path::new(&project), &items)
+}
+
+/// 排布体检（只提示不拦截）：对当前列表（可含未保存改动）现算。
+#[tauri::command]
+fn check_arrangement(project: String, items: Vec<ArrangementItem>) -> Result<ArrangementCheck, String> {
+    project::check_project_arrangement(Path::new(&project), &items)
+}
+
+/// 矛盾提为单元：建单元草稿、矛盾状态改「已成单元」。
+#[tauri::command]
+fn promote_contradiction(path: String) -> Result<NoteEntry, String> {
+    project::promote_contradiction(Path::new(&path))
+}
+
 // --- AI 侧边栏（设计共识 §七）：配置与会话存应用数据目录，流式对话走 Channel ---
 
 #[tauri::command]
@@ -219,6 +302,19 @@ pub fn run() {
             delete_inspiration_card,
             import_inspiration_preview,
             confirm_import_inspirations,
+            scan_projects,
+            create_project,
+            read_project_meta,
+            save_project_meta,
+            scan_notes,
+            save_note,
+            delete_note,
+            read_circle,
+            save_circle,
+            read_arrangement,
+            save_arrangement,
+            check_arrangement,
+            promote_contradiction,
             load_ai_config,
             save_ai_config,
             list_chat_sessions,

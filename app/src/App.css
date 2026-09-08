@@ -1068,3 +1068,285 @@ body {
   border-color: #dcc3ba;
   color: var(--accent);
 }
+
+/* ---------- 构思板块（工单 #4：一书一项目） ---------- */
+
+.project-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 28px 36px 0;
+}
+
+.project-body {
+  display: flex;
+  gap: 22px;
+  flex: 1;
+  min-height: 0;
+  margin-top: 4px;
+}
+
+.project-nav {
+  width: 148px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 20px;
+}
+
+.project-nav .nav-item {
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-nav .nav-item:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.project-nav .nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.nav-badge {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.project-nav .nav-item.active .nav-badge {
+  color: var(--accent);
+}
+
+.project-nav-foot {
+  margin-top: auto;
+  padding: 10px 12px 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.project-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding-bottom: 40px;
+}
+
+.note-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pane-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pane-head h2 {
+  margin: 0 0 2px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.pane-head .hint {
+  margin: 0;
+  max-width: 620px;
+}
+
+.field {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  margin-top: 4px;
+  font: inherit;
+  color: var(--ink);
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.line-row {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.line-row input {
+  margin-top: 0;
+}
+
+.line-row input:first-child {
+  flex: 2;
+}
+
+.line-row input:nth-child(2) {
+  flex: 1;
+}
+
+.md-editor {
+  margin-top: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.md-editor .cm-editor {
+  height: 100%;
+}
+
+.md-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.hint-box {
+  background: #f7f1e4;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.arrange-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.arrange-add select {
+  font: inherit;
+  color: var(--ink);
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  min-width: 180px;
+}
+
+.arrange-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.arrange-table th,
+.arrange-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  vertical-align: top;
+}
+
+.arrange-table thead th {
+  font-weight: 500;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.arrange-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.arrange-table .num {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  padding-top: 13px;
+}
+
+.arrange-table input,
+.arrange-table select {
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.arrange-table select {
+  width: auto;
+  min-width: 78px;
+}
+
+.arrange-table .row-actions {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.row-warn {
+  background: #fdf6f2;
+}
+
+.cell-warn {
+  display: block;
+  color: var(--accent);
+  font-size: 12px;
+  padding-top: 2px;
+}
+
+.check-panel {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 10px 16px;
+  background: #faf7f0;
+}
+
+.check-panel h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.check-panel p {
+  margin: 3px 0;
+  font-size: 13px;
+}
+
+.line-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.line-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+}

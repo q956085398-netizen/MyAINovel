@@ -17,3 +17,15 @@ export function oneLinePreview(text: string, max: number): string {
   if (oneLine.length <= max) return oneLine;
   return oneLine.slice(0, max) + "…";
 }
+
+export function formatCount(n: number): string {
+  return n.toLocaleString("zh-Hans-CN");
+}
+
+/** 列表输入的分隔符：顿号/逗号/分号/空白，与 Rust 侧 push_split 同口径。 */
+export function splitList(text: string): string[] {
+  return text
+    .split(/[、，,；;\s]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}

@@ -15,7 +15,11 @@ use std::time::UNIX_EPOCH;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_yaml::Value;
 
-use crate::book_file::{read_text, scalar_to_string, strip_bom, write_text_atomic};
+use crate::book_file::{
+    map_list, frontmatter_mapping, has_md_extension, is_hidden, map_scalar, push_split,
+    read_text, sanitize_file_name, set_map_list, set_map_scalar, split_frontmatter, strip_bom,
+    unique_file_path, write_frontmatter,
+};
 
 /// 灵感库在库根下的目录名；书库扫描与全文搜索跳过该目录。
 pub const LIBRARY_DIR: &str = "灵感库";
@@ -235,10 +239,10 @@ fn parse_card(path: &Path) -> InspirationCard {
             } else {
                 match serde_yaml::from_str::<Value>(&yaml_text) {
                     Ok(Value::Mapping(map)) => {
-                        card.tags = string_list(&map, "标签");
-                        card.source = mapping_get(&map, "来源");
-                        card.links = string_list(&map, "关联");
-                        card.core = mapping_get(&map, "一句话核心");
+                        card.tags = map_list(&map, "标签");
+                        card.source = map_scalar(&map, "来源");
+                        card.links = map_list(&map, "关联");
+                        card.core = map_scalar(&map, "一句话核心");
                         card.body = body;
                     }
                     _ => {
@@ -253,68 +257,6 @@ fn parse_card(path: &Path) -> InspirationCard {
         }
     }
     card
-}
-
-/// frontmatter 块（起始 `---` 行到下一个 `---` 行）；不完整时返回 None。
-/// 返回（yaml 文本带尾换行，正文文本）。
-fn split_frontmatter(raw: &str) -> Option<(String, String)> {
-    let mut lines = raw.lines();
-    if lines.next()?.trim() != "---" {
-        return None;
-    }
-    let mut yaml_lines: Vec<&str> = Vec::new();
-    let mut body_lines: Option<Vec<&str>> = None;
-    for line in lines {
-        match body_lines.as_mut() {
-            None => {
-                if line.trim() == "---" {
-                    body_lines = Some(Vec::new());
-                } else {
-                    yaml_lines.push(line);
-                }
-            }
-            Some(body) => body.push(line),
-        }
-    }
-    let body_lines = body_lines?;
-    let yaml = if yaml_lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", yaml_lines.join("\n"))
-    };
-    let body = body_lines.join("\n");
-    let body = body.strip_prefix('\n').unwrap_or(&body).to_string();
-    Some((yaml, body))
-}
-
-fn mapping_get(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
-    map.get(Value::String(key.to_string()))
-        .and_then(|v| scalar_to_string(v))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-/// 列表字段取值：yaml 列表逐项取标量；单个标量按分隔符拆（手写常见）。
-fn string_list(map: &serde_yaml::Mapping, key: &str) -> Vec<String> {
-    let Some(value) = map.get(Value::String(key.to_string())) else {
-        return Vec::new();
-    };
-    let mut out: Vec<String> = Vec::new();
-    match value {
-        Value::Sequence(seq) => {
-            for v in seq {
-                if let Some(s) = scalar_to_string(v) {
-                    push_split(&mut out, &s);
-                }
-            }
-        }
-        scalar => {
-            if let Some(s) = scalar_to_string(scalar) {
-                push_split(&mut out, &s);
-            }
-        }
-    }
-    out
 }
 
 fn mtime_of(path: &Path) -> u64 {
@@ -339,26 +281,17 @@ pub fn save_card(
     let dir = root.join(LIBRARY_DIR).join(draft.category.name());
     fs::create_dir_all(&dir).map_err(|e| format!("无法创建文件夹 {}：{e}", dir.display()))?;
 
-    let path = unique_path(&dir, &format!("{title}.md"), prev_path);
+    let path = unique_file_path(&dir, &format!("{title}.md"), prev_path);
 
     // 底图取旧位置（改名/换类别的编辑）或目标位置自身的 frontmatter，
     // 手补的未知键不丢；frontmatter 损坏按空底处理（保存即重建）。
     let base = prev_path.filter(|p| *p != path).unwrap_or(&path);
     let mut map = frontmatter_mapping(base).unwrap_or_default();
 
-    set_string_list(&mut map, "标签", &draft.tags);
-    set_scalar(&mut map, "来源", draft.source.as_deref());
-    set_string_list(&mut map, "关联", &draft.links);
-    set_scalar(&mut map, "一句话核心", draft.core.as_deref());
-
-    let yaml_text =
-        serde_yaml::to_string(&Value::Mapping(map)).map_err(|e| format!("无法生成 yaml：{e}"))?;
-    let body = draft.body.trim_start_matches('\n');
-    let content = if body.is_empty() {
-        format!("---\n{yaml_text}---\n")
-    } else {
-        format!("---\n{yaml_text}---\n\n{body}")
-    };
+    set_map_list(&mut map, "标签", &draft.tags);
+    set_map_scalar(&mut map, "来源", draft.source.as_deref());
+    set_map_list(&mut map, "关联", &draft.links);
+    set_map_scalar(&mut map, "一句话核心", draft.core.as_deref());
 
     // 改名/换类别先挪再写：挪失败时盘上无变化；挪成功后写失败，
     // 卡片仍在（内容是旧的）——两种失败都不产生重复卡。
@@ -368,7 +301,7 @@ pub fn save_card(
                 .map_err(|e| format!("无法移动卡片到 {}：{e}", path.display()))?;
         }
     }
-    write_text_atomic(&path, &content)?;
+    write_frontmatter(&path, map, &draft.body)?;
     Ok(parse_card(&path))
 }
 
@@ -399,81 +332,9 @@ pub fn confirm_import(
     Ok(paths)
 }
 
-fn frontmatter_mapping(path: &Path) -> Option<serde_yaml::Mapping> {
-    let raw = read_text(path).ok()?;
-    let (yaml_text, _) = split_frontmatter(strip_bom(&raw))?;
-    match serde_yaml::from_str::<Value>(&yaml_text) {
-        Ok(Value::Mapping(map)) => Some(map),
-        _ => None,
-    }
-}
-
-fn set_scalar(map: &mut serde_yaml::Mapping, key: &str, value: Option<&str>) {
-    let k = Value::String(key.to_string());
-    match value.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(s) => {
-            map.insert(k, Value::String(s.to_string()));
-        }
-        None => {
-            map.remove(&k);
-        }
-    }
-}
-
-fn set_string_list(map: &mut serde_yaml::Mapping, key: &str, values: &[String]) {
-    let k = Value::String(key.to_string());
-    let cleaned: Vec<Value> = values
-        .iter()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(|v| Value::String(v.to_string()))
-        .collect();
-    if cleaned.is_empty() {
-        map.remove(&k);
-    } else {
-        map.insert(k, Value::Sequence(cleaned));
-    }
-}
-
-/// Windows 非法文件名字符替换为下划线、去尾部点与空格、限长 80 字；
-/// 净化后没有任何字母/数字/汉字（空白、纯符号）报错。
+/// 卡片标题的文件名净化；错误文案说「标题」而不是泛泛的「名称」。
 fn sanitize_title(title: &str) -> Result<String, String> {
-    let mut t: String = title
-        .trim()
-        .chars()
-        .map(|c| match c {
-            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\t' => '_',
-            c if (c as u32) < 0x20 => '_',
-            c => c,
-        })
-        .collect();
-    while t.ends_with(['.', ' ']) {
-        t.pop();
-    }
-    let t: String = t.chars().take(80).collect();
-    if t.is_empty() || !t.chars().any(|c| c.is_alphanumeric()) {
-        return Err("卡片标题不能为空（或只剩符号）".to_string());
-    }
-    Ok(t)
-}
-
-/// 目标文件名被占用时续号；保存自己（prev_path 即目标）不续。
-fn unique_path(dir: &Path, file_name: &str, self_path: Option<&Path>) -> PathBuf {
-    let first = dir.join(file_name);
-    if !first.exists() || Some(first.as_path()) == self_path {
-        return first;
-    }
-    let stem = first
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "未命名".to_string());
-    for n in 2.. {
-        let candidate = dir.join(format!("{stem}-{n}.md"));
-        if !candidate.exists() || Some(candidate.as_path()) == self_path {
-            return candidate;
-        }
-    }
-    unreachable!()
+    sanitize_file_name(title).map_err(|_| "卡片标题不能为空（或只剩符号）".to_string())
 }
 
 // --- 导入旧灵感.md ---
@@ -637,16 +498,6 @@ fn extract_tag_lines(lines: &[&str], tags: &mut Vec<String>) -> String {
     body.join("\n").trim().to_string()
 }
 
-/// 分隔符拆值并入列表（去重、保序）。
-fn push_split(out: &mut Vec<String>, s: &str) {
-    for part in s.split(['、', '，', ',', '；', ';', ' ', '\t']) {
-        let p = part.trim();
-        if !p.is_empty() && !out.iter().any(|t| t == p) {
-            out.push(p.to_string());
-        }
-    }
-}
-
 /// 无标题散块：首行当标题，压到 30 字、超长补省略号。
 fn preamble_title(lines: &[&str]) -> String {
     let first = lines
@@ -663,17 +514,6 @@ fn preamble_title(lines: &[&str]) -> String {
     let mut s: String = first.chars().take(30).collect();
     s.push('…');
     s
-}
-
-fn is_hidden(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| n.starts_with('.'))
-}
-
-fn has_md_extension(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
 }
 
 #[cfg(test)]
