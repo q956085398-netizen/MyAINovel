@@ -177,7 +177,8 @@ fn md_stats(md: &Path) -> MdStats {
 
     MdStats {
         chapters: content.lines().filter(|l| is_chapter_heading(l)).count() as u32,
-        words: content.chars().filter(|c| !c.is_whitespace()).count() as u64,
+        // 与项目/书写章节同一口径（去 frontmatter、去空白、含标点）。
+        words: crate::book_file::billed_word_count(content),
     }
 }
 

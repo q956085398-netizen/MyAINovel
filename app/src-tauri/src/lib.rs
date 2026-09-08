@@ -1,5 +1,6 @@
 mod ai;
 mod book_file;
+mod chapter;
 mod inspiration;
 mod library;
 mod project;
@@ -11,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use ai::{AiConfig, AiState, ChatSession, ChatSessionSummary, ChatStreamEvent, ChatStreamReq};
 use book_file::{BookMeta, ChapterAnchor, MdContent, SaveResult};
+use chapter::{ChapterEntry, SnapshotEntry, UnitBrief, WritingStats};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
 use project::{
@@ -242,6 +244,91 @@ fn transmute_story_card(
     )
 }
 
+// --- 书写板块（工单 #5，docs/spec/书写编辑器.md）：正文一章一文件 ---
+
+#[tauri::command]
+fn scan_chapters(project: String) -> Result<Vec<ChapterEntry>, String> {
+    chapter::scan_chapters(Path::new(&project))
+}
+
+#[tauri::command]
+fn create_chapter(project: String, title: String) -> Result<ChapterEntry, String> {
+    chapter::create_chapter(Path::new(&project), &title)
+}
+
+#[tauri::command]
+fn rename_chapter(path: String, title: String) -> Result<ChapterEntry, String> {
+    chapter::rename_chapter(Path::new(&path), &title)
+}
+
+#[tauri::command]
+fn delete_chapter(path: String) -> Result<(), String> {
+    chapter::delete_chapter(Path::new(&path))
+}
+
+#[tauri::command]
+fn renumber_chapters(project: String) -> Result<Vec<ChapterEntry>, String> {
+    chapter::renumber_chapters(Path::new(&project))
+}
+
+/// 章节保存：指纹闸（ADR 0004）＋保存前快照。
+#[tauri::command]
+fn save_chapter_md(
+    project: String,
+    path: String,
+    content: String,
+    base: Option<String>,
+    force: bool,
+) -> Result<SaveResult, String> {
+    chapter::save_chapter_md(
+        Path::new(&project),
+        Path::new(&path),
+        &content,
+        base.as_deref(),
+        force,
+    )
+}
+
+#[tauri::command]
+fn list_chapter_snapshots(project: String, path: String) -> Result<Vec<SnapshotEntry>, String> {
+    chapter::list_chapter_snapshots(Path::new(&project), Path::new(&path))
+}
+
+#[tauri::command]
+fn read_chapter_snapshot(path: String) -> Result<String, String> {
+    chapter::read_chapter_snapshot(Path::new(&path))
+}
+
+#[tauri::command]
+fn save_chapter_paste_image(project: String, ext: String, bytes: Vec<u8>) -> Result<String, String> {
+    chapter::save_chapter_paste_image(Path::new(&project), &ext, &bytes)
+}
+
+#[tauri::command]
+fn find_unit_for_chapter(project: String, ordinal: u32) -> Result<Option<UnitBrief>, String> {
+    chapter::find_unit_for_chapter(Path::new(&project), ordinal)
+}
+
+fn writing_stats_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("定位应用数据目录失败：{e}"))?
+        .join("书写");
+    Ok(dir.join("统计.json"))
+}
+
+#[tauri::command]
+fn load_writing_stats(app: tauri::AppHandle) -> Result<WritingStats, String> {
+    chapter::load_writing_stats(&writing_stats_path(&app)?)
+}
+
+#[tauri::command]
+fn save_writing_stats(app: tauri::AppHandle, stats: WritingStats) -> Result<(), String> {
+    chapter::save_writing_stats(&writing_stats_path(&app)?, &stats)
+}
+
 // --- AI 侧边栏（设计共识 §七）：配置与会话存应用数据目录，流式对话走 Channel ---
 
 #[tauri::command]
@@ -330,6 +417,18 @@ pub fn run() {
             check_arrangement,
             promote_contradiction,
             transmute_story_card,
+            scan_chapters,
+            create_chapter,
+            rename_chapter,
+            delete_chapter,
+            renumber_chapters,
+            save_chapter_md,
+            list_chapter_snapshots,
+            read_chapter_snapshot,
+            save_chapter_paste_image,
+            find_unit_for_chapter,
+            load_writing_stats,
+            save_writing_stats,
             load_ai_config,
             save_ai_config,
             list_chat_sessions,

@@ -168,7 +168,11 @@ function App() {
           />
         </div>
         <div className={`section-wrap ${section === "书写" ? "" : "hidden"}`}>
-          <Writing />
+          <Writing
+            libraryPath={libraryPath}
+            active={section === "书写"}
+            onChooseFolder={chooseLibraryFolder}
+          />
         </div>
       </main>
       <AiSidebar

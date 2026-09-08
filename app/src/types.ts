@@ -122,6 +122,9 @@ export interface NoteDraft {
   aliases: string[];
   /** 世界观＝力量体系｜地理｜势力｜其他。 */
   category: string | null;
+  /** 单元专用：单元区间（起章/止章，书写侧栏按它反查「本章属于哪个单元」）。 */
+  startChapter: number | null;
+  endChapter: number | null;
   body: string;
 }
 
@@ -137,6 +140,8 @@ export function emptyNoteDraft(kind: NoteKind, name = ""): NoteDraft {
     group: null,
     aliases: [],
     category: null,
+    startChapter: null,
+    endChapter: null,
     body: "",
   };
 }
@@ -188,6 +193,64 @@ export const PACE_VALUES = ["紧绷", "舒缓"];
 export const WORLDVIEW_CATEGORIES = ["力量体系", "地理", "势力", "其他"];
 export const OPENING_STATUS_VALUES = ["备选", "选定"];
 export const CONTRADICTION_STATUS_VALUES = ["池中", "已成单元", "弃用"];
+
+// --- 书写板块（工单 #5，docs/spec/书写编辑器.md）；与 Rust 侧 chapter.rs 对应 ---
+
+/** 一章一文件 `正文/<NNNN 标题>.md`；序在文件名、标题可改、序不动。 */
+export interface ChapterEntry {
+  path: string;
+  fileName: string;
+  /** 文件名里的章序；未编号文件为 null。 */
+  ordinal: number | null;
+  title: string;
+  /** 草稿｜完稿（缺省＝草稿）。 */
+  status: string;
+  /** 计费字数（去空白、含标点，不含 frontmatter）。 */
+  wordCount: number;
+  /** 纯汉字数。 */
+  hanCount: number;
+}
+
+/** 保存前的历史版本（`.gongbi/历史/<章>/<时间戳>.md`）。 */
+export interface SnapshotEntry {
+  path: string;
+  /** Unix 毫秒。 */
+  time: number;
+  wordCount: number;
+}
+
+/** 联动侧栏的单元摘要（本章所在单元＋它在排布里的位置）。 */
+export interface UnitBrief {
+  name: string;
+  core: string | null;
+  types: string[];
+  body: string;
+  startChapter: number | null;
+  endChapter: number | null;
+  /** 在排布.yaml 中的位次（1 起）；未排布＝null。 */
+  index: number | null;
+  total: number;
+  line: string | null;
+  map: string | null;
+  upgradeBattle: string | null;
+  pace: string | null;
+}
+
+/** 与 Rust 侧 chapter.rs::WritingStats 对应（应用状态，不进创作目录）。 */
+export interface WritingStats {
+  dailyGoal: number;
+  /** 日期 YYYY-MM-DD → 当日净增量（可为负）。 */
+  daily: Record<string, number>;
+}
+
+export function emptyWritingStats(): WritingStats {
+  return { dailyGoal: 2000, daily: {} };
+}
+
+/** 章节状态两态（约定值只提示不校验）。 */
+export const CHAPTER_STATUS_VALUES = ["草稿", "完稿"];
+export const STATUS_DRAFT = "草稿";
+export const STATUS_DONE = "完稿";
 
 export function emptyBookMeta(): BookMeta {
   return { title: null, trackRecord: null, summary: null, goldenFinger: null, chapterPrefix: null };

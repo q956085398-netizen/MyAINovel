@@ -53,8 +53,20 @@ export default function NoteDialog({
   const [group, setGroup] = useState(initial.group ?? "");
   const [aliasesText, setAliasesText] = useState(initial.aliases.join("、"));
   const [category, setCategory] = useState(initial.category ?? "");
+  const [startChapter, setStartChapter] = useState(
+    initial.startChapter === null ? "" : String(initial.startChapter),
+  );
+  const [endChapter, setEndChapter] = useState(
+    initial.endChapter === null ? "" : String(initial.endChapter),
+  );
   const [body, setBody] = useState(initial.body);
   const [busy, setBusy] = useState(false);
+
+  /** 空串＝不填（null）；非法数字按不填处理。 */
+  function parseChapter(raw: string): number | null {
+    const n = Number.parseInt(raw.trim(), 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
 
   async function save() {
     if (busy) return;
@@ -72,6 +84,8 @@ export default function NoteDialog({
       group: group.trim() || null,
       aliases: splitList(aliasesText),
       category: category.trim() || null,
+      startChapter: parseChapter(startChapter),
+      endChapter: parseChapter(endChapter),
       body,
     };
     if (!draft.name) {
@@ -190,6 +204,24 @@ export default function NoteDialog({
                 words={vocab?.types ?? []}
                 placeholder="如：掉马甲、打脸"
               />
+            </label>
+            <label>
+              单元区间（起章/止章，书写侧栏按它显示「本章属于哪个单元」）
+              <span className="range-inputs">
+                <input
+                  value={startChapter}
+                  onChange={(e) => setStartChapter(e.target.value)}
+                  placeholder="起章，如 1"
+                  inputMode="numeric"
+                />
+                <span className="range-sep">~</span>
+                <input
+                  value={endChapter}
+                  onChange={(e) => setEndChapter(e.target.value)}
+                  placeholder="止章，如 20"
+                  inputMode="numeric"
+                />
+              </span>
             </label>
           </>
         )}

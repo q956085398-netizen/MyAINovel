@@ -55,7 +55,7 @@ pub enum SaveResult {
 
 /// 内容指纹：字节数混入的 FNV-1a 64。用于覆盖保存前的对账（不是
 /// 密码学场景），长度混入让「同哈希不同长」的构造只剩理论可能。
-fn content_fingerprint(bytes: &[u8]) -> u64 {
+pub(crate) fn content_fingerprint(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325 ^ u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     for &b in bytes {
         hash ^= u64::from(b);
@@ -104,6 +104,78 @@ pub(crate) fn strip_bom(content: &str) -> &str {
     content.strip_prefix('\u{feff}').unwrap_or(content)
 }
 
+// --- 字数口径（全应用共用：书库、项目、书写章节同一套，避免两套数） ---
+
+/// 计费字数：非空白字符数（含标点，起点口径的近似）。
+pub(crate) fn count_billed(text: &str) -> u64 {
+    text.chars().filter(|c| !c.is_whitespace()).count() as u64
+}
+
+/// 纯汉字数：Han 脚本字符（含扩展区、部首补充、々/〇）。
+pub(crate) fn count_han(text: &str) -> u64 {
+    text.chars().filter(|c| is_han(*c)).count() as u64
+}
+
+/// Han 脚本码点区间（Unicode Scripts.txt；与前端 chapterFile.ts 的
+/// 区间表保持一致——两边各一份，改一处要同步另一处）。
+pub(crate) fn is_han(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x2E80..=0x2E99
+            | 0x2E9B..=0x2EF3
+            | 0x2F00..=0x2FD5
+            | 0x3005
+            | 0x3007
+            | 0x3021..=0x3029
+            | 0x3038..=0x303B
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0x20000..=0x2A6DF
+            | 0x2A700..=0x2B739
+            | 0x2B740..=0x2B81D
+            | 0x2B820..=0x2CEA1
+            | 0x2CEB0..=0x2EBE0
+            | 0x2EBF0..=0x2EE5D
+            | 0x30000..=0x3134A
+            | 0x31350..=0x323AF
+    )
+}
+
+/// 去掉开头 frontmatter 块后的正文（字数统计排除它）。未闭合时整块视为
+/// frontmatter——写了一半的头部不该混进字数。
+pub(crate) fn body_after_frontmatter(content: &str) -> &str {
+    let content = strip_bom(content);
+    let Some(first) = content.split('\n').next() else {
+        return content;
+    };
+    if first.trim() != "---" {
+        return content;
+    }
+    if content.len() == first.len() {
+        return "";
+    }
+    let after_first = &content[first.len() + 1..];
+    let mut offset = 0;
+    for line in after_first.split_inclusive('\n') {
+        if line.trim_end_matches(['\r', '\n']).trim() == "---" {
+            return &after_first[offset + line.len()..];
+        }
+        offset += line.len();
+    }
+    ""
+}
+
+/// 正文内容的计费字数（去 frontmatter、去空白、含标点）。
+pub(crate) fn billed_word_count(content: &str) -> u64 {
+    count_billed(body_after_frontmatter(content))
+}
+
+/// 正文内容的纯汉字数（去 frontmatter）。
+pub(crate) fn han_word_count(content: &str) -> u64 {
+    count_han(body_after_frontmatter(content))
+}
+
 // --- yaml 底图读写：双文件制的 .yaml 侧共用（书级元数据、桥段列表都走这里） ---
 
 /// yaml 读为映射底图：文件不存在视为空底；存在但解析失败返回 Err
@@ -130,13 +202,18 @@ pub(crate) fn write_yaml_mapping(yaml: &Path, map: serde_yaml::Mapping) -> Resul
 }
 
 pub fn write_text_atomic(path: &Path, content: &str) -> Result<(), String> {
+    write_bytes_atomic(path, content.as_bytes())
+}
+
+/// 字节版原子写（快照副本、粘贴图片等非字符串内容共用）。
+pub(crate) fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let tmp = path.with_file_name(format!(
         "{}.gongbi.tmp",
         path.file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unnamed")
     ));
-    if let Err(e) = fs::write(&tmp, content) {
+    if let Err(e) = fs::write(&tmp, bytes) {
         return Err(format!("无法写入临时文件 {}：{e}", tmp.display()));
     }
     // std 的 rename 在 Windows 上带 REPLACE_EXISTING，可直接覆盖。
@@ -251,6 +328,23 @@ pub(crate) fn set_map_scalar(map: &mut Mapping, key: &str, value: Option<&str>) 
     match value.map(str::trim).filter(|s| !s.is_empty()) {
         Some(s) => {
             map.insert(k, Value::String(s.to_string()));
+        }
+        None => {
+            map.remove(&k);
+        }
+    }
+}
+
+/// 取可选整数键：标量能解析为 u32 才算（手写 yaml 可能是字符串形态）。
+pub(crate) fn map_u32(map: &serde_yaml::Mapping, key: &str) -> Option<u32> {
+    map_scalar(map, key).and_then(|s| s.parse::<u32>().ok())
+}
+
+pub(crate) fn set_map_u32(map: &mut Mapping, key: &str, value: Option<u32>) {
+    let k = Value::String(key.to_string());
+    match value {
+        Some(v) => {
+            map.insert(k, Value::Number(v.into()));
         }
         None => {
             map.remove(&k);
@@ -439,17 +533,23 @@ fn file_stem_of(path: &Path) -> String {
 }
 
 /// 保存一张剪贴板图片，返回可直接嵌入 markdown 的相对路径（正斜杠）。
-/// 文件名「截图-N.ext」按目录内现有编号递增，保证唯一。
 pub fn save_paste_image(md_path: &Path, ext: &str, bytes: &[u8]) -> Result<String, String> {
     let sub = attachment_subdir(md_path);
     let dir = md_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(&sub);
-    fs::create_dir_all(&dir).map_err(|e| format!("无法创建附件文件夹 {}：{e}", dir.display()))?;
+    let file_name = write_screenshot(&dir, ext, bytes)?;
+    Ok(sub.join(&file_name).to_string_lossy().replace('\\', "/"))
+}
+
+/// 把剪贴板图片写进 dir，返回文件名「截图-N.ext」（按目录内现有编号递增，
+/// 保证唯一）。拆书正文与书写正文的附件落点不同，写入本体共用这一份。
+pub(crate) fn write_screenshot(dir: &Path, ext: &str, bytes: &[u8]) -> Result<String, String> {
+    fs::create_dir_all(dir).map_err(|e| format!("无法创建附件文件夹 {}：{e}", dir.display()))?;
 
     let mut n: u32 = 0;
-    if let Ok(entries) = fs::read_dir(&dir) {
+    if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let Some(name) = entry.file_name().into_string().ok() else {
                 continue;
@@ -467,9 +567,8 @@ pub fn save_paste_image(md_path: &Path, ext: &str, bytes: &[u8]) -> Result<Strin
     n += 1;
 
     let file_name = format!("截图-{n}.{ext}");
-    fs::write(dir.join(&file_name), bytes).map_err(|e| format!("无法写入附件 {file_name}：{e}"))?;
-
-    Ok(sub.join(&file_name).to_string_lossy().replace('\\', "/"))
+    write_bytes_atomic(&dir.join(&file_name), bytes)?;
+    Ok(file_name)
 }
 
 /// 下一章前缀：优先按模板自身匹配到的最大编号续号；模板没匹配到过
