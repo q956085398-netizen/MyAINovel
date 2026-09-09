@@ -22,6 +22,7 @@ import type {
   SaveResult,
   SnapshotEntry,
   UnitBrief,
+  WritingLocate,
   WritingStats,
 } from "./types";
 import {
@@ -166,8 +167,8 @@ interface WritingPageProps {
   project: ProjectEntry;
   /** 书写板块当前是否在前台：切走时立即保存（板块常驻挂载，不卸载）。 */
   active: boolean;
-  /** 从伏笔看板跳来：打开该章并选中引文（仅挂载时生效）。 */
-  locate?: { ordinal: number; quote: string } | null;
+  /** 跳转请求：打开该章并选中引文（仅挂载时生效）。 */
+  locate?: WritingLocate | null;
   onBack: () => void;
   /** 正文有变化：让上层刷新项目列表的计数。 */
   onChanged: () => void;
@@ -444,6 +445,31 @@ export default function WritingPage({
     view.dispatch({
       selection: { anchor: hit.from, head: hit.to },
       effects: EditorView.scrollIntoView(hit.from, { y: "center" }),
+    });
+    view.focus();
+    return true;
+  }
+
+  /** 按行号＋第几次出现选中（发布前校对的命中跳回）；行或词对不上时
+   *  退回全文找词（校对结果是扫盘时的快照，正文可能已经改过）。 */
+  function locateAtLine(line: number, word: string, occurrence: number): boolean {
+    const view = viewRef.current;
+    if (!view) return false;
+    const doc = view.state.doc;
+    if (line < 1 || line > doc.lines) return locateQuote(word);
+    const text = doc.line(line).text;
+    let at = -1;
+    let from = 0;
+    for (let n = 0; n <= occurrence; n += 1) {
+      at = text.indexOf(word, from);
+      if (at < 0) break;
+      from = at + word.length;
+    }
+    if (at < 0) return locateQuote(word);
+    const anchor = doc.line(line).from + at;
+    view.dispatch({
+      selection: { anchor, head: anchor + word.length },
+      effects: EditorView.scrollIntoView(anchor, { y: "center" }),
     });
     view.focus();
     return true;
@@ -908,13 +934,23 @@ export default function WritingPage({
       const remembered = localStorage.getItem(chapterKey(project.dir));
       const numbered = list.filter((c) => c.ordinal !== null);
       const pick =
-        (locate ? list.find((c) => c.ordinal === locate.ordinal) : undefined) ??
+        (locate
+          ? locate.path
+            ? list.find((c) => c.path === locate.path)
+            : list.find((c) => c.ordinal === locate.ordinal)
+          : undefined) ??
         list.find((c) => c.path === remembered) ??
         numbered[numbered.length - 1] ??
         list[0];
       if (pick) await openChapter(pick);
-      // 从伏笔看板跳来：载入后选中引文（找不到就停在文末，失配在看板里已标）。
-      if (locate?.quote) locateQuote(locate.quote);
+      // 跳转落点：给行号按行定位（校对命中），否则全文找引文（伏笔/三线）。
+      if (locate?.quote) {
+        if (locate.line !== undefined) {
+          locateAtLine(locate.line, locate.quote, locate.occurrence ?? 0);
+        } else {
+          locateQuote(locate.quote);
+        }
+      }
       if (!cancelled) setReady(true);
     })();
     return () => {

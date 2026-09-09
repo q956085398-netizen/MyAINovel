@@ -10,6 +10,7 @@ use crate::book_file::{
     has_md_extension, is_hidden, meta_from_mapping, read_yaml_mapping, sibling_yaml_path, BookMeta,
 };
 use crate::inspiration::LIBRARY_DIR;
+use crate::proofread::PROOFREAD_DIR;
 use crate::trope::{tropes_from_mapping, TropeSpan};
 
 /// 构思项目在库根下的目录名；书库扫描、全文搜索、词表聚合（共用本模块的
@@ -84,11 +85,11 @@ pub(crate) fn collect_book_files(root: &Path) -> Result<Vec<BookFiles>, String> 
         }
     }
     for dir in subdirs {
-        // 「灵感库/」是卡片目录、「项目/」是构思工程，都不是一本书。
+        // 「灵感库/」是卡片目录、「项目/」是构思工程、「校对/」是词库，都不是一本书。
         if dir
             .file_name()
             .and_then(|n| n.to_str())
-            .is_some_and(|n| n == LIBRARY_DIR || n == PROJECTS_DIR)
+            .is_some_and(|n| n == LIBRARY_DIR || n == PROJECTS_DIR || n == PROOFREAD_DIR)
         {
             continue;
         }

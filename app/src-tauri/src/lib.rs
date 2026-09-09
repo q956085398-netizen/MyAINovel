@@ -2,10 +2,12 @@ mod ai;
 mod book_file;
 mod chapter;
 mod expectation;
+mod export;
 mod foreshadow;
 mod inspiration;
 mod library;
 mod project;
+mod proofread;
 mod search;
 mod thread;
 mod trope;
@@ -17,6 +19,7 @@ use ai::{AiConfig, AiState, ChatSession, ChatSessionSummary, ChatStreamEvent, Ch
 use book_file::{BookMeta, ChapterAnchor, MdContent, SaveResult};
 use chapter::{ChapterEntry, SnapshotEntry, UnitBrief, WritingStats};
 use expectation::{Expectation, ExpectationBoard};
+use export::{ChapterRange, ExportReport, ExportTemplate};
 use foreshadow::{Foreshadow, ForeshadowView};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
@@ -24,6 +27,7 @@ use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
     ProjectMeta,
 };
+use proofread::ProofReport;
 use trope::TropeSpan;
 use vocabulary::Vocabulary;
 
@@ -453,6 +457,55 @@ fn delete_expectation(project: String, name: String) -> Result<Vec<Expectation>,
     expectation::delete_expectation(Path::new(&project), &name)
 }
 
+// --- 导出与发布（工单 #14，docs/spec/导出与发布.md）：只读派生，只写项目内 导出/ ---
+
+#[tauri::command]
+fn load_export_templates(app: tauri::AppHandle) -> Result<Vec<ExportTemplate>, String> {
+    export::load_templates(&export::templates_path(&app)?)
+}
+
+#[tauri::command]
+fn save_export_templates(
+    app: tauri::AppHandle,
+    templates: Vec<ExportTemplate>,
+) -> Result<(), String> {
+    export::save_templates(&export::templates_path(&app)?, &templates)
+}
+
+#[tauri::command]
+fn export_book(
+    project: String,
+    range: ChapterRange,
+    template: ExportTemplate,
+) -> Result<ExportReport, String> {
+    export::export_book(Path::new(&project), range, &template)
+}
+
+/// 预览（不落盘）：看清清洗效果再决定导出。
+#[tauri::command]
+fn preview_export(
+    project: String,
+    range: ChapterRange,
+    template: ExportTemplate,
+) -> Result<String, String> {
+    export::preview_export(Path::new(&project), range, &template)
+}
+
+/// 发布前校对：只读正文，词库取库根「校对/」（root 为空＝只用内置规则）。
+#[tauri::command]
+fn proofread_chapters(
+    root: String,
+    project: String,
+    range: ChapterRange,
+) -> Result<ProofReport, String> {
+    proofread::proofread_chapters(Path::new(&root), Path::new(&project), range)
+}
+
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    export::reveal_path(Path::new(&path))
+}
+
 fn writing_stats_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     let dir = app
@@ -588,6 +641,12 @@ pub fn run() {
             delete_expectation,
             load_writing_stats,
             save_writing_stats,
+            load_export_templates,
+            save_export_templates,
+            export_book,
+            preview_export,
+            proofread_chapters,
+            reveal_path,
             load_ai_config,
             save_ai_config,
             list_chat_sessions,

@@ -627,6 +627,20 @@ fn normalized_template(template: &str) -> &str {
     }
 }
 
+/// 章号文案（`第7章`）：按章前缀模板渲染，缺省 `第{n}章`；模板无 {n}
+/// 时直接拼在模板后。与前端 chapterFile.ts::chapterHead 同一规则（导出
+/// 与界面显示必须一致），改一处要同步另一处。
+pub fn render_chapter_head(ordinal: u32, prefix: Option<&str>) -> String {
+    let template = prefix
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .unwrap_or(DEFAULT_CHAPTER_PREFIX);
+    match template.split_once("{n}") {
+        Some((pre, suf)) => format!("{pre}{ordinal}{suf}"),
+        None => format!("{template}{ordinal}"),
+    }
+}
+
 /// 章标题锚点：正文里第几个章标题（ordinal，1 起）及其原始行号。
 /// 桥段标注的起止即用该序数——中文数字章号无法可靠转数值，序数对
 /// 任意前缀模板都成立；列表展示口径同为序数。
@@ -1007,5 +1021,14 @@ mod tests {
         let anchors = list_chapters("\u{feff}第一章\n正文", DEFAULT_CHAPTER_PREFIX);
         assert_eq!(anchors.len(), 1);
         assert_eq!(anchors[0].line, 1);
+    }
+
+    #[test]
+    fn 章号文案_缺省前缀_自定义模板_无占位符() {
+        assert_eq!(render_chapter_head(7, None), "第7章");
+        assert_eq!(render_chapter_head(7, Some("  ")), "第7章");
+        // 与前端 chapterHead 同款：前缀先 trim（界面显示与导出一致）
+        assert_eq!(render_chapter_head(7, Some("Chapter {n}: ")), "Chapter 7:");
+        assert_eq!(render_chapter_head(7, Some("第")), "第7");
     }
 }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ProjectEntry } from "./types";
+import type { ProofIssue, ProjectEntry, WritingLocate } from "./types";
 import { errMsg, formatCount } from "./util";
 import WritingPage from "./WritingPage";
+import { ExportDialog } from "./ExportDialog";
 
 /** 记住上次打开的项目：码字工具应「打开即回到那本书」。 */
 const LAST_PROJECT_KEY = "gongbi.writing.project";
@@ -42,8 +43,10 @@ export default function Writing({
     project: ProjectEntry;
     /** 重挂载序号：跳转同一个项目也要重开（locate 只在挂载时生效）。 */
     seq: number;
-    locate: { ordinal: number; quote: string } | null;
+    locate: WritingLocate | null;
   } | null>(null);
+  /** 导出与发布对话框的目标项目（工单 #14；入口在项目列表，不进写作页）。 */
+  const [exportFor, setExportFor] = useState<ProjectEntry | null>(null);
   /** 只在本板块首次扫盘时自动回到上次的项目。 */
   const autoOpenRef = useRef(true);
 
@@ -103,9 +106,22 @@ export default function Writing({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump]);
 
-  function openProject(project: ProjectEntry) {
+  /** 打开项目（locate 非空时顺带定位到某章某处）。 */
+  function openAt(project: ProjectEntry, locate: WritingLocate | null) {
     localStorage.setItem(LAST_PROJECT_KEY, project.dir);
-    setOpen((cur) => ({ project, seq: (cur?.seq ?? 0) + 1, locate: null }));
+    setOpen((cur) => ({ project, seq: (cur?.seq ?? 0) + 1, locate }));
+  }
+
+  /** 校对命中跳回：关掉对话框，打开该章并选中命中词（按行号定位）。 */
+  function jumpFromProofread(project: ProjectEntry, issue: ProofIssue) {
+    setExportFor(null);
+    openAt(project, {
+      ordinal: issue.ordinal,
+      path: issue.path,
+      quote: issue.word,
+      line: issue.line,
+      occurrence: issue.occurrence,
+    });
   }
 
   if (open) {
@@ -181,8 +197,15 @@ export default function Writing({
             {projects.map((p) => (
               <div key={p.dir} className="card-item">
                 <div className="card-title-row">
-                  <button className="card-title" title="开始写" onClick={() => openProject(p)}>
+                  <button className="card-title" title="开始写" onClick={() => openAt(p, null)}>
                     {p.title}
+                  </button>
+                  <button
+                    className="btn small"
+                    title="导出正文 / 发布前校对"
+                    onClick={() => setExportFor(p)}
+                  >
+                    导出/发布
                   </button>
                 </div>
                 <p className="card-meta">
@@ -195,6 +218,18 @@ export default function Writing({
             ))}
           </div>
         </>
+      )}
+
+      {exportFor && (
+        <ExportDialog
+          key={exportFor.dir}
+          projectDir={exportFor.dir}
+          projectTitle={exportFor.title}
+          chapterCount={exportFor.chapterCount}
+          libraryPath={libraryPath}
+          onClose={() => setExportFor(null)}
+          onJump={(issue) => jumpFromProofread(exportFor, issue)}
+        />
       )}
     </div>
   );

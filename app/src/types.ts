@@ -256,6 +256,103 @@ export const CHAPTER_STATUS_VALUES = ["草稿", "完稿"];
 export const STATUS_DRAFT = "草稿";
 export const STATUS_DONE = "完稿";
 
+// --- 导出与发布（工单 #14，docs/spec/导出与发布.md）；与 Rust 侧 export.rs / proofread.rs 对应 ---
+
+/** 章节范围；from/to 全空＝全书，单章＝from==to。 */
+export interface ChapterRange {
+  from: number | null;
+  to: number | null;
+}
+
+/** 渠道模板：存应用状态，跨项目共用；章前缀始终取项目.yaml。 */
+export interface ExportTemplate {
+  name: string;
+  /** txt（平台粘贴口径）｜md（保留 markdown）。 */
+  format: string;
+  chapterHeading: boolean;
+  /** 标题模板，占位符 {章号}/{标题}；null＝「{章号} {标题}」。 */
+  headingTemplate: string | null;
+  /** 段间空行数（0｜1）。 */
+  blankLines: number;
+  indent: boolean;
+  /** 单章字数提示下限（0＝不提示）。 */
+  minWords: number;
+  /** 单章字数提示上限（0＝不限）。 */
+  maxWords: number;
+}
+
+export function defaultExportTemplate(): ExportTemplate {
+  return {
+    name: "默认",
+    format: "txt",
+    chapterHeading: true,
+    headingTemplate: null,
+    blankLines: 1,
+    indent: false,
+    minWords: 2000,
+    maxWords: 0,
+  };
+}
+
+export interface ExportChapterReport {
+  ordinal: number;
+  title: string;
+  fileName: string;
+  wordCount: number;
+  imagesDropped: number;
+  /** 空章 / 字数越界 / frontmatter 未闭合等提示（只提示不拦截）。 */
+  notes: string[];
+}
+
+export interface ExportReport {
+  path: string;
+  format: string;
+  chapterCount: number;
+  wordCount: number;
+  chapters: ExportChapterReport[];
+  /** 未编号文件跳过等整体警告。 */
+  warnings: string[];
+}
+
+/** 写作页跳转落点：伏笔/三线看板带 ordinal＋引文，发布前校对带 path＋
+ *  行号＋第几次出现（更精确）。line 给了就按行定位，否则全文找引文。 */
+export interface WritingLocate {
+  ordinal: number | null;
+  path?: string;
+  quote: string;
+  /** 1 起行号（原始文件行）。 */
+  line?: number;
+  occurrence?: number;
+}
+
+/** 校对命中：line 为原始文件行号（与编辑器缓冲同口径），
+ *  occurrence 为命中词在本行内第几次出现（0 起），跳回时据此定位。 */
+export interface ProofIssue {
+  ordinal: number | null;
+  fileName: string;
+  path: string;
+  line: number;
+  occurrence: number;
+  word: string;
+  suggestion: string | null;
+  /** 敏感词｜的地得｜错词。 */
+  kind: string;
+  snippet: string;
+}
+
+export interface ProofReport {
+  issues: ProofIssue[];
+  scannedChapters: number;
+  sensitiveWords: number;
+  wrongWords: number;
+  /** 库根「校对/敏感词.txt」是否存在（不存在时提示怎么建）。 */
+  sensitiveFileExists: boolean;
+}
+
+export const PROOFREAD_KIND_SENSITIVE = "敏感词";
+export const PROOFREAD_KIND_DE = "的地得";
+export const PROOFREAD_KIND_WRONG = "错词";
+
 // --- 伏笔系统（工单 #6，docs/spec/伏笔系统.md）；与 Rust 侧 foreshadow.rs 对应 ---
 
 /** 埋设锚点：章序数（第几个章标题，1 起）＋选中引文（正文零污染）。 */

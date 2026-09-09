@@ -2067,3 +2067,224 @@ body {
   align-items: center;
   gap: 8px;
 }
+
+/* ---------- 导出与发布（工单 #14，docs/spec/导出与发布.md） ---------- */
+
+.export-tabs {
+  margin-bottom: 14px;
+}
+
+.export-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.export-range label {
+  width: 150px;
+  margin-bottom: 0;
+}
+
+.export-range .hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.export-template {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px 4px;
+  margin-bottom: 14px;
+}
+
+.export-template-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+}
+
+.export-template-row label {
+  width: 180px;
+  margin-bottom: 12px;
+}
+
+.export-template-row label.grow {
+  width: auto;
+  flex: 1;
+  min-width: 220px;
+}
+
+.export-template-row label.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  margin-bottom: 16px;
+  color: var(--ink);
+}
+
+.export-template-row label.check input {
+  width: auto;
+  margin: 0;
+}
+
+.export-template-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.export-template-actions .hint {
+  margin: 0 0 0 auto;
+}
+
+.export-actions {
+  margin-bottom: 12px;
+}
+
+.export-actions .push-left {
+  margin-right: auto;
+}
+
+.export-preview {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.export-report {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-bottom: 12px;
+}
+
+.export-path {
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  word-break: break-all;
+}
+
+.export-report-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.export-chapters {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.export-chapters li {
+  margin-bottom: 2px;
+}
+
+details.export-chapters {
+  margin-top: 10px;
+  font-size: 12px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+details.export-chapters summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+
+.proof-report {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.proof-chapter {
+  margin-bottom: 12px;
+}
+
+.proof-chapter-head {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.proof-chapter ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.proof-hit {
+  appearance: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.proof-hit:hover {
+  background: var(--bg);
+}
+
+.proof-line {
+  color: var(--ink-soft);
+  font-size: 12px;
+  min-width: 62px;
+}
+
+.proof-kind {
+  font-size: 12px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
+.proof-kind.kind-sensitive {
+  color: var(--accent);
+  border-color: #e0bdb2;
+  background: var(--accent-soft);
+}
+
+.proof-kind.kind-de {
+  color: #7a5a1e;
+  border-color: #e6d6b0;
+  background: #faf3e2;
+}
+
+.proof-word {
+  font-weight: 500;
+}
+
+.proof-suggestion {
+  color: var(--accent);
+}
+
+.proof-snippet {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
