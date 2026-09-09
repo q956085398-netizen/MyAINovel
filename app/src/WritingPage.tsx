@@ -14,6 +14,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ChapterEntry,
+  ExpectationBoard,
   Foreshadow,
   MdContent,
   ProjectEntry,
@@ -23,7 +24,15 @@ import type {
   UnitBrief,
   WritingStats,
 } from "./types";
-import { CHAPTER_STATUS_VALUES, STATUS_DONE, STATUS_DRAFT, emptyWritingStats } from "./types";
+import {
+  CHAPTER_STATUS_VALUES,
+  EXPECTATION_HORIZON_MID,
+  EXPECTATION_KIND_EXPECT,
+  STATUS_DONE,
+  STATUS_DRAFT,
+  emptyWritingStats,
+  expectationOverdueChapters,
+} from "./types";
 import { errMsg, formatCount } from "./util";
 import {
   chapterLabel,
@@ -35,6 +44,7 @@ import {
 } from "./chapterFile";
 import { findQuote } from "./foreshadowAnchor";
 import { ForeshadowCollectDialog, ForeshadowNameDialog } from "./ForeshadowDialog";
+import { ExpectationFormDialog, ExpectationFulfillDialog } from "./ExpectationDialog";
 import { baseEditorTheme } from "./editorTheme";
 
 /** 自动保存防抖：停笔约 3 秒落盘（用户拍板「自动保存为主」）。 */
@@ -215,6 +225,14 @@ export default function WritingPage({
   const [annotate, setAnnotate] = useState<{ quote: string } | null>(null);
   const [collect, setCollect] = useState<{ quote: string } | null>(null);
   const [foreshadowBusy, setForeshadowBusy] = useState(false);
+  // 三线（工单 #7）：看板视图（未推进章数/超期由 Rust 现算）供侧栏与弹窗用。
+  const [expectations, setExpectations] = useState<ExpectationBoard>({
+    maxChapter: 0,
+    items: [],
+  });
+  const [expAnnotate, setExpAnnotate] = useState<{ quote: string } | null>(null);
+  const [expFulfill, setExpFulfill] = useState<{ quote: string } | null>(null);
+  const [expectationBusy, setExpectationBusy] = useState(false);
 
   // ---------- 编辑器装配 ----------
 
@@ -489,7 +507,63 @@ export default function WritingPage({
     }
   }
 
-  /** 右键菜单：有选区才出（设为伏笔／回收伏笔），不抢编辑器默认菜单。 */
+  // ---------- 三线（工单 #7，docs/spec/期待感三线.md） ----------
+
+  async function loadExpectations(): Promise<void> {
+    try {
+      setExpectations(await invoke<ExpectationBoard>("expectation_board", { project: project.dir }));
+    } catch (e) {
+      // 三线.yaml 损坏：显式提示，但不挡写作（三线只是旁路数据）。
+      setExpectations({ maxChapter: 0, items: [] });
+      window.alert(`读取三线失败：${errMsg(e)}`);
+    }
+  }
+
+  async function annotateExpectation(name: string, kind: string, horizon: string) {
+    const ordinal = requireOrdinal();
+    if (ordinal === null || !expAnnotate) return;
+    setExpectationBusy(true);
+    try {
+      await invoke("annotate_expectation", {
+        project: project.dir,
+        name,
+        chapter: ordinal,
+        quote: expAnnotate.quote,
+        kind,
+        horizon,
+      });
+      setExpAnnotate(null);
+      await loadExpectations();
+    } catch (e) {
+      window.alert(`记为三线失败：${errMsg(e)}`);
+    } finally {
+      setExpectationBusy(false);
+    }
+  }
+
+  async function fulfillExpectation(name: string, kind: string, note: string) {
+    const ordinal = requireOrdinal();
+    if (ordinal === null || !expFulfill) return;
+    setExpectationBusy(true);
+    try {
+      await invoke("fulfill_expectation", {
+        project: project.dir,
+        name,
+        chapter: ordinal,
+        quote: expFulfill.quote,
+        kind,
+        note: note.trim() || null,
+      });
+      setExpFulfill(null);
+      await loadExpectations();
+    } catch (e) {
+      window.alert(`兑现三线失败：${errMsg(e)}`);
+    } finally {
+      setExpectationBusy(false);
+    }
+  }
+
+  /** 右键菜单：有选区才出（设为伏笔／回收伏笔／记为三线／兑现三线），不抢编辑器默认菜单。 */
   function handleContextMenu(event: MouseEvent, view: EditorView): boolean {
     const sel = view.state.selection.main;
     if (sel.empty) return false;
@@ -822,6 +896,7 @@ export default function WritingPage({
         // 统计读不了：从零起算。
       }
       await loadForeshadows();
+      await loadExpectations();
       let list: ChapterEntry[] = [];
       try {
         list = await rescan();
@@ -864,11 +939,12 @@ export default function WritingPage({
   }, [immersive]);
 
   // 切出书写板块：立即落盘；切回来：焦点还给编辑器（板块常驻挂载，不卸载），
-  // 并重读伏笔（构思侧看板可能刚改过状态/删过条目）。
+  // 并重读伏笔与三线（构思侧看板可能刚改过状态/删过条目）。
   useEffect(() => {
     if (active) {
       viewRef.current?.focus();
       void loadForeshadows().then(applyForeshadowMarks);
+      void loadExpectations();
     } else if (dirtyRef.current) {
       void saveNow(false);
     }
@@ -899,6 +975,21 @@ export default function WritingPage({
   const chapterRecovered = foreshadows.flatMap((f) =>
     f.recovered.filter((r) => r.chapter === chapterOrdinal).map((r) => ({ f, r })),
   );
+  // 三线：本章埋设/兑现＋未兑现的线按「未推进章数 ÷ 档位阈值」的紧迫度降序。
+  const chapterPlantedExp = expectations.items.flatMap((e) =>
+    e.planted.filter((a) => a.chapter === chapterOrdinal).map((a) => ({ e, a })),
+  );
+  const chapterFulfilledExp = expectations.items.flatMap((e) =>
+    e.fulfilled.filter((p) => p.chapter === chapterOrdinal).map((p) => ({ e, p })),
+  );
+  const openLines = expectations.items
+    .filter((e) => e.unadvancedChapters !== null)
+    .map((e) => ({
+      e,
+      unadvanced: e.unadvancedChapters ?? 0,
+      urgency: (e.unadvancedChapters ?? 0) / expectationOverdueChapters(e.horizon),
+    }))
+    .sort((a, b) => b.urgency - a.urgency);
 
   const totalWords = chapters.reduce(
     (sum, c) => sum + (current && c.path === current.path ? counts.billed : c.wordCount),
@@ -1107,6 +1198,73 @@ export default function WritingPage({
                 </ul>
               </>
             )}
+
+            {(chapterPlantedExp.length > 0 || chapterFulfilledExp.length > 0) && (
+              <>
+                <h2 className="sidebar-title">本章三线</h2>
+                <ul className="foreshadow-side-list">
+                  {chapterPlantedExp.map(({ e, a }, i) => (
+                    <li key={`ep${i}`}>
+                      <button
+                        className="link-btn"
+                        title="选中正文里的引文"
+                        onClick={() => locateQuote(a.quote)}
+                      >
+                        {e.name}
+                      </button>
+                      <span className="card-cat">
+                        {e.kind} · {e.horizon}
+                      </span>
+                      {a.quote && <span className="foreshadow-quote">「{a.quote}」</span>}
+                      {findQuote(docText, a.quote) === null && (
+                        <span className="card-cat danger">引文失配</span>
+                      )}
+                    </li>
+                  ))}
+                  {chapterFulfilledExp.map(({ e, p }, i) => (
+                    <li key={`ef${i}`}>
+                      <button
+                        className="link-btn"
+                        title="选中正文里的引文"
+                        onClick={() => locateQuote(p.quote)}
+                      >
+                        {e.name}
+                      </button>
+                      <span className="card-cat">
+                        兑现 · {p.kind} · {e.kind}
+                      </span>
+                      {p.quote && <span className="foreshadow-quote">「{p.quote}」</span>}
+                      {p.note && <span className="foreshadow-note">{p.note}</span>}
+                      {findQuote(docText, p.quote) === null && (
+                        <span className="card-cat danger">引文失配</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {openLines.length > 0 && (
+              <>
+                <h2 className="sidebar-title">还欠着的线</h2>
+                <ul className="foreshadow-side-list">
+                  {openLines.slice(0, 5).map(({ e, unadvanced }) => (
+                    <li key={e.name}>
+                      <span>{e.name}</span>
+                      <span className="card-cat">
+                        {e.kind} · {e.horizon}
+                      </span>
+                      {e.overdue ? (
+                        <span className="card-cat danger">超期 {unadvanced} 章</span>
+                      ) : (
+                        <span className="card-cat">已 {unadvanced} 章未推进</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <p className="hint">共 {openLines.length} 条未兑现，见「构思 → 三线」。</p>
+              </>
+            )}
           </aside>
         )}
       </div>
@@ -1277,6 +1435,26 @@ export default function WritingPage({
           >
             回收伏笔
           </button>
+          <button
+            className="context-item"
+            onClick={() => {
+              setMenu(null);
+              if (requireOrdinal() === null) return;
+              setExpAnnotate({ quote: menu.text });
+            }}
+          >
+            记为三线
+          </button>
+          <button
+            className="context-item"
+            onClick={() => {
+              setMenu(null);
+              if (requireOrdinal() === null) return;
+              setExpFulfill({ quote: menu.text });
+            }}
+          >
+            兑现三线
+          </button>
         </div>
       )}
 
@@ -1299,6 +1477,29 @@ export default function WritingPage({
           busy={foreshadowBusy}
           onCancel={() => setCollect(null)}
           onSubmit={(name, kind, note) => void recoverForeshadow(name, kind, note)}
+        />
+      )}
+
+      {expAnnotate && (
+        <ExpectationFormDialog
+          title="记为三线"
+          hint="选中这段文字会成为这条线的锚点；同名线会追加一条埋设（类别/档位以已有为准），不新建。"
+          initial={expAnnotate.quote.slice(0, 12)}
+          initialKind={EXPECTATION_KIND_EXPECT}
+          initialHorizon={EXPECTATION_HORIZON_MID}
+          busy={expectationBusy}
+          onCancel={() => setExpAnnotate(null)}
+          onSubmit={(name, kind, horizon) => void annotateExpectation(name, kind, horizon)}
+        />
+      )}
+
+      {expFulfill && (
+        <ExpectationFulfillDialog
+          quote={expFulfill.quote}
+          expectations={expectations.items}
+          busy={expectationBusy}
+          onCancel={() => setExpFulfill(null)}
+          onSubmit={(name, kind, note) => void fulfillExpectation(name, kind, note)}
         />
       )}
     </div>

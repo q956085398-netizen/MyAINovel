@@ -1,11 +1,13 @@
 mod ai;
 mod book_file;
 mod chapter;
+mod expectation;
 mod foreshadow;
 mod inspiration;
 mod library;
 mod project;
 mod search;
+mod thread;
 mod trope;
 mod vocabulary;
 
@@ -14,6 +16,7 @@ use std::path::{Path, PathBuf};
 use ai::{AiConfig, AiState, ChatSession, ChatSessionSummary, ChatStreamEvent, ChatStreamReq};
 use book_file::{BookMeta, ChapterAnchor, MdContent, SaveResult};
 use chapter::{ChapterEntry, SnapshotEntry, UnitBrief, WritingStats};
+use expectation::{Expectation, ExpectationBoard};
 use foreshadow::{Foreshadow, ForeshadowView};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
@@ -372,6 +375,84 @@ fn delete_foreshadow(project: String, name: String) -> Result<Vec<Foreshadow>, S
     foreshadow::delete_foreshadow(Path::new(&project), &name)
 }
 
+// --- 三线（工单 #7，docs/spec/期待感三线.md）：项目根 三线.yaml ---
+
+#[tauri::command]
+fn read_expectations(project: String) -> Result<Vec<Expectation>, String> {
+    expectation::read_expectations(Path::new(&project))
+}
+
+/// 时间线看板：三线 ＋ 现扫正文算出的未推进章数/超期/引文失配。
+#[tauri::command]
+fn expectation_board(project: String) -> Result<ExpectationBoard, String> {
+    expectation::expectation_board(Path::new(&project))
+}
+
+#[tauri::command]
+fn add_expectation(
+    project: String,
+    name: String,
+    kind: String,
+    horizon: String,
+) -> Result<Vec<Expectation>, String> {
+    expectation::add_expectation(Path::new(&project), &name, &kind, &horizon)
+}
+
+#[tauri::command]
+fn annotate_expectation(
+    project: String,
+    name: String,
+    chapter: u32,
+    quote: String,
+    kind: String,
+    horizon: String,
+) -> Result<Vec<Expectation>, String> {
+    expectation::annotate_expectation(Path::new(&project), &name, chapter, &quote, &kind, &horizon)
+}
+
+#[tauri::command]
+fn fulfill_expectation(
+    project: String,
+    name: String,
+    chapter: u32,
+    quote: String,
+    kind: String,
+    note: Option<String>,
+) -> Result<Vec<Expectation>, String> {
+    expectation::fulfill_expectation(
+        Path::new(&project),
+        &name,
+        chapter,
+        &quote,
+        &kind,
+        note.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn set_expectation_state(
+    project: String,
+    name: String,
+    state: String,
+) -> Result<Vec<Expectation>, String> {
+    expectation::set_expectation_state(Path::new(&project), &name, &state)
+}
+
+#[tauri::command]
+fn set_expectation_meta(
+    project: String,
+    name: String,
+    kind: String,
+    horizon: String,
+) -> Result<Vec<Expectation>, String> {
+    expectation::set_expectation_meta(Path::new(&project), &name, &kind, &horizon)
+}
+
+#[tauri::command]
+fn delete_expectation(project: String, name: String) -> Result<Vec<Expectation>, String> {
+    expectation::delete_expectation(Path::new(&project), &name)
+}
+
 fn writing_stats_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     let dir = app
@@ -497,6 +578,14 @@ pub fn run() {
             recover_foreshadow,
             set_foreshadow_state,
             delete_foreshadow,
+            read_expectations,
+            expectation_board,
+            add_expectation,
+            annotate_expectation,
+            fulfill_expectation,
+            set_expectation_state,
+            set_expectation_meta,
+            delete_expectation,
             load_writing_stats,
             save_writing_stats,
             load_ai_config,

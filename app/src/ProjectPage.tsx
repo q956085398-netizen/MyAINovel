@@ -12,11 +12,12 @@ import { emptyProjectMeta } from "./types";
 import { errMsg, formatCount } from "./util";
 import ArrangementView from "./ArrangementView";
 import CircleView from "./CircleView";
+import ExpectationBoard from "./ExpectationBoard";
 import ForeshadowBoard from "./ForeshadowBoard";
 import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
 
-const TABS = ["类型圈", "矛盾", "单元", "伏笔", "排布", "人物", "世界观", "开头"] as const;
+const TABS = ["类型圈", "矛盾", "单元", "伏笔", "三线", "排布", "人物", "世界观", "开头"] as const;
 /** 项目页签；跨板块跳转（灵感库关联 → 项目）也用它指路。 */
 export type ProjectTab = (typeof TABS)[number];
 type Tab = ProjectTab;
@@ -176,6 +177,9 @@ export default function ProjectPage({
               {t === "伏笔" && project.foreshadowCount > 0 && (
                 <span className="nav-badge">{project.foreshadowCount}</span>
               )}
+              {t === "三线" && project.expectationCount > 0 && (
+                <span className="nav-badge">{project.expectationCount}</span>
+              )}
               {t === "人物" && project.characterCount > 0 && (
                 <span className="nav-badge">{project.characterCount}</span>
               )}
@@ -207,6 +211,14 @@ export default function ProjectPage({
           )}
           {tab === "伏笔" && (
             <ForeshadowBoard
+              project={project.dir}
+              chapterPrefix={meta.chapterPrefix}
+              onChanged={refreshAll}
+              onOpenChapter={(ordinal, quote) => onOpenChapter(project.dir, ordinal, quote)}
+            />
+          )}
+          {tab === "三线" && (
+            <ExpectationBoard
               project={project.dir}
               chapterPrefix={meta.chapterPrefix}
               onChanged={refreshAll}

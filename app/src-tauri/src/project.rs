@@ -65,6 +65,8 @@ pub struct ProjectEntry {
     pub opening_count: u32,
     /// 伏笔条数（伏笔.yaml；损坏降级为 0，不拖垮扫描）。
     pub foreshadow_count: u32,
+    /// 三线条数（三线.yaml；损坏降级为 0，不拖垮扫描）。
+    pub expectation_count: u32,
 }
 
 /// 扫「项目/」下的直接子文件夹；目录不存在视为还没有项目（首次使用）。
@@ -126,6 +128,9 @@ fn project_entry(dir: &Path) -> ProjectEntry {
         opening_count: count_md(&notes_dir(dir, NoteKind::Opening)),
         // 伏笔.yaml 读不了＝0 条（与项目.yaml 同款降级，打开看板时再显式报错）。
         foreshadow_count: crate::foreshadow::read_foreshadows(dir)
+            .map(|list| list.len() as u32)
+            .unwrap_or(0),
+        expectation_count: crate::expectation::read_expectations(dir)
             .map(|list| list.len() as u32)
             .unwrap_or(0),
     }
@@ -1084,10 +1089,12 @@ mod tests {
             worldview_count: 6,
             opening_count: 7,
             foreshadow_count: 8,
+            expectation_count: 9,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("\"chapterCount\""));
         assert!(json.contains("\"contradictionCount\""));
+        assert!(json.contains("\"expectationCount\""));
 
         assert_eq!(serde_json::to_string(&NoteKind::Unit).unwrap(), "\"单元\"");
         let back: NoteKind = serde_json::from_str("\"世界观\"").unwrap();

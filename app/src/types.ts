@@ -82,6 +82,8 @@ export interface ProjectEntry {
   openingCount: number;
   /** 伏笔条数（伏笔.yaml）。 */
   foreshadowCount: number;
+  /** 三线条数（三线.yaml）。 */
+  expectationCount: number;
 }
 
 /** 与 Rust 侧 project::PlotLine 对应（yaml 落盘键为「名/色」）。 */
@@ -300,6 +302,73 @@ export const FORESHADOW_RECOVERY_KINDS = ["阶段", "终结"] as const;
 export const FORESHADOW_RECOVERY_FINAL = "终结";
 /** 超期阈值（与 Rust 侧 foreshadow::OVERDUE_CHAPTERS 一致）。 */
 export const FORESHADOW_OVERDUE_CHAPTERS = 20;
+
+// --- 期待感/目标三线（工单 #7，docs/spec/期待感三线.md）；与 Rust 侧 expectation.rs 对应 ---
+
+/** 埋设锚点：章序数（第几个章标题，1 起）＋选中引文（正文零污染）。 */
+export interface ExpectationAnchor {
+  chapter: number;
+  quote: string;
+}
+
+/** 兑现记录：类型＝阶段｜终结。 */
+export interface ExpectationPayoff {
+  chapter: number;
+  quote: string;
+  kind: string;
+  note: string | null;
+}
+
+/** 期待线条目（项目根 三线.yaml，应用受管、整表重写）。 */
+export interface Expectation {
+  name: string;
+  /** 期待｜目标（约定值只提示不校验）。 */
+  kind: string;
+  /** 短｜中｜长（时间线网格的行）。 */
+  horizon: string;
+  /** 待埋｜已埋｜部分兑现｜已兑现｜弃用（约定值只提示不校验）。 */
+  state: string;
+  planted: ExpectationAnchor[];
+  fulfilled: ExpectationPayoff[];
+}
+
+/** 看板条目：派生字段（未推进章数、超期、引文失配）。 */
+export interface ExpectationView {
+  name: string;
+  kind: string;
+  horizon: string;
+  state: string;
+  planted: (ExpectationAnchor & { stale: boolean })[];
+  fulfilled: (ExpectationPayoff & { stale: boolean })[];
+  /** 距当前最大章序已过多少章未推进（仅已埋/部分兑现有值）。 */
+  unadvancedChapters: number | null;
+  overdue: boolean;
+}
+
+/** 时间线网格数据：轴长＋条目。 */
+export interface ExpectationBoard {
+  /** 轴长＝max(全书最大章序, 锚点最大章)。 */
+  maxChapter: number;
+  items: ExpectationView[];
+}
+
+export const EXPECTATION_KINDS = ["期待", "目标"] as const;
+export const EXPECTATION_KIND_EXPECT = "期待";
+export const EXPECTATION_KIND_GOAL = "目标";
+export const EXPECTATION_HORIZONS = ["短", "中", "长"] as const;
+export const EXPECTATION_HORIZON_MID = "中";
+export const EXPECTATION_STATES = ["待埋", "已埋", "部分兑现", "已兑现", "弃用"] as const;
+export const EXPECTATION_STATE_PLANTED = "已埋";
+export const EXPECTATION_STATE_PARTIAL = "部分兑现";
+export const EXPECTATION_STATE_DONE = "已兑现";
+export const EXPECTATION_STATE_DROPPED = "弃用";
+export const EXPECTATION_PAYOFF_KINDS = ["阶段", "终结"] as const;
+export const EXPECTATION_PAYOFF_FINAL = "终结";
+/** 超期阈值按档位（与 Rust 侧 expectation::OVERDUE_* 一致）。 */
+export const EXPECTATION_OVERDUE_CHAPTERS: Record<string, number> = { 短: 8, 中: 20, 长: 50 };
+export function expectationOverdueChapters(horizon: string): number {
+  return EXPECTATION_OVERDUE_CHAPTERS[horizon] ?? EXPECTATION_OVERDUE_CHAPTERS["中"];
+}
 
 export function emptyBookMeta(): BookMeta {
   return { title: null, trackRecord: null, summary: null, goldenFinger: null, chapterPrefix: null };

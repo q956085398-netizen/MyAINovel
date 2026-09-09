@@ -1855,3 +1855,215 @@ body {
   font-size: 13px;
   line-height: 1.6;
 }
+
+/* --- 三线（工单 #7，docs/spec/期待感三线.md）：时间线网格 --- */
+
+.exp-lane {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 14px;
+}
+
+.exp-lane-label {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.exp-chip {
+  appearance: none;
+  padding: 3px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.exp-chip:hover,
+.exp-chip.active {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.exp-grid {
+  display: flex;
+  align-items: flex-start;
+  margin: 4px 0 6px;
+}
+
+.exp-grid-labels {
+  flex-shrink: 0;
+  width: 56px;
+}
+
+.exp-tick-space {
+  height: 18px;
+}
+
+.exp-row-label {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.exp-grid-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.exp-grid-canvas {
+  position: relative;
+}
+
+.exp-ticks {
+  position: relative;
+  height: 18px;
+}
+
+.exp-tick {
+  position: absolute;
+  top: 0;
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+
+.exp-track {
+  position: relative;
+  border-bottom: 1px solid var(--line);
+}
+
+.exp-bar {
+  appearance: none;
+  position: absolute;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #faf7f0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.exp-bar.expect {
+  border-left: 3px solid var(--accent);
+}
+
+.exp-bar.goal {
+  border-left: 3px solid #4b6b8a;
+}
+
+/* 未兑现的线：最近锚点之后画虚线尾巴（一直拖到当前章）。 */
+.exp-tail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--accent);
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(168, 67, 47, 0.09) 0 6px,
+    transparent 6px 12px
+  );
+}
+
+.exp-bar.done {
+  border-left: 3px solid #6a8a5b;
+  background: #f2f5ee;
+}
+
+.exp-bar.dropped {
+  opacity: 0.55;
+}
+
+.exp-bar.overdue {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-soft);
+}
+
+.exp-bar.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.exp-bar-name {
+  position: relative;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.exp-dot {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+}
+
+.exp-dot.planted {
+  border: 1.5px solid var(--accent);
+  background: var(--panel);
+}
+
+.exp-dot.fulfilled {
+  background: var(--accent);
+}
+
+.exp-bar-note {
+  position: absolute;
+  transform: translateY(-50%);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.exp-bar-note.danger {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.exp-detail {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.exp-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.exp-detail-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.exp-detail-head .card-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

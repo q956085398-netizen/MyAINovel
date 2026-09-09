@@ -5,15 +5,15 @@
 //! 项目根 `伏笔.yaml`（应用受管，整表重写；写路径原子，ADR 0004）。
 //! 章序数对改名/删章稳定（重编号会挪动锚点）、引文定位章内位置——两者
 //! 失配一律**只提示不自动改**（看板标「引文失配」）。
+//! 与三线（#7）共用 thread.rs 底座：锚点形状、单文件读写、现扫派生。
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
-use crate::book_file::{map_scalar, map_u32, read_text, write_text_atomic};
-use crate::chapter::scan_chapters;
+use crate::book_file::map_scalar;
+use crate::thread::{self, Anchor, AnchorView, Payoff, PayoffView};
 
 pub const FORESHADOW_FILE: &str = "伏笔.yaml";
 
@@ -41,24 +41,6 @@ pub const OVERDUE_CHAPTERS: u32 = 20;
 
 // ---------- 数据模型 ----------
 
-/// 埋设锚点：章序数（第几个章标题，1 起）＋ 选中引文。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ForeshadowAnchor {
-    pub chapter: u32,
-    pub quote: String,
-}
-
-/// 回收记录：章序数＋引文＋类型（阶段｜终结）＋可选说明。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ForeshadowRecovery {
-    pub chapter: u32,
-    pub quote: String,
-    pub kind: String,
-    pub note: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Foreshadow {
@@ -66,8 +48,8 @@ pub struct Foreshadow {
     pub name: String,
     /// 五态之一；缺省读作「待埋」。
     pub state: String,
-    pub planted: Vec<ForeshadowAnchor>,
-    pub recovered: Vec<ForeshadowRecovery>,
+    pub planted: Vec<Anchor>,
+    pub recovered: Vec<Payoff>,
 }
 
 /// 看板条目：在 Foreshadow 之上加派生字段（超期、引文失配）。
@@ -77,261 +59,63 @@ pub struct ForeshadowView {
     pub name: String,
     pub state: String,
     pub planted: Vec<AnchorView>,
-    pub recovered: Vec<RecoveryView>,
+    pub recovered: Vec<PayoffView>,
     /// 距当前最大章序已过多少章未收（仅已埋/部分收有值）。
     pub uncollected_chapters: Option<u32>,
     /// 未收章数 ≥ OVERDUE_CHAPTERS。
     pub overdue: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AnchorView {
-    pub chapter: u32,
-    pub quote: String,
-    /// 引文在该章正文里找不到（章文件缺失也算失配）。
-    pub stale: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecoveryView {
-    pub chapter: u32,
-    pub quote: String,
-    pub kind: String,
-    pub note: Option<String>,
-    pub stale: bool,
-}
-
 pub fn foreshadow_path(project: &Path) -> PathBuf {
     project.join(FORESHADOW_FILE)
-}
-
-// ---------- 引文匹配（全应用单一规则；前端有镜像） ----------
-
-/// 引文定位：先精确子串；不中则去掉全部空白（Unicode White_Space，
-/// 与 book_file/chapterFile 的字数口径同一张表）后再匹配，用于容忍
-/// 换行/缩进差异。返回原始文本的字节区间；空引文＝None。
-pub fn find_quote(text: &str, quote: &str) -> Option<(usize, usize)> {
-    let quote = quote.trim();
-    if quote.is_empty() {
-        return None;
-    }
-    if let Some(start) = text.find(quote) {
-        return Some((start, start + quote.len()));
-    }
-    let (norm, map) = strip_whitespace_map(text);
-    let (norm_quote, _) = strip_whitespace_map(quote);
-    if norm_quote.is_empty() {
-        return None;
-    }
-    let at = norm.find(&norm_quote)?;
-    // norm 与 norm_quote 都是无空白字符串，at 必落在字符边界上。
-    let first = map.get(norm[..at].chars().count())?;
-    let last = map.get(norm[..at].chars().count() + norm_quote.chars().count() - 1)?;
-    Some((first.0, last.1))
-}
-
-/// 去掉空白字符，返回（无空白文本，每个保留字符的原始字节区间）。
-fn strip_whitespace_map(text: &str) -> (String, Vec<(usize, usize)>) {
-    let mut norm = String::new();
-    let mut map = Vec::new();
-    for (offset, ch) in text.char_indices() {
-        if ch.is_whitespace() {
-            continue;
-        }
-        norm.push(ch);
-        map.push((offset, offset + ch.len_utf8()));
-    }
-    (norm, map)
 }
 
 // ---------- 读写 ----------
 
 pub fn read_foreshadows(project: &Path) -> Result<Vec<Foreshadow>, String> {
-    let path = foreshadow_path(project);
-    if !path.is_file() {
-        return Ok(Vec::new());
-    }
-    let text = read_text(&path)?;
-    if text.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    let value: Value = serde_yaml::from_str(&text)
-        .map_err(|e| format!("无法解析 {}：{e}", path.display()))?;
-    let Value::Sequence(seq) = value else {
-        return Err(format!("{} 顶层应为列表（伏笔条目）", path.display()));
-    };
-    seq.iter()
-        .enumerate()
-        .map(|(i, item)| item_from_value(item, &path, i + 1))
-        .collect()
-}
-
-fn item_from_value(value: &Value, path: &Path, index: usize) -> Result<Foreshadow, String> {
-    let Value::Mapping(map) = value else {
-        return Err(format!("{} 第 {index} 项应为映射（名/状态/埋设/回收）", path.display()));
-    };
-    let name = map_scalar(&map, "名")
-        .filter(|n| !n.trim().is_empty())
-        .ok_or_else(|| format!("{} 第 {index} 项缺「名」", path.display()))?;
-    let state = map_scalar(&map, "状态").unwrap_or_else(|| STATE_PENDING.to_string());
-    let planted = map_anchors(&map, "埋设", path, index)?;
-    let recovered = map_recoveries(&map, "回收", path, index)?;
-    Ok(Foreshadow {
-        name,
-        state,
-        planted,
-        recovered,
-    })
-}
-
-fn map_anchors(
-    map: &Mapping,
-    key: &str,
-    path: &Path,
-    index: usize,
-) -> Result<Vec<ForeshadowAnchor>, String> {
-    Ok(map_rows(map, key, path, index)?
-        .iter()
-        .enumerate()
-        .map(|(i, row)| {
-            Ok(ForeshadowAnchor {
-                chapter: required_chapter(row, key, path, index, i)?,
-                quote: map_scalar(row, "引文").unwrap_or_default(),
+    thread::read_threads(
+        &foreshadow_path(project),
+        "伏笔条目（名/状态/埋设/回收）",
+        |map, path, index| {
+            let name = map_scalar(map, "名")
+                .filter(|n| !n.trim().is_empty())
+                .ok_or_else(|| format!("{} 第 {index} 项缺「名」", path.display()))?;
+            Ok(Foreshadow {
+                name,
+                state: map_scalar(map, "状态").unwrap_or_else(|| STATE_PENDING.to_string()),
+                planted: thread::map_anchors(map, "埋设", path, index)?,
+                recovered: thread::map_payoffs(map, "回收", path, index, RECOVERY_STAGE)?,
             })
-        })
-        .collect::<Result<Vec<_>, String>>()?)
-}
-
-fn map_recoveries(
-    map: &Mapping,
-    key: &str,
-    path: &Path,
-    index: usize,
-) -> Result<Vec<ForeshadowRecovery>, String> {
-    Ok(map_rows(map, key, path, index)?
-        .iter()
-        .enumerate()
-        .map(|(i, row)| {
-            Ok(ForeshadowRecovery {
-                chapter: required_chapter(row, key, path, index, i)?,
-                quote: map_scalar(row, "引文").unwrap_or_default(),
-                kind: map_scalar(row, "类型").unwrap_or_else(|| RECOVERY_STAGE.to_string()),
-                note: map_scalar(row, "说明"),
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?)
-}
-
-/// 取「埋设/回收」列表的原始行（每行必须是映射）；缺键/null 视为空表。
-fn map_rows<'a>(
-    map: &'a Mapping,
-    key: &str,
-    path: &Path,
-    index: usize,
-) -> Result<Vec<&'a Mapping>, String> {
-    let Some(value) = map.get(Value::String(key.to_string())) else {
-        return Ok(Vec::new());
-    };
-    if value.is_null() {
-        return Ok(Vec::new());
-    }
-    let Value::Sequence(seq) = value else {
-        return Err(format!("{} 第 {index} 项的「{key}」应为列表", path.display()));
-    };
-    seq.iter()
-        .enumerate()
-        .map(|(i, item)| match item {
-            Value::Mapping(m) => Ok(m),
-            _ => Err(format!(
-                "{} 第 {index} 项「{key}」第 {} 条应为映射（章/引文）",
-                path.display(),
-                i + 1
-            )),
-        })
-        .collect()
-}
-
-fn required_chapter(
-    row: &Mapping,
-    key: &str,
-    path: &Path,
-    index: usize,
-    row_index: usize,
-) -> Result<u32, String> {
-    map_u32(row, "章").ok_or_else(|| {
-        format!(
-            "{} 第 {index} 项「{key}」第 {} 条缺「章」",
-            path.display(),
-            row_index + 1
-        )
-    })
+        },
+    )
 }
 
 pub fn write_foreshadows(project: &Path, list: &[Foreshadow]) -> Result<(), String> {
-    let path = foreshadow_path(project);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("无法创建文件夹 {}：{e}", parent.display()))?;
-    }
-    let seq: Vec<Value> = list.iter().map(item_to_value).collect();
-    let text = serde_yaml::to_string(&Value::Sequence(seq))
-        .map_err(|e| format!("无法生成 yaml：{e}"))?;
-    write_text_atomic(&path, &text)
-}
-
-fn item_to_value(item: &Foreshadow) -> Value {
-    let mut map = Mapping::new();
-    map.insert(
-        Value::String("名".into()),
-        Value::String(item.name.trim().to_string()),
-    );
-    let state = item.state.trim();
-    map.insert(
-        Value::String("状态".into()),
-        Value::String(if state.is_empty() { STATE_PENDING } else { state }.to_string()),
-    );
-    if !item.planted.is_empty() {
-        let seq: Vec<Value> = item
-            .planted
-            .iter()
-            .map(|a| {
-                let mut m = Mapping::new();
-                m.insert(Value::String("章".into()), Value::Number(a.chapter.into()));
-                m.insert(
-                    Value::String("引文".into()),
-                    Value::String(a.quote.trim().to_string()),
-                );
-                Value::Mapping(m)
-            })
-            .collect();
-        map.insert(Value::String("埋设".into()), Value::Sequence(seq));
-    }
-    if !item.recovered.is_empty() {
-        let seq: Vec<Value> = item
-            .recovered
-            .iter()
-            .map(|r| {
-                let mut m = Mapping::new();
-                m.insert(Value::String("章".into()), Value::Number(r.chapter.into()));
-                m.insert(
-                    Value::String("引文".into()),
-                    Value::String(r.quote.trim().to_string()),
-                );
-                m.insert(
-                    Value::String("类型".into()),
-                    Value::String(r.kind.trim().to_string()),
-                );
-                if let Some(note) = r.note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
-                    m.insert(Value::String("说明".into()), Value::String(note.to_string()));
-                }
-                Value::Mapping(m)
-            })
-            .collect();
-        map.insert(Value::String("回收".into()), Value::Sequence(seq));
-    }
-    Value::Mapping(map)
+    thread::write_threads(&foreshadow_path(project), list, |item| {
+        let mut map = Mapping::new();
+        map.insert(
+            Value::String("名".into()),
+            Value::String(item.name.trim().to_string()),
+        );
+        let state = item.state.trim();
+        map.insert(
+            Value::String("状态".into()),
+            Value::String(if state.is_empty() { STATE_PENDING } else { state }.to_string()),
+        );
+        if !item.planted.is_empty() {
+            map.insert(
+                Value::String("埋设".into()),
+                thread::anchors_value(&item.planted),
+            );
+        }
+        if !item.recovered.is_empty() {
+            map.insert(
+                Value::String("回收".into()),
+                thread::payoffs_value(&item.recovered),
+            );
+        }
+        Value::Mapping(map)
+    })
 }
 
 // ---------- 操作 ----------
@@ -374,7 +158,7 @@ pub fn annotate_foreshadow(
         return Err("引文不能为空".to_string());
     }
     let mut list = read_foreshadows(project)?;
-    let anchor = ForeshadowAnchor {
+    let anchor = Anchor {
         chapter,
         quote: quote.to_string(),
     };
@@ -434,7 +218,7 @@ pub fn recover_foreshadow(
         r.chapter == chapter && r.quote == quote && r.kind == kind && r.note.as_deref() == note
     });
     if !dup {
-        item.recovered.push(ForeshadowRecovery {
+        item.recovered.push(Payoff {
             chapter,
             quote: quote.to_string(),
             kind: kind.to_string(),
@@ -491,54 +275,23 @@ pub fn delete_foreshadow(project: &Path, name: &str) -> Result<Vec<Foreshadow>, 
 /// 看板数据：读伏笔.yaml ＋ 现扫正文算超期与引文失配（无索引，#12）。
 pub fn foreshadow_board(project: &Path) -> Result<Vec<ForeshadowView>, String> {
     let list = read_foreshadows(project)?;
-    let chapters = scan_chapters(project)?;
-    let max_ordinal = chapters.iter().filter_map(|c| c.ordinal).max().unwrap_or(0);
-    let mut texts: BTreeMap<u32, Option<String>> = BTreeMap::new();
-    for chapter in &chapters {
-        if let Some(ordinal) = chapter.ordinal {
-            texts.insert(ordinal, read_text(&chapter.path).ok());
-        }
-    }
-    let stale = |chapter: u32, quote: &str| -> bool {
-        match texts.get(&chapter) {
-            Some(Some(text)) => find_quote(text, quote).is_none(),
-            // 章文件缺失（被删/被重编号挪走）也算失配。
-            _ => true,
-        }
-    };
+    let texts = thread::ChapterTexts::load(project)?;
+    let max_ordinal = texts.max_ordinal();
     Ok(list
         .into_iter()
         .map(|f| {
             let last_planted_chapter = f.planted.iter().map(|a| a.chapter).max();
             let uncollected_chapters = match (f.state.as_str(), last_planted_chapter) {
                 (STATE_PLANTED, Some(last)) | (STATE_PARTIAL, Some(last)) => {
-                    Some(max_ordinal.saturating_sub(last))
+                    Some(thread::chapters_since(max_ordinal, last))
                 }
                 _ => None,
             };
             ForeshadowView {
                 name: f.name,
                 state: f.state,
-                planted: f
-                    .planted
-                    .into_iter()
-                    .map(|a| AnchorView {
-                        stale: stale(a.chapter, &a.quote),
-                        chapter: a.chapter,
-                        quote: a.quote,
-                    })
-                    .collect(),
-                recovered: f
-                    .recovered
-                    .into_iter()
-                    .map(|r| RecoveryView {
-                        stale: stale(r.chapter, &r.quote),
-                        chapter: r.chapter,
-                        quote: r.quote,
-                        kind: r.kind,
-                        note: r.note,
-                    })
-                    .collect(),
+                planted: texts.anchor_views(&f.planted),
+                recovered: texts.payoff_views(&f.recovered),
                 uncollected_chapters,
                 overdue: uncollected_chapters.is_some_and(|n| n >= OVERDUE_CHAPTERS),
             }
@@ -696,20 +449,6 @@ mod tests {
         assert!(read_foreshadows(&p).is_err());
         write(&foreshadow_path(&p), "- 状态: 已埋\n");
         assert!(read_foreshadows(&p).is_err());
-    }
-
-    #[test]
-    fn 匹配_精确_去空白_不中为失配() {
-        assert_eq!(find_quote("前面钥匙后面", "钥匙"), Some((6, 12)));
-        // 引文含换行/缩进：去空白后仍命中。
-        let text = "他摸了摸口袋里的\n那把黄铜钥匙，若有所思。";
-        let quote = "口袋里的那把黄铜钥匙";
-        let (from, to) = find_quote(text, quote).unwrap();
-        assert_eq!(&text[from..to], "口袋里的\n那把黄铜钥匙");
-        assert!(find_quote(text, "完全不存在").is_none());
-        assert!(find_quote(text, "   ").is_none());
-        // 空文本。
-        assert!(find_quote("", "钥匙").is_none());
     }
 
     #[test]
