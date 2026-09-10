@@ -556,12 +556,13 @@ export interface ChatMessage {
   meta?: MessageMeta | null;
 }
 
-/** 编辑器三命令落在消息上的上下文：采纳回写按选区行号定位
- *  （callout 插入选区末行行尾、标注按行号换算章范围；正文改动后行号可能过期，越界收敛）。 */
+/** 命令落在消息上的上下文：采纳回写按选区行号定位
+ *  （callout 插入选区末行行尾、标注按行号换算章范围；正文改动后行号可能过期，越界收敛）。
+ *  体检类命令没有行号，只有 kind——它们不带采纳动作。 */
 export interface MessageMeta {
   kind: AiCommandKind;
-  startLine: number;
-  endLine: number;
+  startLine?: number;
+  endLine?: number;
 }
 
 /** 与 Rust 侧 ai.rs::ChatSession 对应；id 由前端 crypto.randomUUID() 生成。 */
@@ -587,23 +588,36 @@ export type ChatStreamEvent =
   | { type: "delta"; text: string }
   | { type: "done"; reason: string | null };
 
-/** 编辑器三命令（设计共识 §七：AI 给初稿，人确认后才落盘）。 */
-export type AiCommandKind = "梳理" | "标注" | "小结";
+/** AI 命令（设计共识 §七、docs/spec/AI命令集.md：AI 给初稿，人确认后才落盘）。
+ *  拆书三条＝梳理/标注/小结（选区＋行号）；构思两条＝排布体检/矛盾梳理；
+ *  书写两条＝本章体检（材料由后端组装）/润色（材料＝选区）。 */
+export type AiCommandKind =
+  | "梳理"
+  | "标注"
+  | "小结"
+  | "排布体检"
+  | "矛盾梳理"
+  | "本章体检"
+  | "润色";
 
-/** 编辑器发给 AI 面板的命令种子：选区文本＋行号（1 起）。 */
+/** 板块发给 AI 面板的命令种子：`text` 既是选区文本也是后端组装的材料。 */
 export interface AiSeed {
   kind: AiCommandKind;
+  /** 书名（拆书稿或构思项目）——只进提示词与消息元数据。 */
   bookName: string;
   text: string;
-  startLine: number;
-  endLine: number;
-  /** 小结命令带的章标题等说明。 */
+  /** 拆书三条命令的选区行号（1 起）；体检/润色没有行号。 */
+  startLine?: number;
+  endLine?: number;
+  /** 命令带的说明（小结的章标题、润色的章名等）。 */
   note?: string;
 }
 
 /** AI 面板当前文档快照（由编辑器注册的桥提供）。 */
 export interface DocSnapshot {
   bookName: string;
+  /** 更细的定位（书写＝章名；拆书没有）。 */
+  label?: string;
   path: string;
   content: string;
 }
@@ -621,4 +635,12 @@ export interface EditorBridge {
   adoptCallout(kind: "点评" | "小结", text: string, anchorLine: number): boolean;
   /** 按选区行号换算章范围，预填并打开桥段标注对话框。 */
   adoptTrope(startLine: number, endLine: number, s: TropeSuggestion): void;
+}
+
+/** 写作页向 AI 面板暴露的回写桥（工单 #15）：`润色` 的采纳＝替换选中，
+ *  走 CodeMirror 正常编辑路径（自动保存与 Ctrl+Z 都照旧）。 */
+export interface WritingBridge {
+  getDoc(): DocSnapshot | null;
+  /** 用润色稿替换当前选区；没有选区/编辑器未就绪返回 false。 */
+  replaceSelection(text: string): boolean;
 }

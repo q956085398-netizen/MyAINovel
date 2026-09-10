@@ -1,4 +1,5 @@
 mod ai;
+mod ai_context;
 mod book_file;
 mod chapter;
 mod expectation;
@@ -577,6 +578,17 @@ fn chat_cancel(state: tauri::State<'_, AiState>, token: u64) {
     state.cancel(token);
 }
 
+/// AI 命令的材料（工单 #15，docs/spec/AI命令集.md）：按固定口径从盘上现读
+/// 组装成一段纯文本，只读不写；提示词在前端 ai.ts，两处各管一段。
+#[tauri::command]
+fn build_ai_context(
+    kind: String,
+    project: String,
+    chapter: Option<u32>,
+) -> Result<String, String> {
+    ai_context::build_context(&kind, Path::new(&project), chapter)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -654,7 +666,8 @@ pub fn run() {
             save_chat_session,
             delete_chat_session,
             chat_stream,
-            chat_cancel
+            chat_cancel,
+            build_ai_context
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

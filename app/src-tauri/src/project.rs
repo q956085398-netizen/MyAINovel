@@ -136,7 +136,8 @@ fn project_entry(dir: &Path) -> ProjectEntry {
     }
 }
 
-fn strip_book_marks(name: &str) -> String {
+/// 文件夹名去《》：书名缺省口径（项目列表与 AI 命令材料共用）。
+pub(crate) fn strip_book_marks(name: &str) -> String {
     name.trim_start_matches('《').trim_end_matches('》').to_string()
 }
 

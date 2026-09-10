@@ -15,6 +15,7 @@ import type {
   EditorBridge,
   ProjectEntry,
   TropeSuggestion,
+  WritingBridge,
 } from "./types";
 
 const SECTIONS = ["拆书", "构思", "书写"] as const;
@@ -49,9 +50,15 @@ function App() {
     quote: string;
   } | null>(null);
   const bridgeRef = useRef<EditorBridge | null>(null);
+  // 写作页的桥（工单 #15）：拆书编辑器与写作页都可能挂着，按当前板块取用。
+  const writingBridgeRef = useRef<WritingBridge | null>(null);
 
   const registerBridge = useCallback((bridge: EditorBridge | null) => {
     bridgeRef.current = bridge;
+  }, []);
+
+  const registerWritingBridge = useCallback((bridge: WritingBridge | null) => {
+    writingBridgeRef.current = bridge;
   }, []);
 
   const chooseLibraryFolder = useCallback(async () => {
@@ -91,13 +98,28 @@ function App() {
 
   const consumeWritingJump = useCallback(() => setWritingJump(null), []);
 
-  /** 编辑器三命令：种子进 AI 面板并展开。 */
+  /** 编辑器板块命令（拆书三条、构思两条、书写两条）：种子进 AI 面板并展开。 */
   const handleAiCommand = useCallback((seed: AiSeed) => {
     setAiSeed(seed);
     setAiOpen(true);
   }, []);
 
-  const getDoc = useCallback((): DocSnapshot | null => bridgeRef.current?.getDoc() ?? null, []);
+  /** 「携带当前文档」按当前板块取：拆书＝拆书稿，书写＝当前章；构思板没有文档。 */
+  const getDoc = useCallback((): DocSnapshot | null => {
+    if (section === "书写") return writingBridgeRef.current?.getDoc() ?? null;
+    if (section === "拆书") return bridgeRef.current?.getDoc() ?? null;
+    return null;
+  }, [section]);
+
+  /** 采纳润色＝替换写作页当前选区。不在书写板块时不认——
+   *  三个板块常驻挂载，切走后写作页还在（隐藏），不许悄悄改到看不见的正文。 */
+  const replaceSelection = useCallback(
+    (text: string) => {
+      if (section !== "书写") return false;
+      return writingBridgeRef.current?.replaceSelection(text) ?? false;
+    },
+    [section],
+  );
 
   const adoptCallout = useCallback((kind: "点评" | "小结", text: string, anchorLine: number) => {
     return bridgeRef.current?.adoptCallout(kind, text, anchorLine) ?? false;
@@ -183,6 +205,7 @@ function App() {
             jump={ideationJump}
             onJumpConsumed={consumeIdeationJump}
             onOpenChapter={openChapterFromIdeation}
+            onAiCommand={handleAiCommand}
           />
         </div>
         <div className={`section-wrap ${section === "书写" ? "" : "hidden"}`}>
@@ -192,6 +215,8 @@ function App() {
             onChooseFolder={chooseLibraryFolder}
             jump={writingJump}
             onJumpConsumed={consumeWritingJump}
+            onAiCommand={handleAiCommand}
+            registerBridge={registerWritingBridge}
           />
         </div>
       </main>
@@ -204,6 +229,7 @@ function App() {
         getDoc={getDoc}
         adoptCallout={adoptCallout}
         adoptTrope={adoptTrope}
+        replaceSelection={replaceSelection}
       />
     </div>
   );

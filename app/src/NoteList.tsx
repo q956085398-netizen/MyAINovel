@@ -13,6 +13,8 @@ interface NoteListProps {
   onChanged: () => void;
   /** 矛盾提为单元成功后：切到单元页。 */
   onPromoted: (unit: NoteEntry) => void;
+  /** 板块 AI 命令（目前只给矛盾页「矛盾梳理」）：材料由后端组装，只出报告。 */
+  onAiCommand?: () => void;
 }
 
 const KIND_HEADINGS: Record<NoteKind, string> = {
@@ -38,6 +40,7 @@ export default function NoteList({
   vocab,
   onChanged,
   onPromoted,
+  onAiCommand,
 }: NoteListProps) {
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -99,12 +102,23 @@ export default function NoteList({
           <h2>{KIND_HEADINGS[kind]}</h2>
           <p className="hint">{KIND_HINTS[kind]}</p>
         </div>
-        <button
-          className="btn primary"
-          onClick={() => setEditing({ draft: emptyNoteDraft(kind), prevPath: null })}
-        >
-          新建{kind}
-        </button>
+        <div className="page-actions">
+          {onAiCommand && (
+            <button
+              className="btn"
+              title="AI 分拣这一池矛盾：能长成单元的、重复的、偏离类型圈的（只出报告，不改文件）"
+              onClick={onAiCommand}
+            >
+              AI 矛盾梳理
+            </button>
+          )}
+          <button
+            className="btn primary"
+            onClick={() => setEditing({ draft: emptyNoteDraft(kind), prevPath: null })}
+          >
+            新建{kind}
+          </button>
+        </div>
       </div>
 
       {selectedStatus > 1 && (

@@ -5,6 +5,8 @@ import {
   buildCommandMessages,
   buildRequestMessages,
   formatCalloutText,
+  formatProseText,
+  isReportKind,
   parseTropeSuggestion,
 } from "./ai";
 import type {
@@ -28,13 +30,15 @@ interface AiSidebarProps {
   onClose: () => void;
   /** 库根：标注命令组提示词前加载词表，让 AI 优先复用既有类型词。 */
   libraryPath: string | null;
-  /** 编辑器命令种子：带选区与行号，面板消费后回调清空。 */
+  /** 板块命令种子：带材料（拆书三条带选区与行号），面板消费后回调清空。 */
   seed: AiSeed | null;
   onSeedConsumed: () => void;
   getDoc: () => DocSnapshot | null;
   /** 采纳 callout：anchorLine 为命令时选区末行（1 起），编辑器按其行尾插入。 */
   adoptCallout: (kind: "点评" | "小结", text: string, anchorLine: number) => boolean;
   adoptTrope: (startLine: number, endLine: number, s: TropeSuggestion) => void;
+  /** 采纳润色稿：替换写作页当前选区（没有选区/编辑器未就绪返回 false）。 */
+  replaceSelection: (text: string) => boolean;
 }
 
 function nowSec(): number {
@@ -52,6 +56,7 @@ export default function AiSidebar({
   getDoc,
   adoptCallout,
   adoptTrope,
+  replaceSelection,
 }: AiSidebarProps) {
   const [config, setConfig] = useState<AiConfig | null>(null);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
@@ -217,8 +222,8 @@ export default function AiSidebar({
     }
   }
 
-  // 编辑器三命令种子：面板拿到即组提示词发送（ADR 0003：AI 只处理人写的内容）。
-  // 供应商未配置时保留种子并打开设置，配好后重跑本效应即自动发出，选区不丢。
+  // 板块命令种子：面板拿到即组提示词发送（ADR 0003：AI 只处理人写的内容）。
+  // 供应商未配置时保留种子并打开设置，配好后重跑本效应即自动发出，材料不丢。
   useEffect(() => {
     if (!seed || !config || seedRef.current === seed) return;
     if (!provider) {
@@ -284,13 +289,29 @@ export default function AiSidebar({
   }
 
   function handleAdopt(kind: AiCommandKind, idx: number, content: string, meta: MessageMeta) {
+    if (isReportKind(kind)) {
+      // 体检类命令只出报告（spec §二、§五：建议不是闸，报告不落盘）。
+      return;
+    }
     if (kind === "标注") {
       const suggestion = parseTropeSuggestion(content);
-      if (!suggestion) return;
+      // 行号是命令时的选区快照：缺了（老会话/新命令）就不采纳，不猜位置。
+      if (!suggestion || meta.startLine === undefined || meta.endLine === undefined) return;
       adoptTrope(meta.startLine, meta.endLine, suggestion);
       setAdoptedSet((s) => new Set(s).add(idx));
       return;
     }
+    if (kind === "润色") {
+      // 润色是整体改写：替换选中；编辑器不可用（切了板块/没选区）只提示，不乱插。
+      const ok = replaceSelection(formatProseText(content));
+      if (ok) {
+        setAdoptedSet((s) => new Set(s).add(idx));
+      } else {
+        setError("替换失败：回到书写板块、停在当前章，且正文里还留着那段选区。");
+      }
+      return;
+    }
+    if (meta.endLine === undefined) return;
     const ok = adoptCallout(
       kind === "梳理" ? "点评" : "小结",
       formatCalloutText(content),
@@ -364,8 +385,10 @@ export default function AiSidebar({
       <div className="ai-messages" ref={messagesRef}>
         {!current || current.messages.length === 0 ? (
           <div className="ai-empty">
-            <p>和 AI 聊拆书、找灵感。编辑器里选中内容后可用三个命令：</p>
-            <p className="hint">梳理选中内容 · 建议类型/解法标注 · 提炼小结</p>
+            <p>和 AI 聊拆书、找灵感、构思剧情。各板块的「AI 命令」：</p>
+            <p className="hint">拆书：梳理选中内容 · 建议类型/解法标注 · 提炼小结</p>
+            <p className="hint">构思：排布体检 · 矛盾梳理（只出报告，不改文件）</p>
+            <p className="hint">书写：本章体检 · 润色选中（润色点采纳才替换正文）</p>
             <p className="hint">AI 只给初稿与建议，采纳后才会写入文档。</p>
           </div>
         ) : (
@@ -393,7 +416,7 @@ export default function AiSidebar({
 
       <div className="ai-composer">
         <div className="ai-composer-controls">
-          <label className="ai-attach" title="把当前打开的拆书稿全文作为上下文发给 AI">
+          <label className="ai-attach" title="把当前打开的文档（拆书稿或当前章）全文作为上下文发给 AI">
             <input
               type="checkbox"
               checked={docAttached}
@@ -404,7 +427,7 @@ export default function AiSidebar({
           </label>
           {docAttached && doc && (
             <span className="ai-ctx-chip">
-              《{doc.bookName}》约 {doc.content.length} 字
+              《{doc.bookName}》{doc.label ? ` · ${doc.label}` : ""} 约 {doc.content.length} 字
             </span>
           )}
         </div>
@@ -470,6 +493,8 @@ function AdoptActions({
   adopted: boolean;
   onAdopt: () => void;
 }) {
+  // 体检类命令只出报告，没有采纳动作（spec §二、§五）。
+  if (isReportKind(kind)) return null;
   if (kind === "标注") {
     const parsed = parseTropeSuggestion(content);
     return (
@@ -491,11 +516,17 @@ function AdoptActions({
       </div>
     );
   }
-  const label = kind === "梳理" ? "采纳为「点评」块插入" : "采纳为「小结」块插入";
+  const label =
+    kind === "梳理" ? "采纳为「点评」块插入" : kind === "润色" ? "替换选中正文" : "采纳为「小结」块插入";
   return (
     <div className="ai-adopt">
-      <button className="btn small" disabled={adopted} onClick={onAdopt}>
-        {adopted ? "已插入 ✓" : label}
+      <button
+        className="btn small"
+        disabled={adopted}
+        title={kind === "润色" ? "用润色稿替换正文里那段选区（可 Ctrl+Z 撤销）" : undefined}
+        onClick={onAdopt}
+      >
+        {adopted ? (kind === "润色" ? "已替换 ✓" : "已插入 ✓") : label}
       </button>
     </div>
   );

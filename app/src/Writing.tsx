@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ProofIssue, ProjectEntry, WritingLocate } from "./types";
+import type { AiSeed, ProofIssue, ProjectEntry, WritingBridge, WritingLocate } from "./types";
 import { errMsg, formatCount } from "./util";
 import WritingPage from "./WritingPage";
 import { ExportDialog } from "./ExportDialog";
@@ -25,6 +25,10 @@ interface WritingProps {
   /** 从伏笔看板跳来：打开该项目的这一章并选中引文；消费后清空。 */
   jump: { projectDir: string; ordinal: number; quote: string } | null;
   onJumpConsumed: () => void;
+  /** 板块 AI 命令（本章体检/润色）：种子交给 AI 面板。 */
+  onAiCommand: (seed: AiSeed) => void;
+  /** 写作页向 AI 面板注册回写桥（采纳润色＝替换选中）。 */
+  registerBridge: (bridge: WritingBridge | null) => void;
 }
 
 /** 书写板块（工单 #5，docs/spec/书写编辑器.md）：日常码字工具。
@@ -35,6 +39,8 @@ export default function Writing({
   onChooseFolder,
   jump,
   onJumpConsumed,
+  onAiCommand,
+  registerBridge,
 }: WritingProps) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -131,6 +137,8 @@ export default function Writing({
         project={open.project}
         active={active}
         locate={open.locate}
+        onAiCommand={onAiCommand}
+        registerBridge={registerBridge}
         onBack={() => {
           setOpen(null);
           if (libraryPath) void scan(libraryPath);

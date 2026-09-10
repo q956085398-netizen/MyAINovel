@@ -13,6 +13,7 @@ import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AiSeed,
   ChapterEntry,
   ExpectationBoard,
   Foreshadow,
@@ -22,6 +23,7 @@ import type {
   SaveResult,
   SnapshotEntry,
   UnitBrief,
+  WritingBridge,
   WritingLocate,
   WritingStats,
 } from "./types";
@@ -172,6 +174,10 @@ interface WritingPageProps {
   onBack: () => void;
   /** 正文有变化：让上层刷新项目列表的计数。 */
   onChanged: () => void;
+  /** 板块 AI 命令（本章体检/润色）：种子交给 AI 面板（工单 #15）。 */
+  onAiCommand: (seed: AiSeed) => void;
+  /** 向 AI 面板注册回写桥：采纳润色＝替换当前选区。 */
+  registerBridge: (bridge: WritingBridge | null) => void;
 }
 
 /** 写作页（工单 #5，docs/spec/书写编辑器.md）：章节列表＋单章编辑器＋
@@ -182,6 +188,8 @@ export default function WritingPage({
   locate,
   onBack,
   onChanged,
+  onAiCommand,
+  registerBridge,
 }: WritingPageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -901,6 +909,56 @@ export default function WritingPage({
     onBack();
   }
 
+  // ---------- AI 命令（工单 #15） ----------
+
+  /** 本章体检：材料（正文＋本章伏笔/三线＋所属单元）由后端现读组装，只出报告。
+   *  读的是盘上正文——先把未保存的改动落盘，冲突没裁决就不跑。 */
+  async function runChapterCheck() {
+    const entry = currentRef.current;
+    if (!entry || entry.ordinal === null) {
+      window.alert("先打开一章再跑体检（章序按文件名前缀认，未编号章不参与）。");
+      return;
+    }
+    if (dirtyRef.current && !(await saveNow(false))) {
+      window.alert("本章还有未落盘的修改（或保存冲突未裁决），先处理再跑体检。");
+      return;
+    }
+    try {
+      const text = await invoke<string>("build_ai_context", {
+        kind: "本章体检",
+        project: project.dir,
+        chapter: entry.ordinal,
+      });
+      onAiCommand({ kind: "本章体检", bookName: project.title, text });
+    } catch (e) {
+      window.alert(`AI 命令材料读取失败：${errMsg(e)}`);
+    }
+  }
+
+  /** 润色：只把选中的那段正文交给 AI；采纳（替换选中）在面板里点。 */
+  function runPolish() {
+    const view = viewRef.current;
+    const entry = currentRef.current;
+    if (!view || !entry) return;
+    const sel = view.state.selection.main;
+    if (sel.empty) {
+      window.alert("先在正文里选中要润色的那一段。");
+      return;
+    }
+    const text = view.state.doc.sliceString(sel.from, sel.to);
+    if (!text.trim()) {
+      window.alert("选中的是空白，先选一段正文。");
+      return;
+    }
+    // 带原始选区（含首尾空白）：AI 看到的与被替换的是同一段，不悄悄吞掉换行。
+    onAiCommand({
+      kind: "润色",
+      bookName: project.title,
+      text,
+      note: chapterLabel(entry, prefix),
+    });
+  }
+
   // ---------- 生命周期 ----------
 
   useEffect(() => {
@@ -986,6 +1044,39 @@ export default function WritingPage({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
+
+  // AI 面板的桥（工单 #15）：getDoc＝当前章全文（「携带当前文档」用），
+  // replaceSelection＝采纳润色稿。替换走正常编辑路径：会标脏、自动保存、可 Ctrl+Z。
+  useEffect(() => {
+    registerBridge({
+      getDoc: () => {
+        const view = viewRef.current;
+        const entry = currentRef.current;
+        if (!view || !entry) return null;
+        return {
+          bookName: project.title,
+          label: chapterLabel(entry, prefix),
+          path: entry.path,
+          content: view.state.doc.toString(),
+        };
+      },
+      replaceSelection: (text: string) => {
+        const view = viewRef.current;
+        if (!view) return false;
+        const sel = view.state.selection.main;
+        if (sel.empty) return false;
+        view.dispatch({
+          changes: { from: sel.from, to: sel.to, insert: text },
+          selection: { anchor: sel.from + text.length },
+          scrollIntoView: true,
+        });
+        return true;
+      },
+    });
+    return () => registerBridge(null);
+    // project 在生命周期内不变（父组件按项目重挂载）；prefix 影响文档抬头，变了重挂桥。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefix]);
 
   // 右键菜单：点别处或 Esc 关掉（菜单内的 mousedown 不算「别处」）。
   useEffect(() => {
@@ -1077,6 +1168,22 @@ export default function WritingPage({
               </button>
               <button className="btn" onClick={() => setSidebarOpen((v) => !v)}>
                 {sidebarOpen ? "收起侧栏" : "侧栏"}
+              </button>
+              <button
+                className="btn"
+                disabled={!ready || !current}
+                title="AI 体检：对照章节拍与本章伏笔/三线现状（只出报告，不改正文）"
+                onClick={() => void runChapterCheck()}
+              >
+                AI 体检
+              </button>
+              <button
+                className="btn"
+                disabled={!ready || !current || counts.sel === 0}
+                title="AI 润色选中段落：回复后点「替换选中正文」才落盘（可 Ctrl+Z 撤销）"
+                onClick={runPolish}
+              >
+                AI 润色
               </button>
             </>
           )}

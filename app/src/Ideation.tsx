@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ProjectEntry } from "./types";
+import type { AiSeed, ProjectEntry } from "./types";
 import { errMsg, formatCount } from "./util";
 import ProjectPage, { type ProjectTab } from "./ProjectPage";
 
@@ -26,6 +26,8 @@ interface IdeationProps {
   onJumpConsumed: () => void;
   /** 伏笔看板点章：跳到书写板块打开该章。 */
   onOpenChapter: (projectDir: string, ordinal: number, quote: string) => void;
+  /** 板块 AI 命令（排布体检/矛盾梳理）：种子交给 AI 面板。 */
+  onAiCommand: (seed: AiSeed) => void;
 }
 
 /** 构思板块：库根「项目/」下一书一文件夹（工单 #4）。
@@ -36,6 +38,7 @@ export default function Ideation({
   jump,
   onJumpConsumed,
   onOpenChapter,
+  onAiCommand,
 }: IdeationProps) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -108,6 +111,7 @@ export default function Ideation({
         libraryPath={libraryPath}
         initialTab={open.tab}
         onOpenChapter={onOpenChapter}
+        onAiCommand={onAiCommand}
         onBack={() => {
           setOpen(null);
           if (libraryPath) void scan(libraryPath);

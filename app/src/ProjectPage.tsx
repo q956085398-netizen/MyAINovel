@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AiCommandKind,
+  AiSeed,
   ArrangementItem,
   NoteEntry,
   NoteKind,
@@ -38,6 +40,8 @@ interface ProjectPageProps {
   onChanged: () => void;
   /** 伏笔看板点章：跳到书写板块打开该章。 */
   onOpenChapter: (projectDir: string, ordinal: number, quote: string) => void;
+  /** 板块 AI 命令：材料由后端组装（工单 #15）。 */
+  onAiCommand: (seed: AiSeed) => void;
 }
 
 /** 构思项目页（工单 #4 的文件布局）：类型圈 / 矛盾池 / 单元 / 伏笔 / 排布 /
@@ -49,6 +53,7 @@ export default function ProjectPage({
   onBack,
   onChanged,
   onOpenChapter,
+  onAiCommand,
 }: ProjectPageProps) {
   const [tab, setTab] = useState<Tab>(initialTab ?? "类型圈");
   const [meta, setMeta] = useState<ProjectMeta>(emptyProjectMeta());
@@ -126,6 +131,19 @@ export default function ProjectPage({
   const refreshAll = useCallback(() => {
     onChanged();
   }, [onChanged]);
+
+  /** 板块 AI 命令：材料（类型圈/排布/矛盾池…）由后端现读组装，命令只出报告。 */
+  const runAiCommand = useCallback(
+    async (kind: AiCommandKind) => {
+      try {
+        const text = await invoke<string>("build_ai_context", { kind, project: project.dir });
+        onAiCommand({ kind, bookName: meta.title ?? project.title, text });
+      } catch (e) {
+        window.alert(`AI 命令材料读取失败：${errMsg(e)}`);
+      }
+    },
+    [onAiCommand, project.dir, project.title, meta.title],
+  );
 
   // 排布的地图提示值＝项目.yaml 的「地图」＋世界观「地理」词条（按名引用）。
   const mapNames = [
@@ -207,6 +225,7 @@ export default function ProjectPage({
               vocab={vocab}
               onChanged={refreshAll}
               onPromoted={() => setTab("单元")}
+              onAiCommand={tab === "矛盾" ? () => void runAiCommand("矛盾梳理") : undefined}
             />
           )}
           {tab === "伏笔" && (
@@ -238,6 +257,7 @@ export default function ProjectPage({
                 mapNames={mapNames}
                 initial={arrangement}
                 onSaved={refreshAll}
+                onAiCommand={() => void runAiCommand("排布体检")}
               />
             ))}
         </div>

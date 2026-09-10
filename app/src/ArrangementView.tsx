@@ -44,6 +44,8 @@ interface ArrangementViewProps {
   mapNames: string[];
   initial: ArrangementItem[];
   onSaved: () => void;
+  /** 板块 AI 命令「排布体检」：材料由后端组装，只出报告不改文件（工单 #15）。 */
+  onAiCommand?: () => void;
 }
 
 /** 排布（俗称大纲）：有序列表即全书次序；每项引用一个单元，属性只放
@@ -55,6 +57,7 @@ export default function ArrangementView({
   mapNames,
   initial,
   onSaved,
+  onAiCommand,
 }: ArrangementViewProps) {
   const [items, setItems] = useState<ArrangementItem[]>(initial);
   const [check, setCheck] = useState<ArrangementCheck | null>(null);
@@ -121,23 +124,32 @@ export default function ArrangementView({
     setDirty(true);
   }
 
-  async function save() {
-    if (saving) return;
+  async function save(): Promise<boolean> {
+    if (saving) return false;
     const empty = items.findIndex((i) => !i.unit.trim());
     if (empty >= 0) {
       window.alert(`第 ${empty + 1} 项还没选单元——每项都要按名引用一个单元。`);
-      return;
+      return false;
     }
     setSaving(true);
     try {
       await invoke("save_arrangement", { project, items });
       setDirty(false);
       onSaved();
+      return true;
     } catch (e) {
       window.alert(`排布保存失败：${errMsg(e)}`);
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  /** AI 体检读盘上排布：有未保存的改动先落盘，存不下就不跑（材料别是旧稿）。 */
+  async function runAiCheck() {
+    if (!onAiCommand) return;
+    if (dirty && !(await save())) return;
+    onAiCommand();
   }
 
   return (
@@ -150,9 +162,21 @@ export default function ArrangementView({
             （升级:战斗按 2:1 体检，节奏看张弛交替——只提示不拦截）。
           </p>
         </div>
-        <button className="btn primary" disabled={saving || !dirty} onClick={() => void save()}>
-          {saving ? "保存中…" : dirty ? "保存排布" : "已保存"}
-        </button>
+        <div className="page-actions">
+          {onAiCommand && (
+            <button
+              className="btn"
+              disabled={saving}
+              title="AI 读类型圈与排布给节奏建议（只出报告，不改 排布.yaml；有改动先保存）"
+              onClick={() => void runAiCheck()}
+            >
+              AI 排布体检
+            </button>
+          )}
+          <button className="btn primary" disabled={saving || !dirty} onClick={() => void save()}>
+            {saving ? "保存中…" : dirty ? "保存排布" : "已保存"}
+          </button>
+        </div>
       </div>
 
       <div className="arrange-add">
