@@ -663,6 +663,56 @@ pub fn transmute_story_card(
             card.category.name()
         ));
     }
+    let title = transmute_into(project)?;
+    let name = crate::inspiration::sanitize_title(&card.title)?;
+    let unit_path = notes_dir(project, NoteKind::Unit).join(format!("{name}.md"));
+    if unit_path.exists() {
+        return Err(format!(
+            "项目里已有同名单元「{name}」，先改名或删掉旧单元再转生"
+        ));
+    }
+    crate::inspiration::append_link(root, &card, &format!("《{title}》/{name}"))?;
+
+    save_unit_draft(project, name, card.core.clone(), card.tags.clone())
+}
+
+/// 角色卡转生书内人物（工单 #8，docs/spec/人物关系画布.md §五）：卡片标题→
+/// 人名、卡片正文→小传正文，分组/别名留空——**转生不生关系**（连线是画布
+/// 上的事，转生只管把人带进屋）；标签/来源/关联留在卡片，卡片「关联」追加
+/// 「《书名》/人名」单向记去向（转生即断链、无同步）。写入次序与故事卡转生
+/// 同款：先记去向、再建人物。
+pub fn transmute_character_card(
+    root: &Path,
+    card_path: &Path,
+    project: &Path,
+) -> Result<NoteEntry, String> {
+    let card = crate::inspiration::read_card(card_path);
+    if card.category != crate::inspiration::CardCategory::Character {
+        return Err(format!(
+            "「{}」是{}，只有角色卡能转生为人物",
+            card.title,
+            card.category.name()
+        ));
+    }
+    let title = transmute_into(project)?;
+    let name = crate::inspiration::sanitize_title(&card.title)?;
+    let person_path = notes_dir(project, NoteKind::Character).join(format!("{name}.md"));
+    if person_path.exists() {
+        return Err(format!(
+            "项目里已有同名人物「{name}」，先改名或删掉旧人物再转生"
+        ));
+    }
+    crate::inspiration::append_link(root, &card, &format!("《{title}》/{name}"))?;
+
+    let mut draft = NoteDraft::new(NoteKind::Character, name);
+    draft.body = card.body.clone();
+    save_note(project, &draft, None)
+}
+
+/// 转生落点校验，并给出卡片「关联」里要记的去向书名（两条转生路径共用）：
+/// 项目必须住 `项目/` 下；书名缺省回退到文件夹名去《》——去向只是备注，
+/// 不因元数据坏掉挡住转生。
+fn transmute_into(project: &Path) -> Result<String, String> {
     if !project.is_dir() {
         return Err(format!("不是有效的项目文件夹：{}", project.display()));
     }
@@ -673,17 +723,12 @@ pub fn transmute_story_card(
     if parent_name != Some(PROJECTS_DIR) {
         return Err(format!("{} 不在 项目/ 下", project.display()));
     }
+    Ok(book_title_of(project))
+}
 
-    let name = crate::inspiration::sanitize_title(&card.title)?;
-    let unit_path = notes_dir(project, NoteKind::Unit).join(format!("{name}.md"));
-    if unit_path.exists() {
-        return Err(format!(
-            "项目里已有同名单元「{name}」，先改名或删掉旧单元再转生"
-        ));
-    }
-
-    // 项目.yaml 缺失或损坏时用文件夹名兜底——去向只是备注，不因元数据坏掉挡住转生。
-    let title = read_project_meta(project)
+/// 书名：`项目.yaml` 的「书名」，缺省＝文件夹名去《》。
+fn book_title_of(project: &Path) -> String {
+    read_project_meta(project)
         .ok()
         .and_then(|m| m.title)
         .unwrap_or_else(|| {
@@ -691,10 +736,7 @@ pub fn transmute_story_card(
                 .file_name()
                 .map(|n| strip_book_marks(&n.to_string_lossy()))
                 .unwrap_or_default()
-        });
-    crate::inspiration::append_link(root, &card, &format!("《{title}》/{name}"))?;
-
-    save_unit_draft(project, name, card.core.clone(), card.tags.clone())
+        })
 }
 
 /// 建单元草稿：核心矛盾/类型预填，正文给同一份骨架——「矛盾提为单元」与

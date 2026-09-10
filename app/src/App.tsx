@@ -42,6 +42,8 @@ function App() {
   const [ideationJump, setIdeationJump] = useState<{
     project: ProjectEntry;
     tab?: ProjectTab;
+    /** 落到某个人物（「《书名》/人名」关联）：人物页签切到画布并选中该节点。 */
+    focus?: string;
   } | null>(null);
   // 构思（伏笔看板）→ 书写的跳转请求：打开该项目的这一章并选中引文。
   const [writingJump, setWritingJump] = useState<{
@@ -79,11 +81,14 @@ function App() {
     setLibTab("书库");
   }, []);
 
-  /** 从灵感库跳构思项目（故事卡转生的去向）：切到构思板块并打开该项目。 */
-  const openProjectFromInspiration = useCallback((project: ProjectEntry, tab?: ProjectTab) => {
-    setSection("构思");
-    setIdeationJump({ project, tab });
-  }, []);
+  /** 从灵感库跳构思项目（卡片转生的去向）：切到构思板块并打开该项目。 */
+  const openProjectFromInspiration = useCallback(
+    (project: ProjectEntry, tab?: ProjectTab, focus?: string) => {
+      setSection("构思");
+      setIdeationJump({ project, tab, focus });
+    },
+    [],
+  );
 
   const consumeIdeationJump = useCallback(() => setIdeationJump(null), []);
 

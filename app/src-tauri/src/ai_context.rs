@@ -12,11 +12,13 @@ use crate::chapter::{self, UnitBrief};
 use crate::expectation::{self, ExpectationView};
 use crate::foreshadow::{self, ForeshadowView};
 use crate::project::{self, ArrangementItem, NoteEntry, NoteKind};
+use crate::relationship::{self, LegendItem, Relationship};
 use crate::thread::{AnchorView, PayoffView};
 
-/// 命令：构思侧两条、书写侧一条（`润色` 的材料是选区本身，不走后端）。
+/// 命令：构思侧三条、书写侧一条（`润色` 的材料是选区本身，不走后端）。
 const KIND_ARRANGEMENT: &str = "排布体检";
 const KIND_CONTRADICTIONS: &str = "矛盾梳理";
+const KIND_RELATIONSHIPS: &str = "人物关系梳理";
 const KIND_CHAPTER: &str = "本章体检";
 
 /// 本章正文带上限（网文单章 2000~4000 字，12000 已很宽裕）；超出截断并注明。
@@ -29,12 +31,21 @@ const CORE_PREVIEW_LIMIT: usize = 80;
 const BODY_PREVIEW_LIMIT: usize = 60;
 /// 全书未收的线最多列多少条。
 const OPEN_LINES_LIMIT: usize = 30;
+/// 人物小传正文进材料的上限。
+const PERSON_BODY_LIMIT: usize = 400;
 
-/// 组装命令材料。只认三条体检类命令；`润色` 由前端带选区，不进这里。
-pub fn build_context(kind: &str, project: &Path, chapter: Option<u32>) -> Result<String, String> {
+/// 组装命令材料。`subjects` 只有「人物关系梳理」用（选中的人名）；
+/// 其余命令传空切片。`润色` 由前端带选区，不进这里。
+pub fn build_context(
+    kind: &str,
+    project: &Path,
+    chapter: Option<u32>,
+    subjects: &[String],
+) -> Result<String, String> {
     match kind {
         KIND_ARRANGEMENT => arrangement_context(project),
         KIND_CONTRADICTIONS => contradiction_context(project),
+        KIND_RELATIONSHIPS => relationship_context(project, subjects),
         KIND_CHAPTER => {
             let ordinal = chapter.ok_or_else(|| "「本章体检」需要指定章序".to_string())?;
             chapter_context(project, ordinal)
@@ -273,6 +284,114 @@ fn contradiction_context(project: &Path) -> Result<String, String> {
         out.push_str(&format!("- {}\n", parts.join(" ｜ ")));
     }
     Ok(out)
+}
+
+// ---------- 人物关系梳理（工单 #8 §6.3） ----------
+
+/// 材料：选中人物的小传（正文＋分组/别名）＋ 他们相关的**全部边**（含不在
+/// 选中集里的邻居人名）＋ 项目类型圈 ＋ 矛盾池现有标题。
+/// 带类型圈与矛盾标题的理由：类型圈是判断「这条关系能不能长出圈内剧情」的
+/// 唯一依据，矛盾标题是防重复的唯一依据；**不塞全书人物名单**——那与
+/// 「选中几个人」的动作意图冲突。表坏了显式报错（#15 纪律）。
+fn relationship_context(project: &Path, names: &[String]) -> Result<String, String> {
+    let subjects = relationship::clean_names(names)?;
+    if subjects.len() < 2 {
+        return Err("「人物关系梳理」至少要选两个人物".to_string());
+    }
+
+    let title = project_title(project)?;
+    let types = circle_types(project)?;
+    let table = relationship::read_table(project)?;
+    let persons = project::scan_notes(project, NoteKind::Character)?;
+    let contradictions = project::scan_notes(project, NoteKind::Contradiction)?;
+
+    let mut out = String::new();
+    out.push_str("【体检对象】选中人物的关系网\n");
+    out.push_str(&format!("【书名】《{title}》\n"));
+    out.push_str(&format!("【类型圈】{}\n", join_or(&types, "（类型圈还没定）")));
+
+    out.push_str("【选中人物】\n");
+    for name in &subjects {
+        match persons.iter().find(|p| &p.name == name) {
+            Some(note) => {
+                let mut head = vec![note.name.clone()];
+                if let Some(group) = opt_text(note.group.as_deref()) {
+                    head.push(format!("分组：{group}"));
+                }
+                let aliases = join_or(&note.aliases, "");
+                if !aliases.is_empty() {
+                    head.push(format!("别名：{aliases}"));
+                }
+                out.push_str(&format!("- {}\n", head.join(" ｜ ")));
+                let body = one_line(&note.body, PERSON_BODY_LIMIT);
+                out.push_str(&format!(
+                    "  小传：{}\n",
+                    if body.is_empty() { "（空）" } else { &body }
+                ));
+            }
+            // 选中的人没了要说出来，别让 AI 以为资料是齐的。
+            None => out.push_str(&format!("- {name}（没有找到这个小传）\n")),
+        }
+    }
+
+    out.push_str("【关系图例】\n");
+    if table.legend.is_empty() {
+        out.push_str("- （图例是空的）\n");
+    }
+    for item in &table.legend {
+        out.push_str(&format!(
+            "- {}（{}）\n",
+            item.name,
+            if item.directed { "有向" } else { "无向" }
+        ));
+    }
+
+    out.push_str("【关系】（选中人物相关的全部关系，含不在选中名单里的那一端）\n");
+    let related: Vec<&Relationship> = table
+        .edges
+        .iter()
+        .filter(|e| subjects.contains(&e.from) || subjects.contains(&e.to))
+        .collect();
+    if related.is_empty() {
+        out.push_str("- （他们身上还没有连过线）\n");
+    }
+    for edge in related {
+        out.push_str(&edge_text(edge, &table.legend));
+    }
+
+    let titles: Vec<String> = contradictions
+        .iter()
+        .map(|c| c.name.clone())
+        .filter(|n| !n.trim().is_empty())
+        .collect();
+    out.push_str(&format!(
+        "【已有矛盾】{}\n",
+        match titles.len() {
+            0 => "（矛盾池是空的）".to_string(),
+            n => format!("共 {n} 条：{}", titles.join("、")),
+        }
+    ));
+    Ok(out)
+}
+
+/// 一条关系进材料：两端＋类型＋描述＋秘密标记。
+fn edge_text(edge: &Relationship, legend: &[LegendItem]) -> String {
+    let arrow = if relationship::directed_of(&edge.kind, legend) {
+        "→"
+    } else {
+        "—"
+    };
+    let mut parts = vec![format!(
+        "{} {arrow} {} ｜ 类型：{}",
+        edge.from, edge.to, edge.kind
+    )];
+    if let Some(note) = opt_text(edge.note.as_deref()) {
+        parts.push(format!("描述：{}", one_line(note, CORE_PREVIEW_LIMIT)));
+    }
+    if edge.secret {
+        parts.push("秘密".to_string());
+    }
+    format!("- {}\n", parts.join(" ｜ "))
 }
 
 // ---------- 本章体检 ----------
@@ -522,7 +641,7 @@ mod tests {
     fn 排布体检_材料含次序_核心与机检() {
         let tmp = TempDir::new().unwrap();
         let p = sample_project(tmp.path());
-        let text = build_context(KIND_ARRANGEMENT, &p, None).unwrap();
+        let text = build_context(KIND_ARRANGEMENT, &p, None, &[]).unwrap();
         assert!(text.contains("【书名】《大魏读书人》"), "{text}");
         assert!(text.contains("【类型圈】掉马甲、打脸"), "{text}");
         assert!(text.contains("【排布】共 2 项（按全书次序）"), "{text}");
@@ -541,7 +660,7 @@ mod tests {
     fn 排布体检_空排布与空类型圈给显式占位() {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
-        let text = build_context(KIND_ARRANGEMENT, &p, None).unwrap();
+        let text = build_context(KIND_ARRANGEMENT, &p, None, &[]).unwrap();
         // 书名缺省＝文件夹名去《》（与项目列表同口径）。
         assert!(text.contains("【书名】《大魏读书人》"), "{text}");
         assert!(text.contains("【类型圈】（类型圈还没定）"), "{text}");
@@ -556,7 +675,7 @@ mod tests {
             &p.join("构思/排布.yaml"),
             "- 单元: 不存在的单元\n- 单元: 初入京城\n",
         );
-        let text = build_context(KIND_ARRANGEMENT, &p, None).unwrap();
+        let text = build_context(KIND_ARRANGEMENT, &p, None, &[]).unwrap();
         assert!(text.contains("排布引用了不存在的单元：不存在的单元"), "{text}");
         assert!(text.contains("还没排布的单元：论道"), "{text}");
     }
@@ -566,7 +685,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = sample_project(tmp.path());
         write(&p.join("构思/单元/论道.md"), "---\n起章: 5\n---\n单元正文\n");
-        let text = build_context(KIND_ARRANGEMENT, &p, None).unwrap();
+        let text = build_context(KIND_ARRANGEMENT, &p, None, &[]).unwrap();
         assert!(text.contains("核心：（空）"), "{text}");
     }
 
@@ -578,7 +697,7 @@ mod tests {
             &p.join("构思/矛盾/无核.md"),
             "---\n状态: 待用\n---\n这是没有一句话核心的矛盾正文，应当被摘进来。\n",
         );
-        let text = build_context(KIND_CONTRADICTIONS, &p, None).unwrap();
+        let text = build_context(KIND_CONTRADICTIONS, &p, None, &[]).unwrap();
         assert!(text.contains("【已有单元】共 2 个：初入京城、论道"), "{text}");
         assert!(text.contains("【矛盾池】共 2 条"), "{text}");
         assert!(text.contains("核心：铜钱是谁留的"), "{text}");
@@ -592,9 +711,90 @@ mod tests {
     fn 矛盾梳理_空池与无单元给显式占位() {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
-        let text = build_context(KIND_CONTRADICTIONS, &p, None).unwrap();
+        let text = build_context(KIND_CONTRADICTIONS, &p, None, &[]).unwrap();
         assert!(text.contains("【已有单元】（还没有单元）"), "{text}");
         assert!(text.contains("【矛盾池】（矛盾池是空的）"), "{text}");
+    }
+
+    fn sample_relationship_project(root: &Path) -> PathBuf {
+        let p = sample_project(root);
+        write(
+            &p.join("构思/人物/张三.md"),
+            "---\n分组: 主角阵营\n别名:\n  - 小陈\n---\n出身寒门，靠情报起家。\n",
+        );
+        write(
+            &p.join("构思/人物/李四.md"),
+            "---\n分组: 主角阵营\n---\n张三的徒弟。\n",
+        );
+        write(
+            &p.join("构思/人物/王五.md"),
+            "---\n分组: 敌方\n---\n国师门生。\n",
+        );
+        write(
+            &p.join("构思/人物关系.yaml"),
+            "图例:\n- 名: 师徒\n  色: \"#c0392b\"\n  方向: 有向\n- 名: 敌对\n  色: \"#7f8c8d\"\n  方向: 无向\n关系:\n- 起: 张三\n  止: 李四\n  类型: 师徒\n  描述: 收徒实为监视\n  秘密: true\n- 起: 张三\n  止: 王五\n  类型: 敌对\n- 起: 李四\n  止: 王五\n  类型: 旧识\n",
+        );
+        p
+    }
+
+    #[test]
+    fn 人物关系梳理_材料含小传_相关边_类型圈与矛盾标题() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_relationship_project(tmp.path());
+        let names = vec!["张三".to_string(), "王五".to_string()];
+        let text = build_context(KIND_RELATIONSHIPS, &p, None, &names).unwrap();
+        assert!(text.contains("【书名】《大魏读书人》"), "{text}");
+        assert!(text.contains("【类型圈】掉马甲、打脸"), "{text}");
+        assert!(text.contains("- 张三 ｜ 分组：主角阵营 ｜ 别名：小陈"), "{text}");
+        assert!(text.contains("小传：出身寒门，靠情报起家。"), "{text}");
+        assert!(text.contains("- 王五 ｜ 分组：敌方"), "{text}");
+        // 李四不在选中名单里，但他那一端要出现——关系网是一张网。
+        assert!(
+            text.contains("张三 → 李四 ｜ 类型：师徒 ｜ 描述：收徒实为监视 ｜ 秘密"),
+            "{text}"
+        );
+        // 无向边用「—」（方向取自图例项）。
+        assert!(text.contains("张三 — 王五 ｜ 类型：敌对"), "{text}");
+        assert!(text.contains("李四 → 王五 ｜ 类型：旧识"), "{text}");
+        assert!(text.contains("【关系图例】"), "{text}");
+        assert!(text.contains("- 师徒（有向）"), "{text}");
+        assert!(text.contains("【已有矛盾】共 1 条：铜钱来历"), "{text}");
+    }
+
+    #[test]
+    fn 人物关系梳理_选中小传缺失与空关系不静默() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_relationship_project(tmp.path());
+        write(
+            &p.join("构思/人物关系.yaml"),
+            "关系:\n- 起: 张三\n  止: 李四\n  类型: 师徒\n",
+        );
+        write(&p.join("构思/矛盾/铜钱来历.md"), "---\n状态: 池中\n---\n");
+        let names = vec!["张三".to_string(), "查无此人".to_string()];
+        let text = build_context(KIND_RELATIONSHIPS, &p, None, &names).unwrap();
+        assert!(text.contains("- 查无此人（没有找到这个小传）"), "{text}");
+        // 图例是空的（手写文件没写图例）要显式占位；图例外类型走兜底方向。
+        assert!(text.contains("（图例是空的）"), "{text}");
+        assert!(text.contains("张三 → 李四 ｜ 类型：师徒"), "{text}");
+
+        // 孤岛人物：没有连过线也要说出来。
+        let names = vec!["张三".to_string(), "李四".to_string()];
+        write(&p.join("构思/人物关系.yaml"), "图例: []\n关系: []\n");
+        let text = build_context(KIND_RELATIONSHIPS, &p, None, &names).unwrap();
+        assert!(text.contains("（他们身上还没有连过线）"), "{text}");
+    }
+
+    #[test]
+    fn 人物关系梳理_少于两人报错_表坏了报错() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_relationship_project(tmp.path());
+        let one = vec!["张三".to_string()];
+        assert!(build_context(KIND_RELATIONSHIPS, &p, None, &one)
+            .unwrap_err()
+            .contains("两个人物"));
+        write(&p.join("构思/人物关系.yaml"), "关系: 不是列表\n");
+        let names = vec!["张三".to_string(), "李四".to_string()];
+        assert!(build_context(KIND_RELATIONSHIPS, &p, None, &names).is_err());
     }
 
     fn sample_chapter_project(root: &Path) -> PathBuf {
@@ -619,7 +819,7 @@ mod tests {
     fn 本章体检_材料含本章_所属单元_伏笔三线与正文() {
         let tmp = TempDir::new().unwrap();
         let p = sample_chapter_project(tmp.path());
-        let text = build_context(KIND_CHAPTER, &p, Some(3)).unwrap();
+        let text = build_context(KIND_CHAPTER, &p, Some(3), &[]).unwrap();
         assert!(text.contains("【本章】第 3 章 第三章"), "{text}");
         assert!(
             text.contains("【所属单元】初入京城（第 1-4 章 ｜ 排布第 1/2 项 ｜ 线：主线 ｜ 地图：京城 ｜ 升级战斗：升级 ｜ 节奏：紧绷） ｜ 核心：主角要进城"),
@@ -662,7 +862,7 @@ mod tests {
         }
         write(&p.join("三线.yaml"), &yaml);
         write(&p.join("正文/0200 第二百章.md"), "很久以后的正文。\n");
-        let text = build_context(KIND_CHAPTER, &p, Some(200)).unwrap();
+        let text = build_context(KIND_CHAPTER, &p, Some(200), &[]).unwrap();
         assert!(text.contains("【全书未收的线】共 36 条（只列前 30）"), "{text}");
         let list: Vec<&str> = text
             .lines()
@@ -682,7 +882,7 @@ mod tests {
             &p.join("正文/0003 第三章.md"),
             &format!("开头{}", "字".repeat(CHAPTER_TEXT_LIMIT + 50)),
         );
-        let text = build_context(KIND_CHAPTER, &p, Some(3)).unwrap();
+        let text = build_context(KIND_CHAPTER, &p, Some(3), &[]).unwrap();
         assert!(
             text.contains(&format!("（正文已截断：只带前 {CHAPTER_TEXT_LIMIT} 字）")),
             "{text}"
@@ -703,7 +903,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = sample_project(tmp.path());
         write(&p.join("正文/0003 第三章.md"), "");
-        let text = build_context(KIND_CHAPTER, &p, Some(3)).unwrap();
+        let text = build_context(KIND_CHAPTER, &p, Some(3), &[]).unwrap();
         assert!(
             text.contains("【正文】--- 正文开始 ---\n（本章还是空的）\n--- 正文结束 ---"),
             "{text}"
@@ -717,9 +917,9 @@ mod tests {
     fn 本章体检_没有这一章或没给章序都报错() {
         let tmp = TempDir::new().unwrap();
         let p = sample_project(tmp.path());
-        let err = build_context(KIND_CHAPTER, &p, Some(9)).unwrap_err();
+        let err = build_context(KIND_CHAPTER, &p, Some(9), &[]).unwrap_err();
         assert!(err.contains("没有第 9 章"), "{err}");
-        let err = build_context(KIND_CHAPTER, &p, None).unwrap_err();
+        let err = build_context(KIND_CHAPTER, &p, None, &[]).unwrap_err();
         assert!(err.contains("需要指定章序"), "{err}");
     }
 
@@ -727,7 +927,7 @@ mod tests {
     fn 未知命令报错() {
         let tmp = TempDir::new().unwrap();
         let p = sample_project(tmp.path());
-        let err = build_context("随手一问", &p, None).unwrap_err();
+        let err = build_context("随手一问", &p, None, &[]).unwrap_err();
         assert!(err.contains("未知的 AI 命令"), "{err}");
     }
 
@@ -736,7 +936,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = sample_chapter_project(tmp.path());
         write(&p.join("伏笔.yaml"), "名: 不是列表\n");
-        let err = build_context(KIND_CHAPTER, &p, Some(3)).unwrap_err();
+        let err = build_context(KIND_CHAPTER, &p, Some(3), &[]).unwrap_err();
         assert!(err.contains("顶层应为列表"), "{err}");
     }
 
@@ -748,7 +948,7 @@ mod tests {
             &p.join("伏笔.yaml"),
             "- 名: 失配的伏笔\n  状态: 已埋\n  埋设:\n    - 章: 3\n      引文: 正文里没有这句话\n",
         );
-        let text = build_context(KIND_CHAPTER, &p, Some(3)).unwrap();
+        let text = build_context(KIND_CHAPTER, &p, Some(3), &[]).unwrap();
         assert!(text.contains("引文失配"), "{text}");
     }
 

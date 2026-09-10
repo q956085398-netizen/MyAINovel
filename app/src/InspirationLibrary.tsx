@@ -7,13 +7,14 @@ import type {
   CardDraft,
   ImportEntry,
   InspirationCard,
+  NoteEntry,
   ProjectEntry,
 } from "./types";
 import { CARD_CATEGORIES, emptyCardDraft } from "./types";
 import { errMsg, oneLinePreview } from "./util";
 import CardDialog from "./CardDialog";
 import ImportDialog from "./ImportDialog";
-import TransmuteDialog from "./TransmuteDialog";
+import TransmuteDialog, { type TransmuteTarget } from "./TransmuteDialog";
 import type { ProjectTab } from "./ProjectPage";
 
 function formatCount(n: number): string {
@@ -28,12 +29,47 @@ function formatDate(unixSec: number): string {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
+/** 卡片类别 → 转生落点（只开两条通道：故事卡→单元 #9、角色卡→人物 #8）。 */
+const TRANSMUTE_ACTIONS: Partial<
+  Record<CardCategory, { target: TransmuteTarget; label: string; hint: string }>
+> = {
+  故事卡: {
+    target: "单元",
+    label: "转生为单元",
+    hint: "新建到某个构思项目：核心矛盾与类型预填，正文只给骨架",
+  },
+  角色卡: {
+    target: "人物",
+    label: "转生为人物",
+    hint: "新建到某个构思项目：卡片正文进小传，分组与关系留给你自己填",
+  },
+};
+
+/** 卡片上的转生按钮；不能转生的类别不渲染。 */
+function TransmuteButton({
+  card,
+  onPick,
+}: {
+  card: InspirationCard;
+  onPick: (card: InspirationCard, target: TransmuteTarget) => void;
+}) {
+  const action = TRANSMUTE_ACTIONS[card.category];
+  if (!action) return null;
+  return (
+    <div className="card-actions">
+      <button className="btn small" title={action.hint} onClick={() => onPick(card, action.target)}>
+        {action.label}
+      </button>
+    </div>
+  );
+}
+
 interface InspirationLibraryProps {
   libraryPath: string | null;
   onChooseFolder: () => void;
   onOpenBook: (book: BookEntry) => void;
-  /** 「关联」里的项目去向（《书名》/单元名）→ 打开该项目的指定页签。 */
-  onOpenProject: (project: ProjectEntry, tab?: ProjectTab) => void;
+  /** 「关联」里的项目去向（《书名》/名字）→ 打开该项目的页签；给出人名则落到画布。 */
+  onOpenProject: (project: ProjectEntry, tab?: ProjectTab, focus?: string) => void;
   /** 转生时没有项目可去：切到「构思」板块新建。 */
   onGoIdeation: () => void;
 }
@@ -60,7 +96,10 @@ export default function InspirationLibrary({
   const [importing, setImporting] = useState<{ sourcePath: string; entries: ImportEntry[] } | null>(
     null,
   );
-  const [transmuting, setTransmuting] = useState<InspirationCard | null>(null);
+  const [transmuting, setTransmuting] = useState<{
+    card: InspirationCard;
+    target: TransmuteTarget;
+  } | null>(null);
 
   const scan = useCallback(async (root: string) => {
     setScanning(true);
@@ -79,8 +118,9 @@ export default function InspirationLibrary({
     if (libraryPath) void scan(libraryPath);
   }, [libraryPath, scan]);
 
-  /** 关联跳转：卡片标题 → 打开卡片；「《书名》/单元名」（转生去向）→ 打开
-   *  项目的「单元」页；拆书稿书名 → 打开拆书稿。 */
+  /** 关联跳转：卡片标题 → 打开卡片；「《书名》/名字」（转生去向）→ 打开
+   *  该项目的对应页签（先单元、再人物、再矛盾/世界观/开头，工单 #8 §五）；
+   *  拆书稿书名 → 打开拆书稿。 */
   async function openLink(text: string) {
     if (!libraryPath) return;
     const t = text.trim();
@@ -93,11 +133,25 @@ export default function InspirationLibrary({
       const slash = t.indexOf("/");
       if (slash > 0) {
         const title = t.slice(0, slash).trim().replace(/^《|》$/g, "");
+        const name = t.slice(slash + 1).trim();
         const projects = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
         const project = projects.find(
           (p) => p.title === title || p.name === title || p.name === `《${title}》`,
         );
+        if (project && name) {
+          // 按名在书内各构思笔记里找：先单元（#9 原样，既有卡片不失联），
+          // 再人物（落到画布并选中这个人）、矛盾、世界观、开头；
+          // 同名歧义由这个固定次序裁决。
+          for (const kind of ["单元", "人物", "矛盾", "世界观", "开头"] as const) {
+            const notes = await invoke<NoteEntry[]>("scan_notes", { project: project.dir, kind });
+            if (notes.some((n) => n.name === name)) {
+              onOpenProject(project, kind, kind === "人物" ? name : undefined);
+              return;
+            }
+          }
+        }
         if (project) {
+          // 名字对不上（单元改了名之类）按 #9 兜底：打开项目的单元页，不自动改条目。
           onOpenProject(project, "单元");
           return;
         }
@@ -308,17 +362,10 @@ export default function InspirationLibrary({
                       {oneLinePreview(card.body, 120)}
                     </p>
                   )}
-                  {card.category === "故事卡" && (
-                    <div className="card-actions">
-                      <button
-                        className="btn small"
-                        title="新建到某个构思项目：核心矛盾与类型预填，正文只给骨架"
-                        onClick={() => setTransmuting(card)}
-                      >
-                        转生为单元
-                      </button>
-                    </div>
-                  )}
+                  <TransmuteButton
+                    card={card}
+                    onPick={(c, target) => setTransmuting({ card: c, target })}
+                  />
                 </div>
               ))}
             </div>
@@ -346,13 +393,14 @@ export default function InspirationLibrary({
       {transmuting && libraryPath && (
         <TransmuteDialog
           libraryPath={libraryPath}
-          card={transmuting}
+          card={transmuting.card}
+          target={transmuting.target}
           onClose={() => setTransmuting(null)}
           onGoIdeation={onGoIdeation}
-          onDone={(project) => {
+          onDone={(project, target) => {
             setTransmuting(null);
             void scan(libraryPath);
-            onOpenProject(project, "单元");
+            onOpenProject(project, target);
           }}
         />
       )}

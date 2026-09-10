@@ -928,6 +928,7 @@ export default function WritingPage({
         kind: "本章体检",
         project: project.dir,
         chapter: entry.ordinal,
+        subjects: null,
       });
       onAiCommand({ kind: "本章体检", bookName: project.title, text });
     } catch (e) {

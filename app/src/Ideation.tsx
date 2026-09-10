@@ -20,9 +20,9 @@ function summary(p: ProjectEntry): string {
 interface IdeationProps {
   libraryPath: string | null;
   onChooseFolder: () => void;
-  /** 从灵感库跳来：打开该项目（可落到某个页签），打开后清空。
+  /** 从灵感库跳来：打开该项目（可落到某个页签／某个人物），打开后清空。
    *  带的是跳转方刚扫到的项目快照，不受本板块列表新鲜度影响。 */
-  jump: { project: ProjectEntry; tab?: ProjectTab } | null;
+  jump: { project: ProjectEntry; tab?: ProjectTab; focus?: string } | null;
   onJumpConsumed: () => void;
   /** 伏笔看板点章：跳到书写板块打开该章。 */
   onOpenChapter: (projectDir: string, ordinal: number, quote: string) => void;
@@ -43,9 +43,12 @@ export default function Ideation({
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<{ project: ProjectEntry; tab?: ProjectTab; seq: number } | null>(
-    null,
-  );
+  const [open, setOpen] = useState<{
+    project: ProjectEntry;
+    tab?: ProjectTab;
+    focus?: string;
+    seq: number;
+  } | null>(null);
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -78,7 +81,12 @@ export default function Ideation({
   // seq 递增让「再次跳到同一个项目」也重挂载——页签只在新挂载时生效。
   useEffect(() => {
     if (!jump) return;
-    setOpen((cur) => ({ project: jump.project, tab: jump.tab, seq: (cur?.seq ?? 0) + 1 }));
+    setOpen((cur) => ({
+      project: jump.project,
+      tab: jump.tab,
+      focus: jump.focus,
+      seq: (cur?.seq ?? 0) + 1,
+    }));
     onJumpConsumed();
   }, [jump, onJumpConsumed]);
 
@@ -110,6 +118,7 @@ export default function Ideation({
         project={open.project}
         libraryPath={libraryPath}
         initialTab={open.tab}
+        initialFocus={open.focus}
         onOpenChapter={onOpenChapter}
         onAiCommand={onAiCommand}
         onBack={() => {

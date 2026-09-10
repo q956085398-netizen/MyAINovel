@@ -29,3 +29,14 @@ export function splitList(text: string): string[] {
     .map((t) => t.trim())
     .filter(Boolean);
 }
+
+/** 排序调整用：把 from 位置的元素移到 to 位置（其余顺延）；越界原样返回。 */
+export function moveItem<T>(list: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) {
+    return list;
+  }
+  const next = [...list];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}

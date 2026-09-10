@@ -2288,3 +2288,136 @@ details.export-chapters summary {
   color: var(--ink-soft);
   font-size: 12px;
 }
+
+/* ---------- 人物关系画布（工单 #8，docs/spec/人物关系画布.md） ---------- */
+
+.character-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.character-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.rel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+}
+
+.rel-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  min-height: 0;
+}
+
+.rel-canvas {
+  flex-shrink: 0;
+  max-width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.rel-band {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.rel-band-label {
+  fill: var(--ink-soft);
+  font-size: 12px;
+}
+
+.rel-node circle {
+  fill: var(--panel);
+  stroke: var(--line);
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+
+.rel-node text {
+  font-size: 12px;
+  fill: var(--ink);
+  pointer-events: none;
+}
+
+.rel-node:hover circle {
+  stroke: var(--accent);
+}
+
+.rel-node.on circle {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.rel-edge-label {
+  font-size: 11px;
+  fill: var(--ink-soft);
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 4px;
+  pointer-events: none;
+}
+
+.rel-side {
+  flex: 1;
+  min-width: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.rel-side-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: var(--panel);
+}
+
+.rel-side-edges {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.rel-confluence {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #faf7f0;
+}
+
+.legend-table input[type="text"],
+.legend-table input:not([type]) {
+  width: 100%;
+}
+
+.legend-order {
+  white-space: nowrap;
+}
+
+.check-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal;
+}
+
+.dialog .check-line input {
+  width: auto;
+}

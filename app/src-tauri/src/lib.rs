@@ -9,6 +9,7 @@ mod inspiration;
 mod library;
 mod project;
 mod proofread;
+mod relationship;
 mod search;
 mod thread;
 mod trope;
@@ -29,6 +30,7 @@ use project::{
     ProjectMeta,
 };
 use proofread::ProofReport;
+use relationship::{Confluence, RelationshipTable, RelationshipView};
 use trope::TropeSpan;
 use vocabulary::Vocabulary;
 
@@ -251,6 +253,60 @@ fn transmute_story_card(
         Path::new(&root),
         Path::new(&card_path),
         Path::new(&project),
+    )
+}
+
+/// 角色卡转生书内人物：建人物、卡片「关联」记去向（工单 #8）。
+#[tauri::command]
+fn transmute_character_card(
+    root: String,
+    card_path: String,
+    project: String,
+) -> Result<NoteEntry, String> {
+    project::transmute_character_card(
+        Path::new(&root),
+        Path::new(&card_path),
+        Path::new(&project),
+    )
+}
+
+// --- 人物关系画布（工单 #8，docs/spec/人物关系画布.md）：构思/人物关系.yaml ---
+
+/// 画布数据：图例 ＋ 画得出来的边 ＋ 失效引用/图例外的类型（只提示）。
+/// 表坏了降级为缺省图例＋空表并带 warning，不拖垮画布。
+#[tauri::command]
+fn read_relationships(project: String) -> Result<RelationshipView, String> {
+    Ok(relationship::relationship_view(Path::new(&project)))
+}
+
+/// 整表写（读-合-写：顶层未知键保留，ADR 0004 原子写）；返回重算后的视图。
+#[tauri::command]
+fn save_relationships(
+    project: String,
+    table: RelationshipTable,
+) -> Result<RelationshipView, String> {
+    let path = PathBuf::from(&project);
+    relationship::save_table(&path, &table)?;
+    Ok(relationship::relationship_view(&path))
+}
+
+/// 人物交汇（只读派生）：他们之间的边 ＋ 共同出现的单元（现扫，零结构）。
+#[tauri::command]
+fn character_confluence(project: String, names: Vec<String>) -> Result<Confluence, String> {
+    relationship::character_confluence(Path::new(&project), &names)
+}
+
+/// 选中数人「提为矛盾」：建矛盾草稿（涉及人物＋边预填，不生成剧情内容）。
+#[tauri::command]
+fn promote_characters(
+    project: String,
+    names: Vec<String>,
+    name: Option<String>,
+) -> Result<NoteEntry, String> {
+    relationship::promote_characters_to_contradiction(
+        Path::new(&project),
+        &names,
+        name.as_deref(),
     )
 }
 
@@ -580,13 +636,20 @@ fn chat_cancel(state: tauri::State<'_, AiState>, token: u64) {
 
 /// AI 命令的材料（工单 #15，docs/spec/AI命令集.md）：按固定口径从盘上现读
 /// 组装成一段纯文本，只读不写；提示词在前端 ai.ts，两处各管一段。
+/// `subjects`＝选中的人名，只有「人物关系梳理」用（工单 #8 §6.3）。
 #[tauri::command]
 fn build_ai_context(
     kind: String,
     project: String,
     chapter: Option<u32>,
+    subjects: Option<Vec<String>>,
 ) -> Result<String, String> {
-    ai_context::build_context(&kind, Path::new(&project), chapter)
+    ai_context::build_context(
+        &kind,
+        Path::new(&project),
+        chapter,
+        subjects.as_deref().unwrap_or(&[]),
+    )
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -626,6 +689,11 @@ pub fn run() {
             check_arrangement,
             promote_contradiction,
             transmute_story_card,
+            transmute_character_card,
+            read_relationships,
+            save_relationships,
+            character_confluence,
+            promote_characters,
             scan_chapters,
             create_chapter,
             rename_chapter,

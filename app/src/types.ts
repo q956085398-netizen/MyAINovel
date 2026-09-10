@@ -530,6 +530,94 @@ export function emptyCardDraft(category: CardCategory = "故事卡"): CardDraft 
   return { category, title: "", tags: [], source: null, links: [], core: null, body: "" };
 }
 
+// --- 人物关系画布（工单 #8，docs/spec/人物关系画布.md）；与 Rust 侧 relationship.rs 对应 ---
+
+/** 图例项：画布级「可命名、有序、可绑定方向的分类集合」。 */
+export interface LegendItem {
+  name: string;
+  color: string;
+  /** 方向是图例项的属性，边继承它（不逐条设）。 */
+  directed: boolean;
+}
+
+/** 一条关系（边）：起→止 只表示有向边的方向，不表示归属——关系网是一张网。 */
+export interface Relationship {
+  from: string;
+  to: string;
+  /** 类型，按名引用图例项（图例外照画兜底样式，只提示）。 */
+  kind: string;
+  note: string | null;
+  /** 秘密标记：可叠加在任何类型上的布尔（方法论「未解之谜」）。 */
+  secret: boolean;
+}
+
+/** 关系表（构思/人物关系.yaml，应用受管、整表重写）。 */
+export interface RelationshipTable {
+  legend: LegendItem[];
+  edges: Relationship[];
+}
+
+/** 画布数据（派生，只读）。 */
+export interface RelationshipView {
+  legend: LegendItem[];
+  /** 文件里的**全部**边，保文件次序——**保存时的唯一底稿**：失效引用的边
+   *  也在里面，整表写回才不会把它们悄悄丢掉（画布只画两端都在的那些）。 */
+  edges: Relationship[];
+  /** `edges` 里引用了不存在人物的那些（画不出来，只列给人看）。 */
+  missing: Relationship[];
+  /** 边引用的、图例里没有的类型（照画兜底样式）。 */
+  unknownKinds: string[];
+  /** 边表坏了（画布降级为缺省图例＋空表）时的显式告警。 */
+  warning: string | null;
+}
+
+/** 人物交汇：他们之间的边 ＋ 共同出现的单元。 */
+export interface Confluence {
+  edges: Relationship[];
+  units: ConfluenceUnit[];
+}
+
+/** 一个提到过 ≥2 个选中人物的单元（人名纯文本提及，零结构）。 */
+export interface ConfluenceUnit {
+  name: string;
+  /** 这个单元正文里提到过的**选中**人物。 */
+  persons: string[];
+}
+
+/** 图例外类型的兜底样式（与 Rust 侧 relationship::FALLBACK_* 一致）。 */
+export const RELATION_FALLBACK_COLOR = "#7f8c8d";
+export const RELATION_FALLBACK_DIRECTED = true;
+/** 图例的色板（与 Rust 侧 relationship::PALETTE 一致）：新增图例项按位置取色。 */
+export const RELATION_PALETTE = [
+  "#c0392b",
+  "#7f8c8d",
+  "#8e44ad",
+  "#2e86c1",
+  "#d68910",
+  "#16a085",
+  "#c2185b",
+  "#5d6d7e",
+];
+
+export function relationPaletteColor(index: number): string {
+  return RELATION_PALETTE[index % RELATION_PALETTE.length];
+}
+
+/** 一条边在画布上的样式：类型命中图例就用图例的色与方向，否则走兜底。 */
+export function relationStyle(
+  kind: string,
+  legend: LegendItem[],
+): { color: string; directed: boolean; known: boolean } {
+  const item = legend.find((l) => l.name === kind);
+  return item
+    ? { color: item.color, directed: item.directed, known: true }
+    : { color: RELATION_FALLBACK_COLOR, directed: RELATION_FALLBACK_DIRECTED, known: false };
+}
+
+export function emptyLegendItem(index: number): LegendItem {
+  return { name: "", color: relationPaletteColor(index), directed: false };
+}
+
 // --- AI 侧边栏（设计共识 §七）；与 Rust 侧 ai.rs 对应（IPC 走 camelCase） ---
 
 /** 与 Rust 侧 ai.rs::AiProvider 对应。 */
@@ -589,7 +677,7 @@ export type ChatStreamEvent =
   | { type: "done"; reason: string | null };
 
 /** AI 命令（设计共识 §七、docs/spec/AI命令集.md：AI 给初稿，人确认后才落盘）。
- *  拆书三条＝梳理/标注/小结（选区＋行号）；构思两条＝排布体检/矛盾梳理；
+ *  拆书三条＝梳理/标注/小结（选区＋行号）；构思三条＝排布体检/矛盾梳理/人物关系梳理；
  *  书写两条＝本章体检（材料由后端组装）/润色（材料＝选区）。 */
 export type AiCommandKind =
   | "梳理"
@@ -597,6 +685,7 @@ export type AiCommandKind =
   | "小结"
   | "排布体检"
   | "矛盾梳理"
+  | "人物关系梳理"
   | "本章体检"
   | "润色";
 

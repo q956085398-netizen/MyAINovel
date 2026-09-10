@@ -18,6 +18,7 @@ import ExpectationBoard from "./ExpectationBoard";
 import ForeshadowBoard from "./ForeshadowBoard";
 import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
+import RelationshipCanvas from "./RelationshipCanvas";
 
 const TABS = ["类型圈", "矛盾", "单元", "伏笔", "三线", "排布", "人物", "世界观", "开头"] as const;
 /** 项目页签；跨板块跳转（灵感库关联 → 项目）也用它指路。 */
@@ -25,6 +26,10 @@ export type ProjectTab = (typeof TABS)[number];
 type Tab = ProjectTab;
 
 const NOTE_TABS: NoteKind[] = ["矛盾", "单元", "人物", "世界观", "开头"];
+
+/** 「人物」页签的两面：名单（小传）与画布（关系网）。 */
+const CHARACTER_VIEWS = ["名单", "画布"] as const;
+type CharacterView = (typeof CHARACTER_VIEWS)[number];
 
 function isNoteTab(tab: Tab): tab is NoteKind {
   return (NOTE_TABS as string[]).includes(tab);
@@ -35,6 +40,8 @@ interface ProjectPageProps {
   libraryPath: string | null;
   /** 打开时落在哪个页签（默认「类型圈」）；仅挂载时生效。 */
   initialTab?: ProjectTab;
+  /** 跨板块跳来的人名（灵感库关联 →「《书名》/人名」）：落到人物画布并选中。 */
+  initialFocus?: string;
   onBack: () => void;
   /** 项目内容变了：让上层刷新项目列表的计数。 */
   onChanged: () => void;
@@ -45,11 +52,12 @@ interface ProjectPageProps {
 }
 
 /** 构思项目页（工单 #4 的文件布局）：类型圈 / 矛盾池 / 单元 / 伏笔 / 排布 /
- *  人物 / 世界观 / 开头。正文由「书写」板块承接（工单 #5）。 */
+ *  人物（名单｜画布）/ 世界观 / 开头。正文由「书写」板块承接（工单 #5）。 */
 export default function ProjectPage({
   project,
   libraryPath,
   initialTab,
+  initialFocus,
   onBack,
   onChanged,
   onOpenChapter,
@@ -65,6 +73,9 @@ export default function ProjectPage({
   const [arrangement, setArrangement] = useState<ArrangementItem[]>([]);
   const [arrangementError, setArrangementError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [characterView, setCharacterView] = useState<CharacterView>(
+    initialFocus ? "画布" : "名单",
+  );
 
   const loadMeta = useCallback(async () => {
     try {
@@ -132,11 +143,17 @@ export default function ProjectPage({
     onChanged();
   }, [onChanged]);
 
-  /** 板块 AI 命令：材料（类型圈/排布/矛盾池…）由后端现读组装，命令只出报告。 */
+  /** 板块 AI 命令：材料（类型圈/排布/矛盾池/人物关系…）由后端现读组装，
+   *  命令只出报告；`subjects`＝选中的人名（只有「人物关系梳理」用）。 */
   const runAiCommand = useCallback(
-    async (kind: AiCommandKind) => {
+    async (kind: AiCommandKind, subjects?: string[]) => {
       try {
-        const text = await invoke<string>("build_ai_context", { kind, project: project.dir });
+        const text = await invoke<string>("build_ai_context", {
+          kind,
+          project: project.dir,
+          chapter: null,
+          subjects: subjects ?? null,
+        });
         onAiCommand({ kind, bookName: meta.title ?? project.title, text });
       } catch (e) {
         window.alert(`AI 命令材料读取失败：${errMsg(e)}`);
@@ -218,7 +235,7 @@ export default function ProjectPage({
 
         <div className="project-content" key={`${tab}-${reloadKey}`}>
           {tab === "类型圈" && <CircleView project={project.dir} vocab={vocab} />}
-          {isNoteTab(tab) && (
+          {isNoteTab(tab) && tab !== "人物" && (
             <NoteList
               project={project.dir}
               kind={tab}
@@ -227,6 +244,40 @@ export default function ProjectPage({
               onPromoted={() => setTab("单元")}
               onAiCommand={tab === "矛盾" ? () => void runAiCommand("矛盾梳理") : undefined}
             />
+          )}
+          {tab === "人物" && (
+            <div className="character-pane">
+              <div className="subtabs">
+                {CHARACTER_VIEWS.map((v) => (
+                  <button
+                    key={v}
+                    className={`subtab ${characterView === v ? "active" : ""}`}
+                    onClick={() => setCharacterView(v)}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+              <div className="character-view" key={characterView}>
+                {characterView === "名单" ? (
+                  <NoteList
+                    project={project.dir}
+                    kind="人物"
+                    vocab={vocab}
+                    onChanged={refreshAll}
+                    onPromoted={() => setTab("单元")}
+                  />
+                ) : (
+                  <RelationshipCanvas
+                    project={project.dir}
+                    focusName={initialFocus}
+                    onAiCommand={(names) => void runAiCommand("人物关系梳理", names)}
+                    onPromoted={() => setTab("矛盾")}
+                    onChanged={refreshAll}
+                  />
+                )}
+              </div>
+            </div>
           )}
           {tab === "伏笔" && (
             <ForeshadowBoard
