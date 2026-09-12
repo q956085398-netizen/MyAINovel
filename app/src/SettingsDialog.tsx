@@ -23,8 +23,19 @@ const FONT_OPTIONS: { value: BodyFont; label: string }[] = [
 ];
 
 /** 设置面板（工单 #24 骨架，spec 个性化设置.md §五）：侧栏底部齿轮打开。
- *  条目：主题／编辑器背景／排版／库位置。 */
-export default function SettingsDialog({ onClose }: { onClose: () => void }) {
+ *  条目：主题／编辑器背景／排版／库位置。库位置＝当前路径＋更改（沿用
+ *  打开库逻辑）＋新建（选空文件夹设为当前库，工单 #21 动作）。 */
+export default function SettingsDialog({
+  libraryPath,
+  onChooseFolder,
+  onCreateLibrary,
+  onClose,
+}: {
+  libraryPath: string | null;
+  onChooseFolder: () => void;
+  onCreateLibrary: () => void;
+  onClose: () => void;
+}) {
   const [settings, update] = useSettings();
 
   /** 自定义背景图（§三）：只记路径存应用状态、不拷进创作目录；
@@ -177,6 +188,21 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               onClick={() => update({ lineHeight: null })}
             >
               恢复默认
+            </button>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <h3>库位置</h3>
+          <p className="hint" title={libraryPath ?? undefined}>
+            {libraryPath ?? "还没有库——选一个文件夹开始，或新建一个空库。"}
+          </p>
+          <div className="settings-chip-row">
+            <button type="button" className="btn small" onClick={onChooseFolder}>
+              更改
+            </button>
+            <button type="button" className="btn small" onClick={onCreateLibrary}>
+              新建
             </button>
           </div>
         </section>

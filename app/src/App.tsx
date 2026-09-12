@@ -279,7 +279,14 @@ function App() {
         adoptTrope={adoptTrope}
         replaceSelection={replaceSelection}
       />
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsDialog
+          libraryPath={libraryPath}
+          onChooseFolder={chooseLibraryFolder}
+          onCreateLibrary={createLibraryFolder}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }
