@@ -21,7 +21,8 @@ Single-context repo (this repo):
 │   ├── adr/
 │   │   ├── 0001-standalone-tauri-app.md
 │   │   ├── 0002-files-as-source-of-truth.md
-│   │   └── 0003-ai-assistant-boundary.md
+│   │   ├── 0003-ai-assistant-boundary.md
+│   │   └── 0004-write-path-atomic-and-fingerprint.md
 │   └── 设计共识.md
 └── docs/agents/          ← this file
 ```
