@@ -48,7 +48,8 @@ import {
 import { findQuote } from "./foreshadowAnchor";
 import { ForeshadowCollectDialog, ForeshadowNameDialog } from "./ForeshadowDialog";
 import { ExpectationFormDialog, ExpectationFulfillDialog } from "./ExpectationDialog";
-import { baseEditorTheme } from "./editorTheme";
+import { baseEditorTheme, editorAppearance } from "./editorTheme";
+import { subscribeSettings } from "./settings";
 
 /** 自动保存防抖：停笔约 3 秒落盘（用户拍板「自动保存为主」）。 */
 const AUTOSAVE_MS = 3000;
@@ -60,6 +61,8 @@ const editorTheme = baseEditorTheme({ fontSize: "17px", paddingBottom: "40vh" })
 const typewriterCompartment = new Compartment();
 const dimCompartment = new Compartment();
 const foreshadowCompartment = new Compartment();
+/** 外观随设置变化（工单 #24：深色；#26：排版）经 Compartment 重配。 */
+const appearanceCompartment = new Compartment();
 
 /** 伏笔引文装饰（工单 #6）：正文零污染——装饰只画在编辑器里，
  *  引文匹配走 findQuote（与 Rust 同一规则）；失配的引文不装饰。 */
@@ -304,6 +307,7 @@ export default function WritingPage({
       basicSetup,
       markdown(),
       editorTheme,
+      appearanceCompartment.of(editorAppearance()),
       highlightActiveLine(),
       typewriterCompartment.of(prefs.typewriter ? typewriterExtension() : []),
       dimCompartment.of(prefs.dimming ? dimmingExtension() : []),
@@ -1023,6 +1027,17 @@ export default function WritingPage({
     // 本组件按项目重挂载（父组件 key），project 在生命周期内不变。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 设置变化（主题/排版）→ 编辑器外观重配（工单 #24/#26）。
+  useEffect(
+    () =>
+      subscribeSettings(() => {
+        viewRef.current?.dispatch({
+          effects: appearanceCompartment.reconfigure(editorAppearance()),
+        });
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!immersive) return;

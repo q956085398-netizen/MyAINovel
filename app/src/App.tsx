@@ -8,6 +8,8 @@ import EditorPage from "./EditorPage";
 import Ideation from "./Ideation";
 import InspirationLibrary from "./InspirationLibrary";
 import Writing from "./Writing";
+import SettingsDialog from "./SettingsDialog";
+import { initSettings } from "./settings";
 import type { ProjectTab } from "./ProjectPage";
 import type {
   AiSeed,
@@ -27,6 +29,9 @@ type LibTab = (typeof LIB_TABS)[number];
 
 const PATH_KEY = "gongbi.libraryPath";
 
+// 主题初始化（工单 #24）：根元素挂 data-theme＋系统深浅监听，一次即可。
+initSettings();
+
 function App() {
   const [section, setSection] = useState<Section>("拆书");
   const [libTab, setLibTab] = useState<LibTab>("书库");
@@ -35,6 +40,8 @@ function App() {
   const [libraryPath, setLibraryPath] = useState<string | null>(() =>
     localStorage.getItem(PATH_KEY),
   );
+  // 设置面板（工单 #24）：侧栏底部齿轮打开；设置存应用状态（localStorage）。
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // AI 侧边栏：面板常驻挂载仅隐藏切换，编辑器经 bridge 提供文档上下文与采纳回写。
   const [aiOpen, setAiOpen] = useState(false);
   const [aiSeed, setAiSeed] = useState<AiSeed | null>(null);
@@ -185,6 +192,13 @@ function App() {
         >
           AI 助手
         </button>
+        <button
+          className="nav-item settings-toggle"
+          title="设置"
+          onClick={() => setSettingsOpen(true)}
+        >
+          ⚙ 设置
+        </button>
         <div className="sidebar-foot">拆书积累 · 灵感沉淀 · 构思写作</div>
       </aside>
       <main className="main">
@@ -265,6 +279,7 @@ function App() {
         adoptTrope={adoptTrope}
         replaceSelection={replaceSelection}
       />
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

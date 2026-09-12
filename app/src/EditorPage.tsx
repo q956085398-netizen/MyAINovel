@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { EditorState, Prec } from "@codemirror/state";
+import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
@@ -18,7 +18,8 @@ import type {
 } from "./types";
 import { emptyBookMeta } from "./types";
 import { errMsg } from "./util";
-import { baseEditorTheme } from "./editorTheme";
+import { baseEditorTheme, editorAppearance } from "./editorTheme";
+import { subscribeSettings } from "./settings";
 import BookMetaDialog from "./BookMetaDialog";
 import TropeDialog from "./TropeDialog";
 
@@ -53,6 +54,9 @@ function chapterOrdinalForLine(chapters: ChapterAnchor[], line: number): number 
 }
 
 const editorTheme = baseEditorTheme({ fontSize: "15px", paddingBottom: "30vh" });
+
+/** 外观随设置变化（工单 #24：深色；#26：排版）经 Compartment 重配。 */
+const appearanceCompartment = new Compartment();
 
 function insertAtLineEnd(view: EditorView, insert: string) {
   const pos = view.state.selection.main.head;
@@ -361,6 +365,7 @@ export default function EditorPage({
             basicSetup,
             markdown(),
             editorTheme,
+            appearanceCompartment.of(editorAppearance()),
             EditorView.updateListener.of((u) => {
               if (u.docChanged) setDirty(true);
             }),
@@ -413,6 +418,18 @@ export default function EditorPage({
     // 本组件按书重挂载（父组件 key），book 在生命周期内不变。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 设置变化（主题/排版）→ 编辑器外观重配（视图异步就绪前订阅先挂上，
+  // dispatch 时 viewRef 没有就不动，挂载时已带最新外观）。
+  useEffect(
+    () =>
+      subscribeSettings(() => {
+        viewRef.current?.dispatch({
+          effects: appearanceCompartment.reconfigure(editorAppearance()),
+        });
+      }),
+    [],
+  );
 
   if (loadError) {
     return (

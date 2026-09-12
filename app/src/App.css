@@ -8,6 +8,48 @@
   --line: #e3ded4;
   --sidebar-bg: #2e2c28;
   --sidebar-ink: #d8d3c8;
+  /* 表面与状态色（工单 #24）：原散落各处的硬编码浅色收口成变量，
+   * 深色主题整组重定义。 */
+  --paper: #fff;
+  --surface: #faf7f0;
+  --surface-2: #faf6ee;
+  --surface-hover: #f2ece1;
+  --accent-line: #e0bdb2;
+  --ok: #2f7a4f;
+  --ok-line: #6a8a5b;
+  --ok-soft: #f2f5ee;
+  --warn-ink: #7a5a1e;
+  --warn-line: #d9a441;
+  --warn-soft: #fdf5e3;
+  --mark-bg: #f5e4a8;
+}
+
+/* ---------- 主题（工单 #24，spec 个性化设置.md §二）----------
+   深色＝整组翻深，全站 var() 引用零改动；CodeMirror 编辑器与
+   伏笔/三线引文装饰经编辑器外观扩展（editorTheme.ts）同步适配。
+   管理页/侧栏/看板只跟主题换色，不铺底图。 */
+[data-theme="dark"] {
+  --bg: #1e1c18;
+  --panel: #26241e;
+  --ink: #e2dccf;
+  --ink-soft: #9a9282;
+  --accent: #cf7a62;
+  --accent-soft: #452f27;
+  --line: #3b382e;
+  --sidebar-bg: #171511;
+  --sidebar-ink: #c6c0b1;
+  --paper: #34312a;
+  --surface: #2c2a23;
+  --surface-2: #302d25;
+  --surface-hover: #3a362c;
+  --accent-line: #5f4237;
+  --ok: #8cbb98;
+  --ok-line: #7fa46f;
+  --ok-soft: #28322a;
+  --warn-ink: #d9b45e;
+  --warn-line: #8a6d2c;
+  --warn-soft: #3d3320;
+  --mark-bg: #6b5a26;
 }
 
 * {
@@ -205,7 +247,7 @@ body {
 .book-table thead th {
   font-weight: 500;
   color: var(--ink-soft);
-  background: #faf7f0;
+  background: var(--surface);
 }
 
 .book-table tbody tr:last-child td {
@@ -213,7 +255,7 @@ body {
 }
 
 .book-table tbody tr:hover {
-  background: #faf6ee;
+  background: var(--surface-2);
 }
 
 .book-table .num {
@@ -291,7 +333,7 @@ body {
 }
 
 .hit-row:hover {
-  background: #faf6ee;
+  background: var(--surface-2);
 }
 
 .hit-book {
@@ -318,7 +360,7 @@ body {
 }
 
 .hit-snippet mark {
-  background: #f5e4a8;
+  background: var(--mark-bg);
   color: inherit;
   border-radius: 3px;
   padding: 0 2px;
@@ -360,7 +402,7 @@ body {
   padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--paper);
   color: var(--ink);
   min-width: 180px;
 }
@@ -421,7 +463,7 @@ body {
   gap: 4px;
   padding: 10px 36px 0;
   border-bottom: 1px solid var(--line);
-  background: #faf7f0;
+  background: var(--surface);
   flex-shrink: 0;
 }
 
@@ -494,7 +536,7 @@ body {
 }
 
 .card-item:hover {
-  background: #faf6ee;
+  background: var(--surface-2);
 }
 
 .card-title-row {
@@ -573,7 +615,7 @@ body {
 .btn.danger {
   margin-right: auto;
   color: var(--accent);
-  border-color: #e0bdb2;
+  border-color: var(--accent-line);
 }
 
 .trope-table select {
@@ -834,6 +876,34 @@ body {
   opacity: 1;
 }
 
+/* ---------- 设置面板（工单 #24） ---------- */
+
+.settings-dialog {
+  width: 460px;
+}
+
+.settings-section {
+  margin: 14px 0 4px;
+}
+
+.settings-section h3 {
+  margin: 0 0 6px;
+  font-size: 14.5px;
+}
+
+.settings-section .hint {
+  margin: 4px 0 8px;
+}
+
+.settings-toggle {
+  color: var(--sidebar-ink);
+  padding: 7px 12px;
+}
+
+.settings-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 /* ---------- 弹窗 ---------- */
 
 .dialog-overlay {
@@ -878,7 +948,7 @@ body {
   padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--paper);
 }
 
 .dialog select {
@@ -889,7 +959,7 @@ body {
   padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--paper);
 }
 
 .dialog.wide {
@@ -980,7 +1050,7 @@ body {
 
 .error-box {
   background: var(--accent-soft);
-  border: 1px solid #e0bdb2;
+  border: 1px solid var(--accent-line);
   color: var(--accent);
   border-radius: 6px;
   padding: 10px 14px;
@@ -1037,7 +1107,7 @@ body {
   padding: 5px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--paper);
 }
 
 .ai-provider-chip {
@@ -1214,7 +1284,7 @@ body {
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--paper);
 }
 
 .ai-input:focus {
@@ -1255,7 +1325,7 @@ body {
 
 /* 编辑器工具栏的 AI 命令按钮，点出来的是「初稿待确认」而非直接落盘 */
 .btn.ai-cmd {
-  border-color: #dcc3ba;
+  border-color: var(--accent-line);
   color: var(--accent);
 }
 
@@ -1372,7 +1442,7 @@ body {
   padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--paper);
 }
 
 .line-row {
@@ -1397,7 +1467,7 @@ body {
   margin-top: 4px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--paper);
   overflow: hidden;
 }
 
@@ -1410,7 +1480,7 @@ body {
 }
 
 .hint-box {
-  background: #f7f1e4;
+  background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 8px 14px;
@@ -1437,7 +1507,7 @@ body {
   padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--paper);
   min-width: 180px;
 }
 
@@ -1483,7 +1553,7 @@ body {
   padding: 5px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--paper);
 }
 
 .arrange-table select {
@@ -1498,7 +1568,7 @@ body {
 }
 
 .row-warn {
-  background: #fdf6f2;
+  background: var(--accent-soft);
 }
 
 .cell-warn {
@@ -1512,7 +1582,7 @@ body {
   border: 1px dashed var(--line);
   border-radius: 8px;
   padding: 10px 16px;
-  background: #faf7f0;
+  background: var(--surface);
 }
 
 .check-panel h3 {
@@ -1610,7 +1680,7 @@ body {
 }
 
 .chapter-item:hover {
-  background: #f2ece1;
+  background: var(--surface-hover);
 }
 
 .chapter-item.active {
@@ -1633,7 +1703,7 @@ body {
 }
 
 .chapter-done {
-  color: #2f7a4f;
+  color: var(--ok);
 }
 
 .writing-editor {
@@ -1784,9 +1854,9 @@ body {
   gap: 10px;
   margin: 0 24px 8px;
   padding: 8px 12px;
-  border: 1px solid #d9a441;
+  border: 1px solid var(--warn-line);
   border-radius: 8px;
-  background: #fdf5e3;
+  background: var(--warn-soft);
   font-size: 13px;
 }
 
@@ -1854,7 +1924,7 @@ body {
 }
 
 .history-item:hover {
-  background: #f2ece1;
+  background: var(--surface-hover);
 }
 
 .history-item.active {
@@ -1870,7 +1940,7 @@ body {
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #faf7f0;
+  background: var(--surface);
   white-space: pre-wrap;
   word-break: break-word;
   font-family: inherit;
@@ -1942,7 +2012,7 @@ body {
   margin: 6px 0 12px;
   padding: 8px 10px;
   border-left: 3px solid var(--line);
-  background: #faf7f0;
+  background: var(--surface);
   border-radius: 0 6px 6px 0;
 }
 
@@ -1987,7 +2057,7 @@ body {
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--paper);
 }
 
 .context-menu {
@@ -2066,7 +2136,7 @@ body {
   padding: 3px 10px;
   border: 1px dashed var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--paper);
   font: inherit;
   font-size: 12.5px;
   color: var(--ink);
@@ -2141,7 +2211,7 @@ body {
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 5px;
-  background: #faf7f0;
+  background: var(--surface);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -2170,8 +2240,8 @@ body {
 }
 
 .exp-bar.done {
-  border-left: 3px solid #6a8a5b;
-  background: #f2f5ee;
+  border-left: 3px solid var(--ok-line);
+  background: var(--ok-soft);
 }
 
 .exp-bar.dropped {
@@ -2456,14 +2526,14 @@ details.export-chapters summary {
 
 .proof-kind.kind-sensitive {
   color: var(--accent);
-  border-color: #e0bdb2;
+  border-color: var(--accent-line);
   background: var(--accent-soft);
 }
 
 .proof-kind.kind-de {
-  color: #7a5a1e;
-  border-color: #e6d6b0;
-  background: #faf3e2;
+  color: var(--warn-ink);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
 }
 
 .proof-word {
@@ -2589,7 +2659,7 @@ details.export-chapters summary {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px 14px;
-  background: #faf7f0;
+  background: var(--surface);
 }
 
 .legend-table input[type="text"],

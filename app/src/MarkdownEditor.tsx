@@ -1,11 +1,15 @@
 import { useEffect, useRef } from "react";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
-import { baseEditorTheme } from "./editorTheme";
+import { baseEditorTheme, editorAppearance } from "./editorTheme";
+import { subscribeSettings } from "./settings";
 
 const editorTheme = baseEditorTheme({ fontSize: "14px", paddingBottom: "2em" });
+
+/** 外观随设置变化（工单 #24：深色）经 Compartment 重配。 */
+const appearanceCompartment = new Compartment();
 
 interface MarkdownEditorProps {
   value: string;
@@ -33,6 +37,7 @@ export default function MarkdownEditor({ value, onChange, height = "320px" }: Ma
           basicSetup,
           markdown(),
           editorTheme,
+          appearanceCompartment.of(editorAppearance()),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString());
           }),
@@ -40,7 +45,14 @@ export default function MarkdownEditor({ value, onChange, height = "320px" }: Ma
       }),
     });
     viewRef.current = view;
+    // 设置变化（主题）→ 外观重配（工单 #24）。
+    const unsubscribe = subscribeSettings(() => {
+      viewRef.current?.dispatch({
+        effects: appearanceCompartment.reconfigure(editorAppearance()),
+      });
+    });
     return () => {
+      unsubscribe();
       view.destroy();
       viewRef.current = null;
     };
