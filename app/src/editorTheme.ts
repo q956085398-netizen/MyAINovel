@@ -1,7 +1,7 @@
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { resolvedTheme } from "./settings";
+import { getSettings, resolvedTheme } from "./settings";
 
 interface EditorThemeOptions {
   fontSize: string;
@@ -50,9 +50,12 @@ const darkEditorTheme = EditorView.theme(
 );
 
 /** 编辑器外观（工单 #24 起）：随设置/主题变化，编辑器经 Compartment 重配
- *  （订阅见 settings.ts）。浅色＝空扩展（现状）。 */
+ *  （订阅见 settings.ts）。浅色＋素纸＝空扩展（现状）。
+ *  深色判定：主题深色，或选了深色纹理「暮山」（浅主题下暮山也配浅字）。 */
 export function editorAppearance() {
-  return resolvedTheme() === "dark"
-    ? [darkEditorTheme, syntaxHighlighting(darkHighlight)]
-    : [];
+  const { background } = getSettings();
+  const dark =
+    resolvedTheme() === "dark" ||
+    (background.kind === "builtin" && background.id === "暮山");
+  return dark ? [darkEditorTheme, syntaxHighlighting(darkHighlight)] : [];
 }
