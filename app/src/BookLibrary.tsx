@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { BookEntry, SearchHit } from "./types";
 import { errMsg, tropeSpanLabel } from "./util";
+import { useDisplayMode } from "./displayMode";
+import DisplayToggle from "./DisplayToggle";
+import CoverArt from "./CoverArt";
 
 /** 与 Rust 侧 search::MAX_HITS 对应，达上限时提示截断。 */
 const MAX_HITS = 200;
@@ -58,6 +61,9 @@ export default function BookLibrary({
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // 展示模式（工单 #22）：封面网格（默认）｜书名列表（现有表格）。
+  const [display, setDisplay] = useDisplayMode("books");
 
   const scan = useCallback(async (path: string) => {
     setScanning(true);
@@ -272,49 +278,74 @@ export default function BookLibrary({
             </div>
           ) : (
             <>
-              <p className="stats">
-                共 {formatCount(books.length)} 本 · 散文件 {formatCount(scatteredCount)} ·
-                一书一文件夹 {formatCount(folderCount)} · 桥段 {formatCount(totalTropes)}
-              </p>
-              <table className="book-table">
-                <thead>
-                  <tr>
-                    <th>书名</th>
-                    <th>成绩</th>
-                    <th>布局</th>
-                    <th className="num">章数</th>
-                    <th className="num">字数</th>
-                    <th className="num">桥段</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <div className="list-bar">
+                <p className="stats">
+                  共 {formatCount(books.length)} 本 · 散文件 {formatCount(scatteredCount)} ·
+                  一书一文件夹 {formatCount(folderCount)} · 桥段 {formatCount(totalTropes)}
+                </p>
+                <DisplayToggle mode={display} onChange={setDisplay} />
+              </div>
+              {display === "grid" ? (
+                <div className="cover-grid">
                   {books.map((b) => (
-                    <tr key={b.primaryMd} title="打开拆书稿" onClick={() => onOpen(b)}>
-                      <td className="book-name">
-                        <div>
-                          {b.name}
-                          {b.meta.goldenFinger && (
-                            <span className="cell-sub" title="金手指">
-                              {" "}
-                              · {b.meta.goldenFinger}
-                            </span>
-                          )}
-                        </div>
-                        {b.meta.summary && (
-                          <div className="cell-sub cell-sub-block" title={b.meta.summary}>
-                            {b.meta.summary}
-                          </div>
-                        )}
-                      </td>
-                      <td>{b.meta.trackRecord ?? "—"}</td>
-                      <td>{layoutLabel[b.layout]}</td>
-                      <td className="num">{formatCount(b.chapterCount)}</td>
-                      <td className="num">{formatCount(b.wordCount)}</td>
-                      <td className="num">{b.tropes.length || "—"}</td>
-                    </tr>
+                    <div
+                      key={b.primaryMd}
+                      className="cover-card"
+                      title="打开拆书稿"
+                      onClick={() => onOpen(b)}
+                    >
+                      <CoverArt name={b.name} />
+                      <div className="cover-name" title={b.name}>
+                        {b.name}
+                      </div>
+                      <div className="cover-stats">
+                        章 {formatCount(b.chapterCount)} · 字 {formatCount(b.wordCount)} · 桥段{" "}
+                        {b.tropes.length}
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              ) : (
+                <table className="book-table">
+                  <thead>
+                    <tr>
+                      <th>书名</th>
+                      <th>成绩</th>
+                      <th>布局</th>
+                      <th className="num">章数</th>
+                      <th className="num">字数</th>
+                      <th className="num">桥段</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {books.map((b) => (
+                      <tr key={b.primaryMd} title="打开拆书稿" onClick={() => onOpen(b)}>
+                        <td className="book-name">
+                          <div>
+                            {b.name}
+                            {b.meta.goldenFinger && (
+                              <span className="cell-sub" title="金手指">
+                                {" "}
+                                · {b.meta.goldenFinger}
+                              </span>
+                            )}
+                          </div>
+                          {b.meta.summary && (
+                            <div className="cell-sub cell-sub-block" title={b.meta.summary}>
+                              {b.meta.summary}
+                            </div>
+                          )}
+                        </td>
+                        <td>{b.meta.trackRecord ?? "—"}</td>
+                        <td>{layoutLabel[b.layout]}</td>
+                        <td className="num">{formatCount(b.chapterCount)}</td>
+                        <td className="num">{formatCount(b.wordCount)}</td>
+                        <td className="num">{b.tropes.length || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
 
               {totalTropes > 0 && (
                 <section className="trope-filter">

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AiSeed, ProofIssue, ProjectEntry, WritingBridge, WritingLocate } from "./types";
 import { errMsg, formatCount } from "./util";
+import { useDisplayMode } from "./displayMode";
+import DisplayToggle from "./DisplayToggle";
+import CoverArt from "./CoverArt";
 import WritingPage from "./WritingPage";
 import { ExportDialog } from "./ExportDialog";
 
@@ -58,6 +61,8 @@ export default function Writing({
   const [exportFor, setExportFor] = useState<ProjectEntry | null>(null);
   /** 只在本板块首次扫盘时自动回到上次的项目。 */
   const autoOpenRef = useRef(true);
+  // 展示模式（工单 #22）：与构思板块共用项目列表档位偏好。
+  const [display, setDisplay] = useDisplayMode("projects");
 
   const scan = useCallback(async (root: string) => {
     setScanning(true);
@@ -211,31 +216,66 @@ export default function Writing({
 
       {projects.length > 0 && (
         <>
-          <p className="stats">共 {formatCount(projects.length)} 个项目</p>
-          <div className="card-list">
-            {projects.map((p) => (
-              <div key={p.dir} className="card-item">
-                <div className="card-title-row">
-                  <button className="card-title" title="开始写" onClick={() => openAt(p, null)}>
-                    {p.title}
-                  </button>
+          <div className="list-bar">
+            <p className="stats">共 {formatCount(projects.length)} 个项目</p>
+            <DisplayToggle mode={display} onChange={setDisplay} />
+          </div>
+          {display === "grid" ? (
+            <div className="cover-grid">
+              {projects.map((p) => (
+                <div
+                  key={p.dir}
+                  className="cover-card"
+                  title="开始写"
+                  onClick={() => openAt(p, null)}
+                >
+                  <CoverArt name={p.title} />
                   <button
-                    className="btn small"
+                    className="btn small cover-action"
                     title="导出正文 / 发布前校对"
-                    onClick={() => setExportFor(p)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExportFor(p);
+                    }}
                   >
                     导出/发布
                   </button>
+                  <div className="cover-name" title={p.title}>
+                    {p.title}
+                  </div>
+                  <div className="cover-stats">
+                    单元 {p.unitCount} · 矛盾 {p.contradictionCount} ·{" "}
+                    {formatCount(p.wordCount)} 字
+                  </div>
                 </div>
-                <p className="card-meta">
-                  <span className="card-source">{summary(p)}</span>
-                </p>
-                <p className="card-preview" title={p.dir}>
-                  {p.dir}
-                </p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="card-list">
+              {projects.map((p) => (
+                <div key={p.dir} className="card-item">
+                  <div className="card-title-row">
+                    <button className="card-title" title="开始写" onClick={() => openAt(p, null)}>
+                      {p.title}
+                    </button>
+                    <button
+                      className="btn small"
+                      title="导出正文 / 发布前校对"
+                      onClick={() => setExportFor(p)}
+                    >
+                      导出/发布
+                    </button>
+                  </div>
+                  <p className="card-meta">
+                    <span className="card-source">{summary(p)}</span>
+                  </p>
+                  <p className="card-preview" title={p.dir}>
+                    {p.dir}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
 
