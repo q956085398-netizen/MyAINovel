@@ -14,15 +14,19 @@ import type {
   AiConfig,
   AiSeed,
   ChatMessage,
+  ChatPersona,
   ChatSession,
   ChatSessionSummary,
   ChatStreamEvent,
   DocSnapshot,
   MessageMeta,
+  NoteEntry,
+  ProjectEntry,
   TropeSuggestion,
   Vocabulary,
 } from "./types";
-import { errMsg, oneLinePreview } from "./util";
+import { errMsg, oneLinePreview, stripBookMarks } from "./util";
+import ChatAdoptDialog, { type ChatExcerptEntry } from "./ChatAdoptDialog";
 import ProviderSettingsDialog from "./ProviderSettingsDialog";
 
 interface AiSidebarProps {
@@ -75,6 +79,11 @@ export default function AiSidebar({
   const currentRef = useRef<ChatSession | null>(null);
   /** 已采纳过回写的消息（会话内序号），采纳一次即失效。 */
   const [adoptedSet, setAdoptedSet] = useState<Set<number>>(new Set());
+  /** 人物对话：勾选要落盘的消息（会话内序号，不含 system 底座）。 */
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [adoptOpen, setAdoptOpen] = useState<"矛盾" | "故事卡" | null>(null);
+  /** 打开人物会话时标签对不上（项目/人物改名或删除）的提示；不回写不清理。 */
+  const [stalePersona, setStalePersona] = useState<string | null>(null);
   /** 防种子被重复消费（React 严格模式效应会跑两遍）。 */
   const seedRef = useRef<AiSeed | null>(null);
 
@@ -179,9 +188,15 @@ export default function AiSidebar({
     }
 
     const docForRequest = docAttached ? getDoc() : null;
+    // 人格会话的首条 system 消息＝人格底座：请求时顶掉默认系统提示，
+    // 也不在历史里重复出现（spec §三）；普通会话没有 system 消息。
+    const personaBase = withUser.messages.find((m) => m.role === "system") ?? null;
+    const history = personaBase
+      ? withUser.messages.filter((m) => m.role !== "system")
+      : withUser.messages;
     const reqMessages = buildRequestMessages(
-      withUser.messages,
-      system ?? DEFAULT_SYSTEM_PROMPT,
+      history,
+      system ?? personaBase?.content ?? DEFAULT_SYSTEM_PROMPT,
       docForRequest,
     );
     const token = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
@@ -224,15 +239,56 @@ export default function AiSidebar({
 
   // 板块命令种子：面板拿到即组提示词发送（ADR 0003：AI 只处理人写的内容）。
   // 供应商未配置时保留种子并打开设置，配好后重跑本效应即自动发出，材料不丢。
+  // 人物对话种子（工单 #16）例外：不发送，只建带人格底座的新会话等人开口。
   useEffect(() => {
     if (!seed || !config || seedRef.current === seed) return;
     if (!provider) {
-      setError("先配置供应商，「" + seed.kind + "」命令会在配好后自动发出。");
+      setError(
+        seed.persona
+          ? "先配置供应商，配好后会自动开始与这个人物的对话。"
+          : "先配置供应商，「" + seed.kind + "」命令会在配好后自动发出。",
+      );
       setSettingsOpen(true);
+      return;
+    }
+    if (seed.persona) {
+      if (streamingRef.current) {
+        // 建新会话会把流式回调的落点切走：等这轮回复完再点一次。
+        setError("正在回复中，等这轮结束后再点「跟 TA 聊」。");
+        onSeedConsumed();
+        return;
+      }
+      seedRef.current = seed;
+      onSeedConsumed();
+      // 人格底座＝入戏提示＋后端材料，作为会话首条 system 消息随会话持久化
+      // （spec §三）：重开旧会话不用重读盘，人物也还是那个人物。
+      const { system } = buildCommandMessages(seed);
+      const now = nowSec();
+      const session: ChatSession = {
+        id: crypto.randomUUID(),
+        title: `${seed.persona.project}·${seed.persona.person}`,
+        createdAt: now,
+        updatedAt: now,
+        messages: [{ role: "system", content: system, meta: { kind: "人物对话" } }],
+        persona: seed.persona,
+      };
+      updateSession(() => session);
+      resetAdopted();
+      setPicked(new Set());
+      setStalePersona(null);
+      void invoke("save_chat_session", { session })
+        .then(() => refreshSessions())
+        .catch(() => {});
       return;
     }
     seedRef.current = seed;
     onSeedConsumed();
+    // 命令不混进人物对话会话：人格底座会把命令的回答也带成角色腔。
+    if (currentRef.current?.persona) {
+      updateSession(() => null);
+      resetAdopted();
+      setPicked(new Set());
+    }
     void (async () => {
       // 标注命令带词表（每次现取，词表在 Obsidian 里手改也即时生效）。
       let vocab: Vocabulary | null = null;
@@ -269,8 +325,37 @@ export default function AiSidebar({
       const session = await invoke<ChatSession>("load_chat_session", { id });
       updateSession(() => session);
       resetAdopted();
+      setPicked(new Set());
+      if (session.persona) void checkPersona(session.persona);
+      else setStalePersona(null);
     } catch (e) {
       setError(errMsg(e));
+    }
+  }
+
+  /** 标签失效只提示不校验（spec §三）：旧会话照常能聊（人格底座自随会话），
+   *  对不上时说一声，不回写、不清理；查不动（没开库）就沉默。 */
+  async function checkPersona(p: ChatPersona) {
+    setStalePersona(null);
+    if (!libraryPath) return;
+    try {
+      const projects = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
+      const proj = projects.find((x) => x.title === stripBookMarks(p.project));
+      if (!proj) {
+        setStalePersona(`${p.project}这个项目找不到了（改名或挪走？）——按原人格底座继续聊。`);
+        return;
+      }
+      const persons = await invoke<NoteEntry[]>("scan_notes", {
+        project: proj.dir,
+        kind: "人物",
+      });
+      if (!persons.some((n) => n.name === p.person)) {
+        setStalePersona(
+          `${p.project}里已没有「${p.person}」（改名或删除？）——按原人格底座继续聊。`,
+        );
+      }
+    } catch {
+      // 失效提示是锦上添花：查不动就不查了，别挡对话。
     }
   }
 
@@ -282,11 +367,36 @@ export default function AiSidebar({
       await invoke("delete_chat_session", { id: session.id });
       updateSession(() => null);
       resetAdopted();
+      setPicked(new Set());
+      setStalePersona(null);
       await refreshSessions();
     } catch (e) {
       setError(errMsg(e));
     }
   }
+
+  /** 人物对话的勾选（spec §六）：一段对话＝一条或多条消息，说话人标记
+   *  （我＝作者，AI 那条记人物名）在采纳对话框里预填。 */
+  function togglePick(i: number) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  const persona = current?.persona ?? null;
+  const pickedEntries: ChatExcerptEntry[] = persona
+    ? [...picked]
+        .sort((a, b) => a - b)
+        .map((i) => current!.messages[i])
+        .filter((m) => m && m.role !== "system")
+        .map((m) => ({
+          speaker: m.role === "user" ? "我" : persona.person,
+          content: m.content,
+        }))
+    : [];
 
   function handleAdopt(kind: AiCommandKind, idx: number, content: string, meta: MessageMeta) {
     if (isReportKind(kind)) {
@@ -333,6 +443,8 @@ export default function AiSidebar({
           onClick={() => {
             updateSession(() => null);
             resetAdopted();
+            setPicked(new Set());
+            setStalePersona(null);
           }}
         >
           新会话
@@ -382,6 +494,8 @@ export default function AiSidebar({
         </div>
       )}
 
+      {stalePersona && persona && <div className="hint-box">{stalePersona}</div>}
+
       <div className="ai-messages" ref={messagesRef}>
         {!current || current.messages.length === 0 ? (
           <div className="ai-empty">
@@ -392,27 +506,66 @@ export default function AiSidebar({
             <p className="hint">AI 只给初稿与建议，采纳后才会写入文档。</p>
           </div>
         ) : (
-          current.messages.map((m, i) => (
-            <div key={i} className={`ai-msg ${m.role}`}>
-              <div className="ai-bubble">
-                {m.content}
-                {streaming && i === lastIdx && m.role === "assistant" && (
-                  <span className="ai-cursor">▍</span>
+          current.messages.map((m, i) => {
+            // 人格底座（首条 system 消息）：折叠展示，不进对话流。
+            if (m.role === "system") {
+              return (
+                <details key={i} className="ai-persona-base">
+                  <summary>人格底座（{persona ? `与${persona.person}入戏的材料与规则` : "系统提示"}）</summary>
+                  <pre>{m.content}</pre>
+                </details>
+              );
+            }
+            return (
+              <div key={i} className={`ai-msg ${m.role}`}>
+                <div className="ai-msg-row">
+                  {persona && !streaming && (
+                    <label className="ai-pick" title="勾选后可存为矛盾/故事卡">
+                      <input
+                        type="checkbox"
+                        checked={picked.has(i)}
+                        onChange={() => togglePick(i)}
+                      />
+                    </label>
+                  )}
+                  <div className="ai-bubble">
+                    {m.content}
+                    {streaming && i === lastIdx && m.role === "assistant" && (
+                      <span className="ai-cursor">▍</span>
+                    )}
+                  </div>
+                </div>
+                {m.role === "assistant" && !streaming && m.meta && (
+                  <AdoptActions
+                    kind={m.meta.kind}
+                    content={m.content}
+                    adopted={adoptedSet.has(i)}
+                    onAdopt={() => handleAdopt(m.meta!.kind, i, m.content, m.meta!)}
+                  />
                 )}
               </div>
-              {m.role === "assistant" && !streaming && m.meta && (
-                <AdoptActions
-                  kind={m.meta.kind}
-                  content={m.content}
-                  adopted={adoptedSet.has(i)}
-                  onAdopt={() => handleAdopt(m.meta!.kind, i, m.content, m.meta!)}
-                />
-              )}
-            </div>
-          ))
+            );
+          })
         )}
         {error && <div className="error-box">{error}</div>}
       </div>
+
+      {persona && picked.size > 0 && (
+        <div className="ai-adopt-bar">
+          <span>
+            已选 {picked.size} 条对话
+          </span>
+          <button className="btn small" onClick={() => setAdoptOpen("矛盾")}>
+            存为矛盾
+          </button>
+          <button className="btn small" onClick={() => setAdoptOpen("故事卡")}>
+            存为故事卡
+          </button>
+          <button className="btn small" onClick={() => setPicked(new Set())}>
+            取消选择
+          </button>
+        </div>
+      )}
 
       <div className="ai-composer">
         <div className="ai-composer-controls">
@@ -435,7 +588,13 @@ export default function AiSidebar({
           className="ai-input"
           rows={3}
           value={input}
-          placeholder={provider ? "输入后回车发送，Shift+Enter 换行" : "先在「设置」里配置供应商"}
+          placeholder={
+            provider
+              ? persona
+                ? `跟${persona.person}说点什么（TA 会入戏回应）……`
+                : "输入后回车发送，Shift+Enter 换行"
+              : "先在「设置」里配置供应商"
+          }
           disabled={!provider}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -476,6 +635,16 @@ export default function AiSidebar({
             setConfig(cfg);
             setSettingsOpen(false);
           }}
+        />
+      )}
+
+      {adoptOpen && persona && pickedEntries.length > 0 && (
+        <ChatAdoptDialog
+          mode={adoptOpen}
+          persona={persona}
+          entries={pickedEntries}
+          libraryRoot={libraryPath}
+          onClose={() => setAdoptOpen(null)}
         />
       )}
     </aside>

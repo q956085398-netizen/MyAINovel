@@ -18,8 +18,10 @@ interface RelationshipCanvasProps {
   project: string;
   /** 从灵感库「关联」跳来的人名：打开时选中这个节点（工单 #8 §五步 2）。 */
   focusName?: string;
-  /** 「AI 梳理」：材料由后端按选中人名现读组装，只出报告（工单 #15 纪律）。 */
+  /** 「AI 梳理」：材料由后端按选中人名现读组装，只出报告（#15 纪律）。 */
   onAiCommand: (names: string[]) => void;
+  /** 「跟 TA 聊」：进人物对话（工单 #16），一人一会话。 */
+  onChat?: (name: string) => void;
   /** 建了矛盾之后：切到「矛盾」页去看（与「矛盾提为单元」同款跳转）。 */
   onPromoted: () => void;
   onChanged: () => void;
@@ -132,6 +134,7 @@ export default function RelationshipCanvas({
   project,
   focusName,
   onAiCommand,
+  onChat,
   onPromoted,
   onChanged,
 }: RelationshipCanvasProps) {
@@ -467,6 +470,15 @@ export default function RelationshipCanvas({
                     <div className="card-title-row">
                       <strong>{note.name}</strong>
                       {note.group && <span className="card-cat">{note.group}</span>}
+                      {onChat && (
+                        <button
+                          className="btn small"
+                          title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋类型圈当人格底座）"
+                          onClick={() => onChat(note.name)}
+                        >
+                          跟 TA 聊
+                        </button>
+                      )}
                       <button className="btn small" onClick={() => setEditing(note)}>
                         小传
                       </button>

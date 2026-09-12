@@ -4,6 +4,12 @@ export function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** 去掉首尾书名号（《书名》→ 书名）：按《书名》引用的解析口径共用
+ *  （灵感库关联跳转、人物对话的会话标签与采纳落盘）。 */
+export function stripBookMarks(title: string): string {
+  return title.trim().replace(/^《|》$/g, "");
+}
+
 /** 桥段章范围文案；起止是章标题序数（第几个章标题），非正文章号。 */
 export function tropeSpanLabel(t: TropeSpan): string {
   return t.startChapter === t.endChapter

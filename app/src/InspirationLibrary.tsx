@@ -11,7 +11,7 @@ import type {
   ProjectEntry,
 } from "./types";
 import { CARD_CATEGORIES, emptyCardDraft } from "./types";
-import { errMsg, oneLinePreview } from "./util";
+import { errMsg, oneLinePreview, stripBookMarks } from "./util";
 import CardDialog from "./CardDialog";
 import ImportDialog from "./ImportDialog";
 import TransmuteDialog, { type TransmuteTarget } from "./TransmuteDialog";
@@ -132,7 +132,7 @@ export default function InspirationLibrary({
     try {
       const slash = t.indexOf("/");
       if (slash > 0) {
-        const title = t.slice(0, slash).trim().replace(/^《|》$/g, "");
+        const title = stripBookMarks(t.slice(0, slash));
         const name = t.slice(slash + 1).trim();
         const projects = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
         const project = projects.find(

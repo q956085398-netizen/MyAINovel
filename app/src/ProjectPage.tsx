@@ -162,6 +162,32 @@ export default function ProjectPage({
     [onAiCommand, project.dir, project.title, meta.title],
   );
 
+  /** 「跟 TA 聊」进人物对话（工单 #16）：材料后端现读，人格底座随会话走；
+   *  跟命令不同——不自动发送，建好会话等人先开口。 */
+  const chatWith = useCallback(
+    async (name: string) => {
+      const bookTitle = meta.title ?? project.title;
+      try {
+        const text = await invoke<string>("build_ai_context", {
+          kind: "人物对话",
+          project: project.dir,
+          chapter: null,
+          subjects: [name],
+        });
+        onAiCommand({
+          kind: "人物对话",
+          bookName: bookTitle,
+          text,
+          note: name,
+          persona: { project: `《${bookTitle}》`, person: name },
+        });
+      } catch (e) {
+        window.alert(`人物对话开不起来：${errMsg(e)}`);
+      }
+    },
+    [onAiCommand, project.dir, project.title, meta.title],
+  );
+
   // 排布的地图提示值＝项目.yaml 的「地图」＋世界观「地理」词条（按名引用）。
   const mapNames = [
     ...meta.maps,
@@ -266,12 +292,14 @@ export default function ProjectPage({
                     vocab={vocab}
                     onChanged={refreshAll}
                     onPromoted={() => setTab("单元")}
+                    onChat={(name) => void chatWith(name)}
                   />
                 ) : (
                   <RelationshipCanvas
                     project={project.dir}
                     focusName={initialFocus}
                     onAiCommand={(names) => void runAiCommand("人物关系梳理", names)}
+                    onChat={(name) => void chatWith(name)}
                     onPromoted={() => setTab("矛盾")}
                     onChanged={refreshAll}
                   />

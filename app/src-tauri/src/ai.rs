@@ -63,6 +63,16 @@ pub struct ChatMessage {
     pub meta: Option<Value>,
 }
 
+/// 会话的人物对话标签（工单 #16，docs/spec/人物对话.md §三）：记录这个
+/// 会话在跟哪本书的哪个人物聊。只用于列表显示与再打开识别——人物/项目
+/// 改名后标签失效只提示，不回写不清理。
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPersona {
+    pub project: String,
+    pub person: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatSession {
@@ -72,6 +82,9 @@ pub struct ChatSession {
     pub created_at: u64,
     pub updated_at: u64,
     pub messages: Vec<ChatMessage>,
+    /// 人物对话标签（普通 AI 会话为 None；旧会话文件缺此键＝None）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona: Option<ChatPersona>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -81,6 +94,7 @@ pub struct ChatSessionSummary {
     pub title: String,
     pub updated_at: u64,
     pub message_count: usize,
+    pub persona: Option<ChatPersona>,
 }
 
 /// 会话 id 只允许字母数字、连字符、下划线，杜绝路径逃逸。
@@ -133,6 +147,7 @@ pub fn list_sessions(dir: &Path) -> Result<Vec<ChatSessionSummary>, String> {
             title: session.title,
             updated_at: session.updated_at,
             message_count: session.messages.len(),
+            persona: session.persona,
         });
     }
     out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -537,6 +552,7 @@ mod tests {
                 content: "hi".into(),
                 meta: Some(json!({"kind":"小结","startLine":3})),
             }],
+            persona: None,
         };
         save_session(dir.path(), &s).unwrap();
         let loaded = load_session(dir.path(), "s1").unwrap();
@@ -565,6 +581,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             messages: vec![],
+            persona: None,
         };
         assert!(save_session(dir.path(), &s).is_err());
         assert!(load_session(dir.path(), "../evil").is_err());
@@ -578,6 +595,56 @@ mod tests {
         std::fs::write(dir.path().join("broken.json"), "not json").unwrap();
         std::fs::write(dir.path().join("note.txt"), "ignore me").unwrap();
         assert!(list_sessions(dir.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn persona_tag_round_trip_and_legacy_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        // 旧会话文件（没有 persona 键）读回来是 None，照常工作。
+        std::fs::write(
+            dir.path().join("legacy.json"),
+            r#"{"id":"legacy","title":"旧会话","createdAt":1,"updatedAt":2,"messages":[]}"#,
+        )
+        .unwrap();
+        assert!(load_session(dir.path(), "legacy").unwrap().persona.is_none());
+
+        // 人物对话会话：标签往返，列表摘要也带。
+        let s = ChatSession {
+            id: "persona".into(),
+            title: "跟张三聊".into(),
+            created_at: 1,
+            updated_at: 5,
+            messages: vec![],
+            persona: Some(ChatPersona {
+                project: "《大魏读书人》".into(),
+                person: "张三".into(),
+            }),
+        };
+        save_session(dir.path(), &s).unwrap();
+        assert_eq!(
+            load_session(dir.path(), "persona").unwrap().persona,
+            Some(ChatPersona {
+                project: "《大魏读书人》".into(),
+                person: "张三".into(),
+            })
+        );
+        let list = list_sessions(dir.path()).unwrap();
+        assert_eq!(list[0].id, "persona");
+        assert_eq!(list[0].persona.as_ref().map(|p| p.person.as_str()), Some("张三"));
+        assert!(list[1].persona.is_none());
+
+        // 无标签会话存盘不落 persona 键——文件形状与旧会话完全一致。
+        let plain = ChatSession {
+            id: "plain".into(),
+            title: String::new(),
+            created_at: 0,
+            updated_at: 0,
+            messages: vec![],
+            persona: None,
+        };
+        save_session(dir.path(), &plain).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("plain.json")).unwrap();
+        assert!(!text.contains("persona"), "{text}");
     }
 
     #[test]

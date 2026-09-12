@@ -15,6 +15,8 @@ interface NoteListProps {
   onPromoted: (unit: NoteEntry) => void;
   /** 板块 AI 命令（目前只给矛盾页「矛盾梳理」）：材料由后端组装，只出报告。 */
   onAiCommand?: () => void;
+  /** 人物页专属：「跟 TA 聊」进人物对话（工单 #16）。 */
+  onChat?: (name: string) => void;
 }
 
 const KIND_HEADINGS: Record<NoteKind, string> = {
@@ -41,6 +43,7 @@ export default function NoteList({
   onChanged,
   onPromoted,
   onAiCommand,
+  onChat,
 }: NoteListProps) {
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -185,16 +188,27 @@ export default function NoteList({
                 {oneLinePreview(note.body, 120)}
               </p>
             )}
-            {kind === "矛盾" && (
+            {(kind === "矛盾" || (kind === "人物" && onChat)) && (
               <div className="card-actions">
-                <button
-                  className="btn small"
-                  disabled={promoting === note.path}
-                  title="新建同名单元草稿，矛盾状态改「已成单元」"
-                  onClick={() => void promote(note)}
-                >
-                  {promoting === note.path ? "正在提…" : "提为单元"}
-                </button>
+                {kind === "人物" && onChat && (
+                  <button
+                    className="btn small"
+                    title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋类型圈当人格底座）"
+                    onClick={() => onChat(note.name)}
+                  >
+                    跟 TA 聊
+                  </button>
+                )}
+                {kind === "矛盾" && (
+                  <button
+                    className="btn small"
+                    disabled={promoting === note.path}
+                    title="新建同名单元草稿，矛盾状态改「已成单元」"
+                    onClick={() => void promote(note)}
+                  >
+                    {promoting === note.path ? "正在提…" : "提为单元"}
+                  </button>
+                )}
               </div>
             )}
           </div>

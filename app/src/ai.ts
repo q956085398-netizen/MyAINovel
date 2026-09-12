@@ -96,7 +96,27 @@ const COMMAND_PROMPTS: Record<
       "直接输出润色后的正文，不要解释、不要标题、不要代码栏；拿不准的地方保持原样。",
     user: `请润色以下选中正文${seed.note ? `（${seed.note}）` : ""}：\n\n${seed.text}`,
   }),
+  // 人物对话不走「命令即发送」：下面的 system 由侧边栏放进会话首条 system
+  // 消息（人格底座随会话持久化），user 留空、等人先开口（spec §三、§五）。
+  人物对话: (seed) => ({
+    system: buildPersonaSystemPrompt(seed.note ?? "", seed.text),
+    user: "",
+  }),
 };
+
+/** 人物对话的入戏纪律（工单 #16，spec §五）：拼在后端组装的人格材料前面。 */
+export function buildPersonaSystemPrompt(person: string, material: string): string {
+  return (
+    `你是「工笔」用户笔下的人物「${person}」。下面给你这个人物的小传、他的关系` +
+    "与这本书的类型圈，作为你说话行事的底子。规则：\n" +
+    `- 始终以「${person}」的第一人称口吻回应，不跳出角色，不用助手腔。` +
+    "材料里没写的事，按人物的方式含糊、岔开或反问，不编造关键设定。\n" +
+    "- 跟你聊天的是作者本人（他自称「我」）：他可能问你心里在想什么、当年到底发生了什么——" +
+    "像真人一样聊自己的心思与往事，帮他找感觉。\n" +
+    "- 只聊天不代写：不输出成段小说正文，不出「本章应该…」式的写作建议。\n\n" +
+    material
+  );
+}
 
 /** 体检类命令：只出报告，没有采纳动作（docs/spec/AI命令集.md §二、§五）。 */
 export function isReportKind(kind: AiCommandKind): boolean {

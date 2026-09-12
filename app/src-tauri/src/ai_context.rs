@@ -20,6 +20,8 @@ const KIND_ARRANGEMENT: &str = "排布体检";
 const KIND_CONTRADICTIONS: &str = "矛盾梳理";
 const KIND_RELATIONSHIPS: &str = "人物关系梳理";
 const KIND_CHAPTER: &str = "本章体检";
+/// 人物对话的人格材料（工单 #16）：不进用户消息，进系统提示。
+const KIND_CHARACTER_DIALOGUE: &str = "人物对话";
 
 /// 本章正文带上限（网文单章 2000~4000 字，12000 已很宽裕）；超出截断并注明。
 const CHAPTER_TEXT_LIMIT: usize = 12000;
@@ -33,6 +35,8 @@ const BODY_PREVIEW_LIMIT: usize = 60;
 const OPEN_LINES_LIMIT: usize = 30;
 /// 人物小传正文进材料的上限。
 const PERSON_BODY_LIMIT: usize = 400;
+/// 人物对话的小传正文上限（人格底座要全文，比梳理的单行预览宽得多）。
+const PERSONA_BODY_LIMIT: usize = 4000;
 
 /// 组装命令材料。`subjects` 只有「人物关系梳理」用（选中的人名）；
 /// 其余命令传空切片。`润色` 由前端带选区，不进这里。
@@ -50,6 +54,7 @@ pub fn build_context(
             let ordinal = chapter.ok_or_else(|| "「本章体检」需要指定章序".to_string())?;
             chapter_context(project, ordinal)
         }
+        KIND_CHARACTER_DIALOGUE => character_context(project, subjects),
         other => Err(format!("未知的 AI 命令「{other}」")),
     }
 }
@@ -392,6 +397,75 @@ fn edge_text(edge: &Relationship, legend: &[LegendItem]) -> String {
         parts.push("秘密".to_string());
     }
     format!("- {}\n", parts.join(" ｜ "))
+}
+
+// ---------- 人物对话（工单 #16，docs/spec/人物对话.md §四） ----------
+
+/// 人格材料：一个人的小传全文（含分组/别名）＋ 他相关的全部关系边 ＋
+/// 类型圈。这份材料由前端放进**系统提示**（人格底座），不是用户消息。
+/// 不塞正文与全书人物名单——「跟这个人聊」不等于「替这本书开会」。
+/// 人物文件/边表/类型圈读不动一律显式报错：人格不能建立在缺页的小传上。
+fn character_context(project: &Path, subjects: &[String]) -> Result<String, String> {
+    let names = relationship::clean_names(subjects)?;
+    let [name] = names.as_slice() else {
+        return Err("「人物对话」一次只聊一个人物".to_string());
+    };
+
+    let title = project_title(project)?;
+    let types = circle_types(project)?;
+    let persons = project::scan_notes(project, NoteKind::Character)?;
+    let Some(note) = persons.iter().find(|p| &p.name == name) else {
+        return Err(format!("没有找到「{name}」的人物文件"));
+    };
+
+    let mut out = String::new();
+    out.push_str(&format!("【书名】《{title}》\n"));
+    out.push_str(&format!("【类型圈】{}\n", join_or(&types, "（类型圈还没定）")));
+
+    let mut head = vec![note.name.clone()];
+    if let Some(group) = opt_text(note.group.as_deref()) {
+        head.push(format!("分组：{group}"));
+    }
+    let aliases = join_or(&note.aliases, "");
+    if !aliases.is_empty() {
+        head.push(format!("别名：{aliases}"));
+    }
+    out.push_str(&format!("【人物】{}\n", head.join(" ｜ ")));
+
+    // 小传全文进人格底座（换行保留），超上限才截断并注明。
+    let (body, truncated) = truncate_chars(note.body.trim(), PERSONA_BODY_LIMIT);
+    out.push_str("【小传】\n");
+    if body.is_empty() {
+        out.push_str("（小传还是空的）\n");
+    } else {
+        if truncated {
+            out.push_str(&format!("（小传已截断：只带前 {PERSONA_BODY_LIMIT} 字）\n"));
+        }
+        out.push_str(&body);
+        out.push('\n');
+    }
+
+    // 边表读不动＝报错（与 relationship_view 的降级不同：人格材料宁可不给）。
+    let table = relationship::read_table(project)?;
+    let related: Vec<&Relationship> = table
+        .edges
+        .iter()
+        .filter(|e| &e.from == name || &e.to == name)
+        .collect();
+    out.push_str("【关系】（与他相关的全部关系，另一端的人名照列）\n");
+    if related.is_empty() {
+        out.push_str("- （他身上还没有连过线）\n");
+    }
+    for edge in related {
+        out.push_str(&edge_text(edge, &table.legend));
+        // 失效引用只提示：另一端没建档，AI 该知道这人只有名字。
+        for end in [&edge.from, &edge.to] {
+            if end != name && !persons.iter().any(|p| &p.name == end) {
+                out.push_str(&format!("  （「{end}」还没有人物文件）\n"));
+            }
+        }
+    }
+    Ok(out)
 }
 
 // ---------- 本章体检 ----------
@@ -795,6 +869,79 @@ mod tests {
         write(&p.join("构思/人物关系.yaml"), "关系: 不是列表\n");
         let names = vec!["张三".to_string(), "李四".to_string()];
         assert!(build_context(KIND_RELATIONSHIPS, &p, None, &names).is_err());
+    }
+
+    #[test]
+    fn 人物对话_材料含小传全文_他的边与类型圈() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_relationship_project(tmp.path());
+        // 小传全文进人格底座：保留分段，不是梳理那种单行预览。
+        write(
+            &p.join("构思/人物/张三.md"),
+            "---\n分组: 主角阵营\n别名:\n  - 小陈\n---\n第一段生平。\n\n第二段性格。\n",
+        );
+        let text = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &["张三".to_string()]).unwrap();
+        assert!(text.contains("【书名】《大魏读书人》"), "{text}");
+        assert!(text.contains("【类型圈】掉马甲、打脸"), "{text}");
+        assert!(text.contains("【人物】张三 ｜ 分组：主角阵营 ｜ 别名：小陈"), "{text}");
+        assert!(text.contains("【小传】\n第一段生平。\n\n第二段性格。\n"), "{text}");
+        assert!(
+            text.contains("张三 → 李四 ｜ 类型：师徒 ｜ 描述：收徒实为监视 ｜ 秘密"),
+            "{text}"
+        );
+        assert!(text.contains("张三 — 王五 ｜ 类型：敌对"), "{text}");
+        // 李四—王五这条边跟张三无关，不进人格材料。
+        assert!(!text.contains("李四 → 王五"), "{text}");
+    }
+
+    #[test]
+    fn 人物对话_孤岛占位_另一端缺档只提示() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_relationship_project(tmp.path());
+        write(
+            &p.join("构思/人物关系.yaml"),
+            "图例:\n- 名: 师徒\n  方向: 有向\n关系:\n- 起: 张三\n  止: 赵六\n  类型: 师徒\n",
+        );
+        let text = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &["张三".to_string()]).unwrap();
+        assert!(text.contains("张三 → 赵六 ｜ 类型：师徒"), "{text}");
+        assert!(text.contains("（「赵六」还没有人物文件）"), "{text}");
+
+        write(&p.join("构思/人物关系.yaml"), "关系: []\n");
+        let text = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &["李四".to_string()]).unwrap();
+        assert!(text.contains("- （他身上还没有连过线）"), "{text}");
+    }
+
+    #[test]
+    fn 人物对话_人物缺失_人数不对_表坏了都报错() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_relationship_project(tmp.path());
+        let err = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &["查无此人".to_string()]).unwrap_err();
+        assert!(err.contains("没有找到「查无此人」"), "{err}");
+        let both = vec!["张三".to_string(), "李四".to_string()];
+        let err = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &both).unwrap_err();
+        assert!(err.contains("一次只聊一个人物"), "{err}");
+        let err = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &[]).unwrap_err();
+        assert!(err.contains("没有选中人物"), "{err}");
+        write(&p.join("构思/人物关系.yaml"), "关系: 不是列表\n");
+        assert!(build_context(KIND_CHARACTER_DIALOGUE, &p, None, &["张三".to_string()]).is_err());
+    }
+
+    #[test]
+    fn 人物对话_小传超上限截断_空小传给占位() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_relationship_project(tmp.path());
+        write(
+            &p.join("构思/人物/张三.md"),
+            &"字".repeat(PERSONA_BODY_LIMIT + 10),
+        );
+        let text = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &["张三".to_string()]).unwrap();
+        assert!(
+            text.contains(&format!("（小传已截断：只带前 {PERSONA_BODY_LIMIT} 字）")),
+            "{text}"
+        );
+        write(&p.join("构思/人物/张三.md"), "---\n---\n\n");
+        let text = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &["张三".to_string()]).unwrap();
+        assert!(text.contains("【小传】\n（小传还是空的）"), "{text}");
     }
 
     fn sample_chapter_project(root: &Path) -> PathBuf {

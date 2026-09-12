@@ -984,6 +984,59 @@ body {
   flex-wrap: wrap;
 }
 
+/* 人物对话（工单 #16）：勾选框贴着气泡；底座折叠块；采纳条在输入区上方。 */
+.ai-msg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.ai-msg.user .ai-msg-row {
+  flex-direction: row-reverse;
+}
+
+.ai-pick {
+  display: flex;
+  align-items: center;
+  padding-top: 8px;
+  cursor: pointer;
+  flex: none;
+}
+
+.ai-persona-base {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.ai-persona-base summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.ai-persona-base pre {
+  margin: 8px 0 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 40vh;
+  overflow-y: auto;
+  font-family: inherit;
+}
+
+.ai-adopt-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
 .ai-composer {
   border-top: 1px solid var(--line);
   padding: 10px 14px 12px;

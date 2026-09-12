@@ -653,6 +653,13 @@ export interface MessageMeta {
   endLine?: number;
 }
 
+/** 与 Rust 侧 ai.rs::ChatPersona 对应（工单 #16）：会话在跟哪本书的哪个人物聊。
+ *  项目记《书名》（与卡片「关联」同款带书名号），只用于显示与落盘时按名解析。 */
+export interface ChatPersona {
+  project: string;
+  person: string;
+}
+
 /** 与 Rust 侧 ai.rs::ChatSession 对应；id 由前端 crypto.randomUUID() 生成。 */
 export interface ChatSession {
   id: string;
@@ -661,6 +668,8 @@ export interface ChatSession {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  /** 人物对话标签；普通会话没有。 */
+  persona?: ChatPersona | null;
 }
 
 /** 与 Rust 侧 ai.rs::ChatSessionSummary 对应。 */
@@ -669,6 +678,7 @@ export interface ChatSessionSummary {
   title: string;
   updatedAt: number;
   messageCount: number;
+  persona?: ChatPersona | null;
 }
 
 /** chat_stream 的 onEvent Channel 事件；与 Rust 侧 ai.rs::ChatStreamEvent 对应。 */
@@ -678,7 +688,8 @@ export type ChatStreamEvent =
 
 /** AI 命令（设计共识 §七、docs/spec/AI命令集.md：AI 给初稿，人确认后才落盘）。
  *  拆书三条＝梳理/标注/小结（选区＋行号）；构思三条＝排布体检/矛盾梳理/人物关系梳理；
- *  书写两条＝本章体检（材料由后端组装）/润色（材料＝选区）。 */
+ *  书写两条＝本章体检（材料由后端组装）/润色（材料＝选区）。
+ *  「人物对话」（docs/spec/人物对话.md）不是命令：材料进系统提示建人格会话，不自动发送。 */
 export type AiCommandKind =
   | "梳理"
   | "标注"
@@ -687,7 +698,8 @@ export type AiCommandKind =
   | "矛盾梳理"
   | "人物关系梳理"
   | "本章体检"
-  | "润色";
+  | "润色"
+  | "人物对话";
 
 /** 板块发给 AI 面板的命令种子：`text` 既是选区文本也是后端组装的材料。 */
 export interface AiSeed {
@@ -698,8 +710,10 @@ export interface AiSeed {
   /** 拆书三条命令的选区行号（1 起）；体检/润色没有行号。 */
   startLine?: number;
   endLine?: number;
-  /** 命令带的说明（小结的章标题、润色的章名等）。 */
+  /** 命令带的说明（小结的章标题、润色的章名、人物对话的人名等）。 */
   note?: string;
+  /** 人物对话种子专有：带它＝只建人格会话、不自动发送（工单 #16）。 */
+  persona?: ChatPersona;
 }
 
 /** AI 面板当前文档快照（由编辑器注册的桥提供）。 */
