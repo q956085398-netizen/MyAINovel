@@ -18,8 +18,7 @@ import type {
 } from "./types";
 import { emptyBookMeta } from "./types";
 import { errMsg } from "./util";
-import { baseEditorTheme, editorAppearance } from "./editorTheme";
-import { subscribeSettings } from "./settings";
+import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
 import BookMetaDialog from "./BookMetaDialog";
 import TropeDialog from "./TropeDialog";
 
@@ -421,15 +420,7 @@ export default function EditorPage({
 
   // 设置变化（主题/排版）→ 编辑器外观重配（视图异步就绪前订阅先挂上，
   // dispatch 时 viewRef 没有就不动，挂载时已带最新外观）。
-  useEffect(
-    () =>
-      subscribeSettings(() => {
-        viewRef.current?.dispatch({
-          effects: appearanceCompartment.reconfigure(editorAppearance()),
-        });
-      }),
-    [],
-  );
+  useEditorAppearance(viewRef, appearanceCompartment);
 
   if (loadError) {
     return (

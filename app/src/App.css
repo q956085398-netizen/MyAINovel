@@ -22,6 +22,7 @@
   --warn-line: #d9a441;
   --warn-soft: #fdf5e3;
   --mark-bg: #f5e4a8;
+  --goal-line: #4b6b8a;
 }
 
 /* ---------- 主题（工单 #24，spec 个性化设置.md §二）----------
@@ -50,6 +51,7 @@
   --warn-line: #8a6d2c;
   --warn-soft: #3d3320;
   --mark-bg: #6b5a26;
+  --goal-line: #7ea3c4;
 }
 
 * {
@@ -2362,7 +2364,7 @@ body {
 }
 
 .exp-bar.goal {
-  border-left: 3px solid #4b6b8a;
+  border-left: 3px solid var(--goal-line);
 }
 
 /* 未兑现的线：最近锚点之后画虚线尾巴（一直拖到当前章）。 */

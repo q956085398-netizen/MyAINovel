@@ -9,7 +9,7 @@ import Ideation from "./Ideation";
 import InspirationLibrary from "./InspirationLibrary";
 import Writing from "./Writing";
 import SettingsDialog from "./SettingsDialog";
-import { initSettings } from "./settings";
+import { getSettings, initSettings } from "./settings";
 import type { ProjectTab } from "./ProjectPage";
 import type {
   AiSeed,
@@ -80,32 +80,50 @@ function App() {
     );
   }, [libraryPath]);
 
+  // 自定义背景图多在库外，重启后 asset 授权是运行时态会丢——启动补授权
+  // （工单 #25：路径持久化在设置里，图本身不动）。
+  useEffect(() => {
+    const bg = getSettings().background;
+    if (bg.kind !== "image") return;
+    invoke("grant_asset_scope", { path: bg.path }).catch((e) =>
+      console.error("授权背景图访问失败：", e),
+    );
+  }, []);
+
+  const pickLibraryFolder = useCallback(
+    (title: string) => open({ directory: true, multiple: false, title }),
+    [],
+  );
+
   const chooseLibraryFolder = useCallback(async () => {
-    const picked = await open({
-      directory: true,
-      multiple: false,
-      title: "选择库文件夹",
-    });
+    const picked = await pickLibraryFolder("选择库文件夹");
     if (typeof picked === "string") {
       localStorage.setItem(PATH_KEY, picked);
       setLibraryPath(picked);
     }
-  }, []);
+  }, [pickLibraryFolder]);
 
   /** 新建空库（工单 #21）：选一个空文件夹即设为当前库，零预建——
    *  词表/项目/灵感库全部首用时懒生成。与「打开库」动作同款，只有文案与
-   *  意图不同（spec 书库新建与展示 §三）。 */
+   *  意图不同（spec 书库新建与展示 §三）；选到非空文件夹时向人确认，
+   *  不自动清洗、不改写任何既有文件。 */
   const createLibraryFolder = useCallback(async () => {
-    const picked = await open({
-      directory: true,
-      multiple: false,
-      title: "选择一个空文件夹作为新库",
-    });
-    if (typeof picked === "string") {
-      localStorage.setItem(PATH_KEY, picked);
-      setLibraryPath(picked);
+    const picked = await pickLibraryFolder("选择一个空文件夹作为新库");
+    if (typeof picked !== "string") return;
+    try {
+      const empty = await invoke<boolean>("is_empty_dir", { path: picked });
+      if (!empty) {
+        const ok = window.confirm(
+          `选中的文件夹不是空的，仍要把它作为库打开吗？\n\n${picked}\n\n不会改动、不会搬动里面的任何文件。`,
+        );
+        if (!ok) return;
+      }
+    } catch {
+      // 判定失败不拦路：当作打开库处理，交给后续扫描。
     }
-  }, []);
+    localStorage.setItem(PATH_KEY, picked);
+    setLibraryPath(picked);
+  }, [pickLibraryFolder]);
 
   /** 从灵感库跳书：打开拆书稿并切到书库页。 */
   const openBookFromInspiration = useCallback((book: BookEntry) => {

@@ -3,13 +3,14 @@ import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { markdown } from "@codemirror/lang-markdown";
-import { baseEditorTheme, editorAppearance } from "./editorTheme";
-import { subscribeSettings } from "./settings";
+import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
 
 const editorTheme = baseEditorTheme({ fontSize: "14px", paddingBottom: "2em" });
 
-/** 外观随设置变化（工单 #24：深色）经 Compartment 重配。 */
+/** 外观随设置变化经 Compartment 重配；便签编辑器只跟深色不跟排版
+ *  （spec 个性化设置.md §四：排版三件套归拆书/书写两个主编辑器）。 */
 const appearanceCompartment = new Compartment();
+const noteAppearance = { typography: false } as const;
 
 interface MarkdownEditorProps {
   value: string;
@@ -27,6 +28,8 @@ export default function MarkdownEditor({ value, onChange, height = "320px" }: Ma
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
+  useEditorAppearance(viewRef, appearanceCompartment, noteAppearance);
+
   useEffect(() => {
     if (!containerRef.current) return;
     const view = new EditorView({
@@ -37,7 +40,7 @@ export default function MarkdownEditor({ value, onChange, height = "320px" }: Ma
           basicSetup,
           markdown(),
           editorTheme,
-          appearanceCompartment.of(editorAppearance()),
+          appearanceCompartment.of(editorAppearance(noteAppearance)),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString());
           }),
@@ -45,14 +48,7 @@ export default function MarkdownEditor({ value, onChange, height = "320px" }: Ma
       }),
     });
     viewRef.current = view;
-    // 设置变化（主题）→ 外观重配（工单 #24）。
-    const unsubscribe = subscribeSettings(() => {
-      viewRef.current?.dispatch({
-        effects: appearanceCompartment.reconfigure(editorAppearance()),
-      });
-    });
     return () => {
-      unsubscribe();
       view.destroy();
       viewRef.current = null;
     };

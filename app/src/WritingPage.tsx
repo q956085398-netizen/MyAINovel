@@ -48,8 +48,7 @@ import {
 import { findQuote } from "./foreshadowAnchor";
 import { ForeshadowCollectDialog, ForeshadowNameDialog } from "./ForeshadowDialog";
 import { ExpectationFormDialog, ExpectationFulfillDialog } from "./ExpectationDialog";
-import { baseEditorTheme, editorAppearance } from "./editorTheme";
-import { subscribeSettings } from "./settings";
+import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
 
 /** 自动保存防抖：停笔约 3 秒落盘（用户拍板「自动保存为主」）。 */
 const AUTOSAVE_MS = 3000;
@@ -1029,15 +1028,7 @@ export default function WritingPage({
   }, []);
 
   // 设置变化（主题/排版）→ 编辑器外观重配（工单 #24/#26）。
-  useEffect(
-    () =>
-      subscribeSettings(() => {
-        viewRef.current?.dispatch({
-          effects: appearanceCompartment.reconfigure(editorAppearance()),
-        });
-      }),
-    [],
-  );
+  useEditorAppearance(viewRef, appearanceCompartment);
 
   useEffect(() => {
     if (!immersive) return;

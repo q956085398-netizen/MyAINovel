@@ -1,7 +1,9 @@
+import { useEffect, type RefObject } from "react";
+import { Compartment, type Extension } from "@codemirror/state";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { getSettings, resolvedTheme, type BodyFont } from "./settings";
+import { getSettings, resolvedTheme, subscribeSettings, type BodyFont } from "./settings";
 
 /** 排版三件套（工单 #26，spec 个性化设置.md §四）：两个编辑器共用，
  *  未设置的项不产生规则＝各编辑器现状（拆书 15px／书写 17px、行距 1.9）。 */
@@ -74,16 +76,41 @@ const darkEditorTheme = EditorView.theme(
 );
 
 /** 编辑器外观（工单 #24 起）：随设置/主题变化，编辑器经 Compartment 重配
- *  （订阅见 settings.ts）。浅色＋素纸＋默认排版＝空扩展（现状）。
- *  深色判定：主题深色，或选了深色纹理「暮山」（浅主题下暮山也配浅字）。 */
-export function editorAppearance() {
+ *  （订阅见 useEditorAppearance）。浅色＋素纸＋默认排版＝空扩展（现状）。
+ *  深色判定：主题深色，或选了深色纹理「暮山」（浅主题下暮山也配浅字）。
+ *  typography=false 时只跟深色不跟排版（spec §四：排版三件套归拆书/
+ *  书写两个主编辑器，构思便签编辑器不随）。 */
+export interface EditorAppearanceOptions {
+  typography?: boolean;
+}
+
+export function editorAppearance({ typography = true }: EditorAppearanceOptions = {}): Extension[] {
   const { background, font, fontSize, lineHeight } = getSettings();
   const dark =
     resolvedTheme() === "dark" ||
     (background.kind === "builtin" && background.id === "暮山");
-  const rules = typographyRules(font, fontSize, lineHeight);
+  const rules = typography ? typographyRules(font, fontSize, lineHeight) : {};
   return [
     ...(dark ? [darkEditorTheme, syntaxHighlighting(darkHighlight)] : []),
     ...(Object.keys(rules).length > 0 ? [EditorView.theme(rules)] : []),
   ];
+}
+
+/** 订阅设置变化 → 编辑器外观 Compartment 重配（各编辑器共用一个订阅形状）。 */
+export function useEditorAppearance(
+  viewRef: RefObject<EditorView | null>,
+  compartment: Compartment,
+  options?: EditorAppearanceOptions,
+) {
+  useEffect(
+    () =>
+      subscribeSettings(() => {
+        viewRef.current?.dispatch({
+          effects: compartment.reconfigure(editorAppearance(options)),
+        });
+      }),
+    // viewRef/compartment 是模块级或挂载期稳定引用；options 为字面量或缺省。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 }

@@ -50,6 +50,13 @@ fn create_book(root: String, title: String) -> Result<BookEntry, String> {
     library::create_book(&PathBuf::from(&root), &title)
 }
 
+/// 新建库空文件夹判定（工单 #21）：选中的文件夹是否为空（含隐藏项）；
+/// 非空时前端向人确认，不自动清洗。
+#[tauri::command]
+fn is_empty_dir(path: String) -> Result<bool, String> {
+    library::is_empty_library_dir(Path::new(&path))
+}
+
 /// 设封面（工单 #23）：选图拷为 cover_dir/封面.<ext>（旧封面删除替换），
 /// 返回封面文件路径。封面是全应用第一处图片渲染——本地图片加载走
 /// asset 协议（convertFileSrc），scope 由 grant_asset_scope 运行时授权。
@@ -693,6 +700,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_library,
             create_book,
+            is_empty_dir,
             set_cover,
             grant_asset_scope,
             read_book_md,

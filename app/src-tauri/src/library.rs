@@ -264,6 +264,19 @@ fn file_stem_of(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// 新建库的空文件夹判定（工单 #21，spec 书库新建与展示 §三）：目录存在
+/// 且没有任何条目（含隐藏文件）。非空时由前端向人确认后再设为当前库——
+/// 不自动清洗、不改写任何既有文件（ADR 0002）。
+pub fn is_empty_library_dir(path: &Path) -> Result<bool, String> {
+    if !path.is_dir() {
+        return Err(format!("不是有效的文件夹：{}", path.display()));
+    }
+    Ok(fs::read_dir(path)
+        .map_err(|e| format!("无法读取文件夹 {}：{e}", path.display()))?
+        .next()
+        .is_none())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,5 +608,19 @@ mod tests {
         let books = scan_library(&root).unwrap();
         assert_eq!(books[0].cover.as_deref(), Some(dest.as_path()));
         assert_eq!(fs::read(&dest).unwrap(), "png bytes".as_bytes(), "拷贝而非引用");
+    }
+
+    #[test]
+    fn 新建库_空文件夹判定_隐藏项也算非空() {
+        let tmp = TempDir::new().unwrap();
+        let empty = tmp.path().join("空库");
+        fs::create_dir_all(&empty).unwrap();
+        assert!(is_empty_library_dir(&empty).unwrap());
+
+        let occupied = tmp.path().join("非空");
+        fs::create_dir_all(occupied.join(".obsidian")).unwrap();
+        assert!(!is_empty_library_dir(&occupied).unwrap());
+
+        assert!(is_empty_library_dir(&tmp.path().join("不存在")).is_err());
     }
 }

@@ -15,15 +15,32 @@ pub const COVER_EXTS: [&str; 3] = ["png", "jpg", "webp"];
 const COVER_STEM: &str = "封面";
 
 /// 在封面目录（…/附件/）里按约定文件名找封面；无则 None。
-/// 目录不存在不算错误（附件/ 本就懒生成）。
+/// 目录不存在不算错误（附件/ 本就懒生成）。扩展名大小写不敏感
+/// （OB 里手放 封面.PNG 也认）；多扩展名并存按 png＞jpg＞webp 取一。
 pub fn find_cover(dir: &Path) -> Option<PathBuf> {
-    for ext in COVER_EXTS {
-        let path = dir.join(format!("{COVER_STEM}.{ext}"));
-        if path.is_file() {
-            return Some(path);
+    let mut found: Option<(u8, PathBuf)> = None;
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some((stem, ext)) = name.rsplit_once('.') else {
+            continue;
+        };
+        if stem != COVER_STEM {
+            continue;
+        }
+        let ext = ext.to_ascii_lowercase();
+        let Some(prio) = COVER_EXTS.iter().position(|e| *e == ext) else {
+            continue;
+        };
+        let better = match &found {
+            Some((best, _)) => (prio as u8) < *best,
+            None => true,
+        };
+        if better {
+            found = Some((prio as u8, entry.path()));
         }
     }
-    None
+    found.map(|(_, path)| path)
 }
 
 /// 设封面：把选中的图**拷贝**为 dir/封面.<ext>（原图不动）；
@@ -89,6 +106,15 @@ mod tests {
         write(&dir.join("截图-1.png"), "png");
         write(&dir.join("封面备份.png"), "备份");
         assert_eq!(find_cover(&dir), None);
+    }
+
+    #[test]
+    fn 找封面_大写扩展名也认() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("附件");
+        write(&dir.join("封面.PNG"), "大写");
+        write(&dir.join("封面.WebP"), "webp");
+        assert_eq!(find_cover(&dir), Some(dir.join("封面.PNG")), "png 仍压过 webp");
     }
 
     #[test]
