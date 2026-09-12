@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::book_file::{
-    has_md_extension, is_hidden, meta_from_mapping, read_yaml_mapping, sibling_yaml_path, BookMeta,
+    has_md_extension, is_hidden, meta_from_mapping, read_yaml_mapping, sanitize_file_name,
+    sibling_yaml_path, write_text_atomic, BookMeta,
 };
 use crate::inspiration::LIBRARY_DIR;
 use crate::proofread::PROOFREAD_DIR;
@@ -60,6 +61,33 @@ pub fn scan_library(root: &Path) -> Result<Vec<BookEntry>, String> {
         .into_iter()
         .map(book_entry)
         .collect())
+}
+
+/// 新建拆书书（工单 #20，spec 书库新建与展示 §二）：一律一书一文件夹——
+/// 建「《书名》/」＋空 拆书.md；yaml 与 附件/ 懒生成（首次结构化标注/贴图
+/// 才落盘，#13 纪律）。重名报错不续号：书是唯一的，同名是误操作
+/// （同 create_project）。
+pub fn create_book(root: &Path, title: &str) -> Result<BookEntry, String> {
+    if !root.is_dir() {
+        return Err(format!("不是有效的文件夹：{}", root.display()));
+    }
+    let title = title.trim().trim_start_matches('《').trim_end_matches('》').trim();
+    let name =
+        sanitize_file_name(title).map_err(|_| "书名不能为空（或只剩符号）".to_string())?;
+    let dir = root.join(format!("《{name}》"));
+    if dir.exists() {
+        return Err(format!("已存在同名书「{name}」"));
+    }
+    fs::create_dir_all(&dir).map_err(|e| format!("无法创建文件夹 {}：{e}", dir.display()))?;
+    let primary_md = dir.join("拆书.md");
+    write_text_atomic(&primary_md, "")
+        .map_err(|e| format!("无法创建拆书稿 {}：{e}", primary_md.display()))?;
+    Ok(book_entry(BookFiles {
+        name: format!("《{name}》"),
+        layout: Layout::FolderBook,
+        mds: vec![primary_md.clone()],
+        primary_md,
+    }))
 }
 
 pub(crate) fn collect_book_files(root: &Path) -> Result<Vec<BookFiles>, String> {
@@ -421,5 +449,56 @@ mod tests {
 
         let books = scan_library(&root).unwrap();
         assert_eq!(books[0].chapter_count, 1);
+    }
+
+    // --- 新建书（spec 书库新建与展示 §二）---
+
+    #[test]
+    fn 新建书_一书一文件夹_空拆书稿_懒生成() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        let book = create_book(&root, "我的新书").unwrap();
+
+        assert_eq!(book.name, "《我的新书》");
+        assert_eq!(book.layout, Layout::FolderBook);
+        assert!(book.primary_md.ends_with("拆书.md"));
+        // 落点：只建《书名》/＋空 拆书.md；yaml 与附件/懒生成，不预建。
+        assert_eq!(fs::read_to_string(&book.primary_md).unwrap(), "");
+        assert!(!root.join("《我的新书》/拆书.yaml").exists());
+        assert!(!root.join("《我的新书》/附件").exists());
+
+        // 扫描立刻能认出这本书。
+        let books = scan_library(&root).unwrap();
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].name, "《我的新书》");
+    }
+
+    #[test]
+    fn 新建书_同名报错_不自动续号() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        create_book(&root, "书甲").unwrap();
+
+        let err = create_book(&root, "书甲").unwrap_err();
+        assert!(err.contains("书甲"), "报错应指名书名：{err}");
+        // 不续号：库里只有一本。
+        assert_eq!(scan_library(&root).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn 新建书_书名清洗_去书名号与空白_非法字符替换() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        let book = create_book(&root, " 《剑/来：外传》 ").unwrap();
+        assert_eq!(book.name, "《剑_来：外传》");
+        assert!(root.join("《剑_来：外传》/拆书.md").is_file());
+
+        // 只剩符号/空串报错，不建目录。
+        assert!(create_book(&root, "《  》").is_err());
+        assert!(create_book(&root, "《??》").is_err());
+        let entries = fs::read_dir(&root).unwrap().count();
+        assert_eq!(entries, 1, "失败的新建不应留下目录");
     }
 }

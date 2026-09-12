@@ -43,6 +43,12 @@ fn scan_library(root: String) -> Result<Vec<BookEntry>, String> {
     library::scan_library(&path)
 }
 
+/// 新建拆书书（工单 #20）：一书一文件夹＋空拆书稿，yaml/附件懒生成。
+#[tauri::command]
+fn create_book(root: String, title: String) -> Result<BookEntry, String> {
+    library::create_book(&PathBuf::from(&root), &title)
+}
+
 /// 正文读入带版本指纹（ADR 0004）：保存时带回对账，防 Obsidian 抢写被静默覆盖。
 #[tauri::command]
 fn read_book_md(path: String) -> Result<MdContent, String> {
@@ -659,6 +665,7 @@ pub fn run() {
         .manage(AiState::default())
         .invoke_handler(tauri::generate_handler![
             scan_library,
+            create_book,
             read_book_md,
             save_book_md,
             read_book_meta,

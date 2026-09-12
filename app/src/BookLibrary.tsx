@@ -47,6 +47,11 @@ export default function BookLibrary({ libraryPath, onChooseFolder, onOpen }: Boo
   const [tropeType, setTropeType] = useState("");
   const [tropeSolution, setTropeSolution] = useState("");
 
+  // 新建书（工单 #20）：只填书名，建后直进拆书编辑器。
+  const [creating, setCreating] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+
   const scan = useCallback(async (path: string) => {
     setScanning(true);
     setError(null);
@@ -82,6 +87,27 @@ export default function BookLibrary({ libraryPath, onChooseFolder, onOpen }: Boo
   function openByPath(primaryMd: string) {
     const book = books.find((b) => b.primaryMd === primaryMd);
     if (book) onOpen(book);
+  }
+
+  /** 新建书：建 《书名》/＋空 拆书.md（yaml/附件懒生成），成功直进编辑器。 */
+  async function create() {
+    if (!libraryPath || busy) return;
+    const title = newTitle.trim();
+    if (!title) {
+      window.alert("书名不能为空。");
+      return;
+    }
+    setBusy(true);
+    try {
+      const book = await invoke<BookEntry>("create_book", { root: libraryPath, title });
+      setCreating(false);
+      setNewTitle("");
+      onOpen(book);
+    } catch (e) {
+      window.alert(`新建书失败：${errMsg(e)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   /** 桥段跨书筛选（设计共识 §五）：按类型/解法回答「某类型有多少种解法」。 */
@@ -131,11 +157,16 @@ export default function BookLibrary({ libraryPath, onChooseFolder, onOpen }: Boo
         </div>
         <div className="page-actions">
           {libraryPath && (
-            <button className="btn" disabled={scanning} onClick={() => void scan(libraryPath)}>
-              刷新
-            </button>
+            <>
+              <button className="btn" disabled={scanning} onClick={() => void scan(libraryPath)}>
+                刷新
+              </button>
+              <button className="btn primary" onClick={() => setCreating(true)}>
+                新建书
+              </button>
+            </>
           )}
-          <button className="btn primary" onClick={onChooseFolder}>
+          <button className="btn" onClick={onChooseFolder}>
             打开库文件夹
           </button>
         </div>
@@ -159,7 +190,12 @@ export default function BookLibrary({ libraryPath, onChooseFolder, onOpen }: Boo
       {libraryPath && !scanning && !error && books.length === 0 && (
         <div className="empty-state">
           <p>这个文件夹里没有找到拆书稿（.md）。</p>
-          <p className="hint">确认选中的是存放拆书 .md 文件的那一层目录。</p>
+          <p className="hint">确认选中的是存放拆书 .md 文件的那一层目录，或者直接新建一本。</p>
+          <div className="empty-state-actions">
+            <button className="btn primary" onClick={() => setCreating(true)}>
+              新建书
+            </button>
+          </div>
         </div>
       )}
 
@@ -332,6 +368,43 @@ export default function BookLibrary({ libraryPath, onChooseFolder, onOpen }: Boo
             </>
           )}
         </>
+      )}
+
+      {creating && (
+        <div
+          className="dialog-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setCreating(false);
+          }}
+        >
+          <div className="dialog">
+            <h2>新建书</h2>
+            <label>
+              书名
+              <input
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="如：大魏读书人"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void create();
+                }}
+              />
+            </label>
+            <p className="hint">
+              会建 《书名》/ 并放一份空 拆书.md；书级资料与附件随标注/贴图懒生成。
+              同名书已存在时报错，不自动续号。
+            </p>
+            <div className="dialog-actions">
+              <button className="btn" disabled={busy} onClick={() => setCreating(false)}>
+                取消
+              </button>
+              <button className="btn primary" disabled={busy} onClick={() => void create()}>
+                创建
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
