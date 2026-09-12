@@ -32,11 +32,18 @@ export type EditorBackground =
   | { kind: "builtin"; id: BuiltinBackground }
   | { kind: "image"; path: string };
 
+/** 正文字体（§四）：四选一；「跟随系统」＝不动字体栈。 */
+export type BodyFont = "system" | "宋" | "黑" | "楷";
+
 export interface AppSettings {
   /** 主题三态（§二）：浅｜深｜跟随系统；跟随＝监听系统深浅偏好。 */
   theme: ThemeMode;
   /** 编辑器背景（§三）：只铺拆书/书写两个编辑器，沉浸式。 */
   background: EditorBackground;
+  /** 排版三件套（§四）：两个编辑器共用；null＝未设置＝各编辑器现状。 */
+  font: BodyFont;
+  fontSize: number | null;
+  lineHeight: number | null;
 }
 
 const KEY = "gongbi.settings";
@@ -44,6 +51,9 @@ const KEY = "gongbi.settings";
 const DEFAULTS: AppSettings = {
   theme: "light",
   background: { kind: "builtin", id: "素纸" },
+  font: "system",
+  fontSize: null,
+  lineHeight: null,
 };
 
 function load(): AppSettings {

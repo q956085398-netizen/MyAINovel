@@ -1,7 +1,31 @@
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { getSettings, resolvedTheme } from "./settings";
+import { getSettings, resolvedTheme, type BodyFont } from "./settings";
+
+/** 排版三件套（工单 #26，spec 个性化设置.md §四）：两个编辑器共用，
+ *  未设置的项不产生规则＝各编辑器现状（拆书 15px／书写 17px、行距 1.9）。 */
+const FONT_STACKS: Record<Exclude<BodyFont, "system">, string> = {
+  宋: '"Source Han Serif SC", "Noto Serif SC", "SimSun", serif',
+  黑: '"Source Han Sans SC", "Noto Sans SC", "SimHei", "Microsoft YaHei", sans-serif',
+  楷: '"KaiTi", "STKaiti", "Source Han Serif SC", serif',
+};
+
+function typographyRules(
+  font: BodyFont,
+  fontSize: number | null,
+  lineHeight: number | null,
+): Record<string, Record<string, string>> {
+  const spec: Record<string, Record<string, string>> = {};
+  if (font !== "system") spec["&"] = { fontFamily: FONT_STACKS[font] };
+  if (fontSize != null) {
+    spec["&"] = { ...spec["&"], fontSize: `${fontSize}px` };
+  }
+  if (lineHeight != null) {
+    spec[".cm-content"] = { lineHeight: String(lineHeight) };
+  }
+  return spec;
+}
 
 interface EditorThemeOptions {
   fontSize: string;
@@ -50,12 +74,16 @@ const darkEditorTheme = EditorView.theme(
 );
 
 /** 编辑器外观（工单 #24 起）：随设置/主题变化，编辑器经 Compartment 重配
- *  （订阅见 settings.ts）。浅色＋素纸＝空扩展（现状）。
+ *  （订阅见 settings.ts）。浅色＋素纸＋默认排版＝空扩展（现状）。
  *  深色判定：主题深色，或选了深色纹理「暮山」（浅主题下暮山也配浅字）。 */
 export function editorAppearance() {
-  const { background } = getSettings();
+  const { background, font, fontSize, lineHeight } = getSettings();
   const dark =
     resolvedTheme() === "dark" ||
     (background.kind === "builtin" && background.id === "暮山");
-  return dark ? [darkEditorTheme, syntaxHighlighting(darkHighlight)] : [];
+  const rules = typographyRules(font, fontSize, lineHeight);
+  return [
+    ...(dark ? [darkEditorTheme, syntaxHighlighting(darkHighlight)] : []),
+    ...(Object.keys(rules).length > 0 ? [EditorView.theme(rules)] : []),
+  ];
 }

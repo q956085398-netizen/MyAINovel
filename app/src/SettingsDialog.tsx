@@ -4,6 +4,7 @@ import {
   BUILTIN_BACKGROUNDS,
   useSettings,
   type BuiltinBackground,
+  type BodyFont,
   type ThemeMode,
 } from "./settings";
 import { errMsg } from "./util";
@@ -12,6 +13,13 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: "light", label: "浅色" },
   { value: "dark", label: "深色" },
   { value: "system", label: "跟随系统" },
+];
+
+const FONT_OPTIONS: { value: BodyFont; label: string }[] = [
+  { value: "system", label: "跟随系统" },
+  { value: "宋", label: "宋" },
+  { value: "黑", label: "黑" },
+  { value: "楷", label: "楷" },
 ];
 
 /** 设置面板（工单 #24 骨架，spec 个性化设置.md §五）：侧栏底部齿轮打开。
@@ -104,6 +112,73 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               当前背景图：{settings.background.path}（只记路径，不拷进库里）
             </p>
           )}
+        </section>
+
+        <section className="settings-section">
+          <h3>排版</h3>
+          <p className="hint">
+            拆书与书写两个编辑器共用；与书写板块的打字机滚动/沉浸模式互不影响。
+            未调整时保持各编辑器现状。
+          </p>
+          <div className="settings-field">
+            <span className="settings-label">字体</span>
+            <div className="display-toggle" role="radiogroup" aria-label="正文字体">
+              {FONT_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  className={settings.font === o.value ? "active" : ""}
+                  onClick={() => update({ font: o.value })}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="settings-field">
+            <span className="settings-label">字号</span>
+            <input
+              type="range"
+              min={12}
+              max={28}
+              step={1}
+              value={settings.fontSize ?? 16}
+              onChange={(e) => update({ fontSize: Number(e.target.value) })}
+            />
+            <span className="settings-value">
+              {settings.fontSize != null ? `${settings.fontSize}px` : "默认"}
+            </span>
+            <button
+              type="button"
+              className="btn small"
+              disabled={settings.fontSize == null}
+              onClick={() => update({ fontSize: null })}
+            >
+              恢复默认
+            </button>
+          </div>
+          <div className="settings-field">
+            <span className="settings-label">行距</span>
+            <input
+              type="range"
+              min={1.2}
+              max={2.6}
+              step={0.1}
+              value={settings.lineHeight ?? 1.9}
+              onChange={(e) => update({ lineHeight: Number(e.target.value) })}
+            />
+            <span className="settings-value">
+              {settings.lineHeight != null ? settings.lineHeight.toFixed(1) : "默认"}
+            </span>
+            <button
+              type="button"
+              className="btn small"
+              disabled={settings.lineHeight == null}
+              onClick={() => update({ lineHeight: null })}
+            >
+              恢复默认
+            </button>
+          </div>
         </section>
 
         <div className="dialog-actions">

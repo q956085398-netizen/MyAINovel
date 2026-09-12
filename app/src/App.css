@@ -989,6 +989,32 @@ body {
   gap: 8px;
 }
 
+.settings-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.settings-label {
+  flex-shrink: 0;
+  width: 3em;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.settings-value {
+  flex-shrink: 0;
+  min-width: 3.5em;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.settings-field input[type="range"] {
+  flex: 1;
+}
+
 /* ---------- 设置面板（工单 #24） ---------- */
 
 .settings-dialog {
