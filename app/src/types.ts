@@ -52,6 +52,10 @@ export interface BookEntry {
   wordCount: number;
   meta: BookMeta;
   tropes: TropeSpan[];
+  /** 封面文件（约定文件名 附件/封面.png|jpg|webp 现查现识别）；无封面为 null。 */
+  cover: string | null;
+  /** 封面目录（「设封面」的拷贝落点，Rust 侧约定）。 */
+  coverDir: string;
 }
 
 /** 与 Rust 侧 book_file::BookMeta 对应（IPC 走 camelCase；yaml 落盘键为中文）。 */
@@ -84,6 +88,10 @@ export interface ProjectEntry {
   foreshadowCount: number;
   /** 三线条数（三线.yaml）。 */
   expectationCount: number;
+  /** 封面文件（约定文件名 附件/封面.png|jpg|webp 现查现识别）；无封面为 null。 */
+  cover: string | null;
+  /** 封面目录（「设封面」的拷贝落点）＝项目内 附件/。 */
+  coverDir: string;
 }
 
 /** 与 Rust 侧 project::PlotLine 对应（yaml 落盘键为「名/色」）。 */

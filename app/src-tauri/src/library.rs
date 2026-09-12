@@ -41,6 +41,12 @@ pub struct BookEntry {
     pub meta: BookMeta,
     /// 同名 .yaml 的桥段标注列表；无 yaml 或损坏时为空。
     pub tropes: Vec<TropeSpan>,
+    /// 封面文件（约定文件名 附件/封面.png|jpg|webp，现查现识别，零 yaml 键）；
+    /// 无封面为 None，前端以书名首字占位。删文件即撤。
+    pub cover: Option<PathBuf>,
+    /// 封面目录（「设封面」的拷贝落点）：一书一文件夹＝书内 附件/，
+    /// 散文件书＝库根 附件/<书名>/（与截图粘贴同路径纪律）。
+    pub cover_dir: PathBuf,
 }
 
 struct MdStats {
@@ -57,10 +63,20 @@ pub(crate) struct BookFiles {
 }
 
 pub fn scan_library(root: &Path) -> Result<Vec<BookEntry>, String> {
-    Ok(collect_book_files(root)?
+    let root = root.to_path_buf();
+    Ok(collect_book_files(&root)?
         .into_iter()
-        .map(book_entry)
+        .map(|files| book_entry(&root, files))
         .collect())
+}
+
+/// 封面目录（约定）：一书一文件夹＝书内 附件/；散文件书＝库根
+/// 附件/<书名>/（与 book_file::attachment_subdir 同路径纪律）。
+fn cover_dir_for(root: &Path, files: &BookFiles) -> PathBuf {
+    match files.layout {
+        Layout::FolderBook => files.primary_md.parent().unwrap_or(root).join("附件"),
+        Layout::Scattered => root.join("附件").join(&files.name),
+    }
 }
 
 /// 新建拆书书（工单 #20，spec 书库新建与展示 §二）：一律一书一文件夹——
@@ -82,12 +98,15 @@ pub fn create_book(root: &Path, title: &str) -> Result<BookEntry, String> {
     let primary_md = dir.join("拆书.md");
     write_text_atomic(&primary_md, "")
         .map_err(|e| format!("无法创建拆书稿 {}：{e}", primary_md.display()))?;
-    Ok(book_entry(BookFiles {
-        name: format!("《{name}》"),
-        layout: Layout::FolderBook,
-        mds: vec![primary_md.clone()],
-        primary_md,
-    }))
+    Ok(book_entry(
+        root,
+        BookFiles {
+            name: format!("《{name}》"),
+            layout: Layout::FolderBook,
+            mds: vec![primary_md.clone()],
+            primary_md,
+        },
+    ))
 }
 
 pub(crate) fn collect_book_files(root: &Path) -> Result<Vec<BookFiles>, String> {
@@ -157,7 +176,7 @@ fn folder_book_files(dir: &Path) -> Option<BookFiles> {
     })
 }
 
-fn book_entry(files: BookFiles) -> BookEntry {
+fn book_entry(root: &Path, files: BookFiles) -> BookEntry {
     let (chapters, words) = files
         .mds
         .iter()
@@ -165,6 +184,8 @@ fn book_entry(files: BookFiles) -> BookEntry {
         .fold((0u32, 0u64), |(c, w), s| (c + s.chapters, w + s.words));
 
     let (meta, tropes) = meta_and_tropes(&files.primary_md);
+    let cover_dir = cover_dir_for(root, &files);
+    let cover = crate::cover::find_cover(&cover_dir);
     BookEntry {
         name: files.name,
         layout: files.layout,
@@ -174,6 +195,8 @@ fn book_entry(files: BookFiles) -> BookEntry {
         word_count: words,
         meta,
         tropes,
+        cover,
+        cover_dir,
     }
 }
 
@@ -500,5 +523,77 @@ mod tests {
         assert!(create_book(&root, "《??》").is_err());
         let entries = fs::read_dir(&root).unwrap().count();
         assert_eq!(entries, 1, "失败的新建不应留下目录");
+    }
+
+    // --- 封面扫描（工单 #23，spec 书库新建与展示 §五）---
+
+    #[test]
+    fn 封面_一书一文件夹_落书内附件() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("《书丙》/拆书.md"), "第1章");
+        write(&root.join("《书丙》/附件/封面.png"), "png");
+
+        let books = scan_library(&root).unwrap();
+        assert_eq!(
+            books[0].cover,
+            Some(root.join("《书丙》/附件/封面.png"))
+        );
+        assert_eq!(books[0].cover_dir, root.join("《书丙》/附件"));
+    }
+
+    #[test]
+    fn 封面_散文件书_落库根附件_按书名分目录() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("书乙.md"), "第1章");
+        write(&root.join("附件/书乙/封面.jpg"), "jpg");
+
+        let books = scan_library(&root).unwrap();
+        assert_eq!(books[0].cover, Some(root.join("附件/书乙/封面.jpg")));
+        assert_eq!(books[0].cover_dir, root.join("附件/书乙"));
+    }
+
+    #[test]
+    fn 封面_无封面为空_删文件即撤() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("书甲.md"), "第1章");
+        write(&root.join("附件/书甲/封面.png"), "png");
+
+        let books = scan_library(&root).unwrap();
+        assert!(books[0].cover.is_some());
+        fs::remove_file(root.join("附件/书甲/封面.png")).unwrap();
+        assert!(scan_library(&root).unwrap()[0].cover.is_none());
+    }
+
+    #[test]
+    fn 封面_多扩展名并存_按_png_优先() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("《书》/拆书.md"), "第1章");
+        write(&root.join("《书》/附件/封面.webp"), "w");
+        write(&root.join("《书》/附件/封面.jpg"), "j");
+        write(&root.join("《书》/附件/封面.png"), "p");
+
+        assert_eq!(
+            scan_library(&root).unwrap()[0].cover,
+            Some(root.join("《书》/附件/封面.png"))
+        );
+    }
+
+    #[test]
+    fn 封面_端到端_新建库_新建书_设封面_扫描识别() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        let book = create_book(&root, "我的新书").unwrap();
+        assert!(book.cover.is_none(), "新书无封面");
+
+        // 模拟用户选图：库外一张 png。
+        let picked = tmp.path().join("选图.png");
+        fs::write(&picked, b"png bytes").unwrap();
+        let dest = crate::cover::set_cover(&book.cover_dir, &picked).unwrap();
+        assert_eq!(dest, root.join("《我的新书》/附件/封面.png"));
+
+        let books = scan_library(&root).unwrap();
+        assert_eq!(books[0].cover.as_deref(), Some(dest.as_path()));
+        assert_eq!(fs::read(&dest).unwrap(), "png bytes".as_bytes(), "拷贝而非引用");
     }
 }

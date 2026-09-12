@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import AiSidebar from "./AiSidebar";
@@ -62,6 +63,15 @@ function App() {
   const registerWritingBridge = useCallback((bridge: WritingBridge | null) => {
     writingBridgeRef.current = bridge;
   }, []);
+
+  // 封面/背景图的本地加载走 asset 协议（工单 #23）：库位置用户自选，
+  // 静态 scope 留空，打开/新建库时把库根现授权（递归覆盖库内路径）。
+  useEffect(() => {
+    if (!libraryPath) return;
+    invoke("grant_asset_scope", { path: libraryPath }).catch((e) =>
+      console.error("授权库目录图片访问失败：", e),
+    );
+  }, [libraryPath]);
 
   const chooseLibraryFolder = useCallback(async () => {
     const picked = await open({

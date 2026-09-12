@@ -4,7 +4,7 @@ import type { BookEntry, SearchHit } from "./types";
 import { errMsg, tropeSpanLabel } from "./util";
 import { useDisplayMode } from "./displayMode";
 import DisplayToggle from "./DisplayToggle";
-import CoverArt from "./CoverArt";
+import CoverArt, { pickAndSetCover } from "./CoverArt";
 
 /** 与 Rust 侧 search::MAX_HITS 对应，达上限时提示截断。 */
 const MAX_HITS = 200;
@@ -294,7 +294,15 @@ export default function BookLibrary({
                       title="打开拆书稿"
                       onClick={() => onOpen(b)}
                     >
-                      <CoverArt name={b.name} />
+                      <CoverArt
+                        name={b.name}
+                        cover={b.cover}
+                        onSetCover={() =>
+                          void pickAndSetCover(b.coverDir, () => {
+                            if (libraryPath) void scan(libraryPath);
+                          })
+                        }
+                      />
                       <div className="cover-name" title={b.name}>
                         {b.name}
                       </div>

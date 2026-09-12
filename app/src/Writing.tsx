@@ -4,7 +4,7 @@ import type { AiSeed, ProofIssue, ProjectEntry, WritingBridge, WritingLocate } f
 import { errMsg, formatCount } from "./util";
 import { useDisplayMode } from "./displayMode";
 import DisplayToggle from "./DisplayToggle";
-import CoverArt from "./CoverArt";
+import CoverArt, { pickAndSetCover } from "./CoverArt";
 import WritingPage from "./WritingPage";
 import { ExportDialog } from "./ExportDialog";
 
@@ -229,7 +229,15 @@ export default function Writing({
                   title="开始写"
                   onClick={() => openAt(p, null)}
                 >
-                  <CoverArt name={p.title} />
+                  <CoverArt
+                    name={p.title}
+                    cover={p.cover}
+                    onSetCover={() =>
+                      void pickAndSetCover(p.coverDir, () => {
+                        if (libraryPath) void scan(libraryPath);
+                      })
+                    }
+                  />
                   <button
                     className="btn small cover-action"
                     title="导出正文 / 发布前校对"

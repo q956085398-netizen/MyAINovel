@@ -2,6 +2,7 @@ mod ai;
 mod ai_context;
 mod book_file;
 mod chapter;
+mod cover;
 mod expectation;
 mod export;
 mod foreshadow;
@@ -47,6 +48,32 @@ fn scan_library(root: String) -> Result<Vec<BookEntry>, String> {
 #[tauri::command]
 fn create_book(root: String, title: String) -> Result<BookEntry, String> {
     library::create_book(&PathBuf::from(&root), &title)
+}
+
+/// 设封面（工单 #23）：选图拷为 cover_dir/封面.<ext>（旧封面删除替换），
+/// 返回封面文件路径。封面是全应用第一处图片渲染——本地图片加载走
+/// asset 协议（convertFileSrc），scope 由 grant_asset_scope 运行时授权。
+#[tauri::command]
+fn set_cover(cover_dir: String, image_path: String) -> Result<String, String> {
+    cover::set_cover(Path::new(&cover_dir), Path::new(&image_path))
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
+/// 把一个路径加进 asset 协议 scope（目录递归、文件单点）：库位置用户
+/// 自选，静态 scope 留空、打开/新建库时现授权；自定义编辑器背景图
+/// （库外文件）同理。
+#[tauri::command]
+fn grant_asset_scope(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri::Manager;
+    let scope = app.asset_protocol_scope();
+    let target = PathBuf::from(&path);
+    if target.is_dir() {
+        scope
+            .allow_directory(&target, true)
+            .map_err(|e| format!("无法授权目录访问：{e}"))
+    } else {
+        scope.allow_file(&target).map_err(|e| format!("无法授权文件访问：{e}"))
+    }
 }
 
 /// 正文读入带版本指纹（ADR 0004）：保存时带回对账，防 Obsidian 抢写被静默覆盖。
@@ -666,6 +693,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_library,
             create_book,
+            set_cover,
+            grant_asset_scope,
             read_book_md,
             save_book_md,
             read_book_meta,

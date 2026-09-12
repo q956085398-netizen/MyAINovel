@@ -67,6 +67,11 @@ pub struct ProjectEntry {
     pub foreshadow_count: u32,
     /// 三线条数（三线.yaml；损坏降级为 0，不拖垮扫描）。
     pub expectation_count: u32,
+    /// 封面文件（约定文件名 附件/封面.png|jpg|webp，现查现识别，零 yaml 键）；
+    /// 无封面为 None，前端以书名首字占位。
+    pub cover: Option<PathBuf>,
+    /// 封面目录（「设封面」的拷贝落点）＝项目内 附件/（懒生成，放封面即建）。
+    pub cover_dir: PathBuf,
 }
 
 /// 扫「项目/」下的直接子文件夹；目录不存在视为还没有项目（首次使用）。
@@ -115,6 +120,7 @@ fn project_entry(dir: &Path) -> ProjectEntry {
     // 项目.yaml 损坏时列表降级为缺省，不拖垮扫描；打开项目时会显式告警。
     let meta = read_project_meta(dir).unwrap_or_default();
     let (chapter_count, word_count) = text_stats(&dir.join(TEXT_DIR));
+    let cover_dir = dir.join("附件");
     ProjectEntry {
         dir: dir.to_path_buf(),
         title: meta.title.unwrap_or_else(|| strip_book_marks(&name)),
@@ -133,6 +139,8 @@ fn project_entry(dir: &Path) -> ProjectEntry {
         expectation_count: crate::expectation::read_expectations(dir)
             .map(|list| list.len() as u32)
             .unwrap_or(0),
+        cover: crate::cover::find_cover(&cover_dir),
+        cover_dir,
     }
 }
 
@@ -1133,11 +1141,14 @@ mod tests {
             opening_count: 7,
             foreshadow_count: 8,
             expectation_count: 9,
+            cover: None,
+            cover_dir: PathBuf::from("项目/《书》/附件"),
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("\"chapterCount\""));
         assert!(json.contains("\"contradictionCount\""));
         assert!(json.contains("\"expectationCount\""));
+        assert!(json.contains("\"coverDir\""));
 
         assert_eq!(serde_json::to_string(&NoteKind::Unit).unwrap(), "\"单元\"");
         let back: NoteKind = serde_json::from_str("\"世界观\"").unwrap();
@@ -1196,6 +1207,22 @@ mod tests {
         assert!(create_project(&root, "大魏读书人").is_err(), "重名应报错");
         assert!(create_project(&root, "   ").is_err());
         assert_eq!(scan_projects(&root).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn 封面_项目内附件_扫描识别_删文件即撤() {
+        let root = root();
+        write(&project(&root).join("附件/封面.webp"), "webp");
+
+        let projects = scan_projects(&root).unwrap();
+        assert_eq!(
+            projects[0].cover,
+            Some(project(&root).join("附件/封面.webp"))
+        );
+        assert_eq!(projects[0].cover_dir, project(&root).join("附件"));
+
+        fs::remove_file(project(&root).join("附件/封面.webp")).unwrap();
+        assert!(scan_projects(&root).unwrap()[0].cover.is_none());
     }
 
     #[test]

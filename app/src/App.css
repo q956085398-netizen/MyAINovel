@@ -799,6 +799,28 @@ body {
   white-space: nowrap;
 }
 
+.cover-art-wrap {
+  position: relative;
+}
+
+.cover-art-wrap .cover-art {
+  margin-bottom: 8px;
+}
+
+.set-cover-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 16px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+}
+
+.cover-card:hover .set-cover-btn,
+.cover-card:focus-within .set-cover-btn {
+  opacity: 1;
+}
+
 .cover-action {
   position: absolute;
   top: 16px;

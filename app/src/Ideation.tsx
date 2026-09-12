@@ -4,7 +4,7 @@ import type { AiSeed, ProjectEntry } from "./types";
 import { errMsg, formatCount } from "./util";
 import { useDisplayMode } from "./displayMode";
 import DisplayToggle from "./DisplayToggle";
-import CoverArt from "./CoverArt";
+import CoverArt, { pickAndSetCover } from "./CoverArt";
 import ProjectPage, { type ProjectTab } from "./ProjectPage";
 
 function summary(p: ProjectEntry): string {
@@ -223,7 +223,15 @@ export default function Ideation({
                   title="打开项目"
                   onClick={() => setOpen({ project: p, seq: 0 })}
                 >
-                  <CoverArt name={p.title} />
+                  <CoverArt
+                    name={p.title}
+                    cover={p.cover}
+                    onSetCover={() =>
+                      void pickAndSetCover(p.coverDir, () => {
+                        if (libraryPath) void scan(libraryPath);
+                      })
+                    }
+                  />
                   <div className="cover-name" title={p.title}>
                     {p.title}
                   </div>
