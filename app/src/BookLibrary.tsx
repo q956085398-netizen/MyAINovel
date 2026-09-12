@@ -31,10 +31,17 @@ function Highlight({ text, query }: { text: string; query: string }) {
 interface BookLibraryProps {
   libraryPath: string | null;
   onChooseFolder: () => void;
+  /** 新建空库：选空文件夹即设为当前库（工单 #21）。 */
+  onCreateLibrary: () => void;
   onOpen: (book: BookEntry) => void;
 }
 
-export default function BookLibrary({ libraryPath, onChooseFolder, onOpen }: BookLibraryProps) {
+export default function BookLibrary({
+  libraryPath,
+  onChooseFolder,
+  onCreateLibrary,
+  onOpen,
+}: BookLibraryProps) {
   const [books, setBooks] = useState<BookEntry[]>([]);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -182,6 +189,14 @@ export default function BookLibrary({ libraryPath, onChooseFolder, onOpen }: Boo
             <br />
             根目录散文件与一书一文件夹两种布局都认，不会搬动或改写你的文件。
           </p>
+          <div className="empty-state-actions">
+            <button className="btn primary" onClick={onChooseFolder}>
+              打开库文件夹
+            </button>
+            <button className="btn" onClick={onCreateLibrary}>
+              新建空库
+            </button>
+          </div>
         </div>
       )}
 

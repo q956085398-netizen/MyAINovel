@@ -75,6 +75,21 @@ function App() {
     }
   }, []);
 
+  /** 新建空库（工单 #21）：选一个空文件夹即设为当前库，零预建——
+   *  词表/项目/灵感库全部首用时懒生成。与「打开库」动作同款，只有文案与
+   *  意图不同（spec 书库新建与展示 §三）。 */
+  const createLibraryFolder = useCallback(async () => {
+    const picked = await open({
+      directory: true,
+      multiple: false,
+      title: "选择一个空文件夹作为新库",
+    });
+    if (typeof picked === "string") {
+      localStorage.setItem(PATH_KEY, picked);
+      setLibraryPath(picked);
+    }
+  }, []);
+
   /** 从灵感库跳书：打开拆书稿并切到书库页。 */
   const openBookFromInspiration = useCallback((book: BookEntry) => {
     setOpenBook(book);
@@ -189,24 +204,27 @@ function App() {
               <BookLibrary
                 libraryPath={libraryPath}
                 onChooseFolder={chooseLibraryFolder}
+                onCreateLibrary={createLibraryFolder}
                 onOpen={setOpenBook}
               />
             )}
           </div>
           <div className={`section-wrap ${libTab === "灵感库" ? "" : "hidden"}`}>
-            <InspirationLibrary
-              libraryPath={libraryPath}
-              onChooseFolder={chooseLibraryFolder}
-              onOpenBook={openBookFromInspiration}
-              onOpenProject={openProjectFromInspiration}
-              onGoIdeation={() => setSection("构思")}
-            />
+          <InspirationLibrary
+            libraryPath={libraryPath}
+            onChooseFolder={chooseLibraryFolder}
+            onCreateLibrary={createLibraryFolder}
+            onOpenBook={openBookFromInspiration}
+            onOpenProject={openProjectFromInspiration}
+            onGoIdeation={() => setSection("构思")}
+          />
           </div>
         </div>
         <div className={`section-wrap ${section === "构思" ? "" : "hidden"}`}>
           <Ideation
             libraryPath={libraryPath}
             onChooseFolder={chooseLibraryFolder}
+            onCreateLibrary={createLibraryFolder}
             jump={ideationJump}
             onJumpConsumed={consumeIdeationJump}
             onOpenChapter={openChapterFromIdeation}
@@ -218,6 +236,7 @@ function App() {
             libraryPath={libraryPath}
             active={section === "书写"}
             onChooseFolder={chooseLibraryFolder}
+            onCreateLibrary={createLibraryFolder}
             jump={writingJump}
             onJumpConsumed={consumeWritingJump}
             onAiCommand={handleAiCommand}

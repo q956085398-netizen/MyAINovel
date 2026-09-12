@@ -67,6 +67,8 @@ function TransmuteButton({
 interface InspirationLibraryProps {
   libraryPath: string | null;
   onChooseFolder: () => void;
+  /** 新建空库：选空文件夹即设为当前库（工单 #21）。 */
+  onCreateLibrary: () => void;
   onOpenBook: (book: BookEntry) => void;
   /** 「关联」里的项目去向（《书名》/名字）→ 打开该项目的页签；给出人名则落到画布。 */
   onOpenProject: (project: ProjectEntry, tab?: ProjectTab, focus?: string) => void;
@@ -79,6 +81,7 @@ interface InspirationLibraryProps {
 export default function InspirationLibrary({
   libraryPath,
   onChooseFolder,
+  onCreateLibrary,
   onOpenBook,
   onOpenProject,
   onGoIdeation,
@@ -254,6 +257,14 @@ export default function InspirationLibrary({
             <br />
             可以直接用现有的拆书库文件夹。
           </p>
+          <div className="empty-state-actions">
+            <button className="btn primary" onClick={onChooseFolder}>
+              打开库文件夹
+            </button>
+            <button className="btn" onClick={onCreateLibrary}>
+              新建空库
+            </button>
+          </div>
         </div>
       )}
 

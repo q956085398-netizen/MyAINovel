@@ -20,6 +20,8 @@ function summary(p: ProjectEntry): string {
 interface IdeationProps {
   libraryPath: string | null;
   onChooseFolder: () => void;
+  /** 新建空库：选空文件夹即设为当前库（工单 #21）。 */
+  onCreateLibrary: () => void;
   /** 从灵感库跳来：打开该项目（可落到某个页签／某个人物），打开后清空。
    *  带的是跳转方刚扫到的项目快照，不受本板块列表新鲜度影响。 */
   jump: { project: ProjectEntry; tab?: ProjectTab; focus?: string } | null;
@@ -35,6 +37,7 @@ interface IdeationProps {
 export default function Ideation({
   libraryPath,
   onChooseFolder,
+  onCreateLibrary,
   jump,
   onJumpConsumed,
   onOpenChapter,
@@ -171,6 +174,14 @@ export default function Ideation({
             <br />
             可以直接用现有的拆书库文件夹（拆书与构思互不干扰）。
           </p>
+          <div className="empty-state-actions">
+            <button className="btn primary" onClick={onChooseFolder}>
+              打开库文件夹
+            </button>
+            <button className="btn" onClick={onCreateLibrary}>
+              新建空库
+            </button>
+          </div>
         </div>
       )}
 

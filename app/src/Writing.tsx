@@ -22,6 +22,8 @@ interface WritingProps {
   /** 书写板块是否在前台（切走时写作页立即落盘）。 */
   active: boolean;
   onChooseFolder: () => void;
+  /** 新建空库：选空文件夹即设为当前库（工单 #21）。 */
+  onCreateLibrary: () => void;
   /** 从伏笔看板跳来：打开该项目的这一章并选中引文；消费后清空。 */
   jump: { projectDir: string; ordinal: number; quote: string } | null;
   onJumpConsumed: () => void;
@@ -37,6 +39,7 @@ export default function Writing({
   libraryPath,
   active,
   onChooseFolder,
+  onCreateLibrary,
   jump,
   onJumpConsumed,
   onAiCommand,
@@ -184,6 +187,14 @@ export default function Writing({
             <br />
             可以直接用现有的拆书库文件夹（拆书与书写互不干扰）。
           </p>
+          <div className="empty-state-actions">
+            <button className="btn primary" onClick={onChooseFolder}>
+              打开库文件夹
+            </button>
+            <button className="btn" onClick={onCreateLibrary}>
+              新建空库
+            </button>
+          </div>
         </div>
       )}
 
