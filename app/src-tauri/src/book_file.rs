@@ -1,6 +1,7 @@
 //! 拆书稿文件操作：正文读写、书级元数据（双文件制的 .yaml 侧）、
 //! 粘贴截图落盘、下一章前缀计算。写入均走临时文件＋改名、长活缓冲
-//! 覆盖保存带版本指纹对账（ADR 0004）。
+//! 覆盖保存带版本指纹对账（ADR 0004）、覆盖前留历史快照（书写章节
+//! 的快照也收口在这里，工单 #28）。
 //!
 //! BookMeta 走 Tauri IPC（camelCase JSON）；yaml 侧键为中文且合并保留
 //! 未知键——用户在 Obsidian 手补的字段不能被「书级资料」保存抹掉。
@@ -93,10 +94,120 @@ pub fn save_book_md(
             return Ok(SaveResult::Conflict);
         }
     }
+    snapshot_existing_file(&book_snapshot_dir(path), path);
     write_text_atomic(path, content)?;
     Ok(SaveResult::Saved {
         fingerprint: content_fingerprint(content.as_bytes()).to_string(),
     })
+}
+
+// --- 覆盖前快照（工单 #28）：拆书稿与书写章节同一套机制 ---
+
+/// 快照根目录（点开头，Obsidian 与全部扫描天然忽略）。
+pub const SNAPSHOT_ROOT: &str = ".gongbi";
+pub const SNAPSHOT_DIR: &str = "历史";
+pub const MAX_SNAPSHOTS: usize = 200;
+/// 两次快照的最小间隔（自动保存频繁，防额度被十几分钟耗光）。
+pub const SNAPSHOT_MIN_GAP: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// 快照目录：base 下 `.gongbi/历史/<key>/`。书写章＝项目根＋章文件名；
+/// 拆书稿＝书文件夹（或库根散文件）＋文件名 stem。
+pub fn snapshot_dir(base: &Path, key: &str) -> PathBuf {
+    base.join(SNAPSHOT_ROOT).join(SNAPSHOT_DIR).join(key)
+}
+
+/// 拆书稿快照目录：随 md 所在目录——一书一文件夹＝书内 `.gongbi/历史/<stem>/`，
+/// 库根散文件书＝库根 `.gongbi/历史/<书名>/`（spec 拆书保存与模板 §二）。
+fn book_snapshot_dir(md_path: &Path) -> PathBuf {
+    snapshot_dir(
+        md_path.parent().unwrap_or_else(|| Path::new(".")),
+        &file_stem_of(md_path),
+    )
+}
+
+/// 覆盖前把盘上旧内容留一份快照（读不到旧文件＝首存，不留）。
+/// 失败只记日志——两条保存路径（拆书稿/书写章）共用这一段。
+pub(crate) fn snapshot_existing_file(dir: &Path, path: &Path) {
+    if let Ok(old) = fs::read(path) {
+        if let Err(e) = snapshot_before_overwrite(dir, &old) {
+            eprintln!("快照失败（不影响保存）：{e}");
+        }
+    }
+}
+
+/// 目录内的快照文件，按（修改时间，文件名）升序——取最新用 `pop()`。
+pub(crate) fn snapshot_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && has_md_extension(p))
+        .map(|path| {
+            let time = fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            (time, path)
+        })
+        .collect();
+    files.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    files.into_iter().map(|(_, path)| path).collect()
+}
+
+/// 覆盖前留一份「被覆盖的上一版」；与最近一份快照内容相同则跳过。
+/// 失败不阻断保存——快照是保险，不是闸。
+pub(crate) fn snapshot_before_overwrite(dir: &Path, old_bytes: &[u8]) -> Result<(), String> {
+    snapshot_with_gap(dir, old_bytes, SNAPSHOT_MIN_GAP)
+}
+
+/// 快照节流：自动保存每几秒写盘一次，逐次留快照会在十几分钟内把
+/// 200 份额度耗尽——两次快照至少隔 min_gap；空白内容（刚建的空稿）不留。
+pub(crate) fn snapshot_with_gap(
+    dir: &Path,
+    old_bytes: &[u8],
+    min_gap: std::time::Duration,
+) -> Result<(), String> {
+    if String::from_utf8_lossy(old_bytes).trim().is_empty() {
+        return Ok(());
+    }
+    if let Some(latest) = snapshot_files(dir).pop() {
+        if fs::read(&latest).map(|b| b == old_bytes).unwrap_or(false) {
+            return Ok(());
+        }
+        if min_gap > std::time::Duration::ZERO {
+            let too_soon = fs::metadata(&latest)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age < min_gap);
+            if too_soon {
+                return Ok(());
+            }
+        }
+    }
+    fs::create_dir_all(dir).map_err(|e| format!("无法创建历史目录 {}：{e}", dir.display()))?;
+    // 毫秒级时间戳：同一秒内连存也保持字典序，且碰撞几乎不可能。
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%3f").to_string();
+    let mut name = format!("{stamp}.md");
+    for n in 2.. {
+        if !dir.join(&name).exists() {
+            break;
+        }
+        name = format!("{stamp}-{n}.md");
+    }
+    write_bytes_atomic(&dir.join(&name), old_bytes)?;
+    thin_snapshots(dir);
+    Ok(())
+}
+
+/// 只留最近 MAX_SNAPSHOTS 份，超出删最旧。
+pub(crate) fn thin_snapshots(dir: &Path) {
+    let files = snapshot_files(dir);
+    let overflow = files.len().saturating_sub(MAX_SNAPSHOTS);
+    for path in files.into_iter().take(overflow) {
+        let _ = fs::remove_file(path);
+    }
 }
 
 /// 去掉正文开头的 BOM，避免遮蔽首行章标题。
@@ -526,12 +637,12 @@ fn attachment_subdir(md_path: &Path) -> PathBuf {
     }
 }
 
-fn file_stem_of(path: &Path) -> String {
+/// 文件名 stem（无扩展名）：快照目录、附件分目录共用。
+pub(crate) fn file_stem_of(path: &Path) -> String {
     path.file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
-
 /// 保存一张剪贴板图片，返回可直接嵌入 markdown 的相对路径（正斜杠）。
 pub fn save_paste_image(md_path: &Path, ext: &str, bytes: &[u8]) -> Result<String, String> {
     let sub = attachment_subdir(md_path);
@@ -816,6 +927,69 @@ mod tests {
             save_book_md(&md2, "我的", None, false).unwrap(),
             SaveResult::Conflict
         );
+    }
+
+    #[test]
+    fn 保存_首次覆盖留快照_落书内隐藏目录() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("《书》/拆书.md");
+        write(&md, "第一版");
+        let base = read_book_md(&md).unwrap().fingerprint;
+
+        save_book_md(&md, "第二版", Some(&base), false).unwrap();
+        let dir = snapshot_dir(&root.join("《书》"), "拆书");
+        let files = snapshot_files(&dir);
+        assert_eq!(files.len(), 1, "首次覆盖留下上一版快照");
+        assert_eq!(read_text(&files[0]).unwrap(), "第一版");
+        // 快照根在书内点开头目录里，扫描（is_hidden）从根上忽略。
+        assert!(is_hidden(&root.join("《书》/.gongbi")));
+    }
+
+    #[test]
+    fn 保存_散文件书_快照落库根按书名分目录() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("书乙.md");
+        write(&md, "第一版");
+        let base = read_book_md(&md).unwrap().fingerprint;
+
+        save_book_md(&md, "第二版", Some(&base), false).unwrap();
+        let latest = snapshot_files(&root.join(".gongbi/历史/书乙"))
+            .pop()
+            .unwrap();
+        assert_eq!(read_text(&latest).unwrap(), "第一版");
+    }
+
+    #[test]
+    fn 快照_同内容不重复_空白不留_节流_超上限删最旧() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let dir = snapshot_dir(&root, "拆书");
+
+        snapshot_with_gap(&dir, "第一版".as_bytes(), std::time::Duration::ZERO).unwrap();
+        assert_eq!(snapshot_files(&dir).len(), 1);
+        // 与最近快照同内容：不重复存
+        snapshot_with_gap(&dir, "第一版".as_bytes(), std::time::Duration::ZERO).unwrap();
+        assert_eq!(snapshot_files(&dir).len(), 1);
+        // 新内容：存
+        snapshot_with_gap(&dir, "第二版".as_bytes(), std::time::Duration::ZERO).unwrap();
+        assert_eq!(snapshot_files(&dir).len(), 2);
+        // 空白内容：不留
+        snapshot_with_gap(&dir, "  \n".as_bytes(), std::time::Duration::ZERO).unwrap();
+        assert_eq!(snapshot_files(&dir).len(), 2);
+        // 距最近快照不足间隔：节流跳过
+        snapshot_with_gap(
+            &dir,
+            "第三版".as_bytes(),
+            std::time::Duration::from_secs(3600),
+        )
+        .unwrap();
+        assert_eq!(snapshot_files(&dir).len(), 2);
+
+        // 造 205 份假快照，thin 只留 200
+        for i in 0..205 {
+            write(&dir.join(format!("20200101-{i:06}.md")), "旧");
+        }
+        thin_snapshots(&dir);
+        assert_eq!(snapshot_files(&dir).len(), MAX_SNAPSHOTS);
     }
 
     #[test]

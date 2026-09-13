@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  AUTOSAVE_OPTIONS,
   BUILTIN_BACKGROUNDS,
   useSettings,
   type BuiltinBackground,
@@ -189,6 +190,25 @@ export default function SettingsDialog({
             >
               恢复默认
             </button>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <h3>自动保存</h3>
+          <p className="hint">
+            拆书与书写两个编辑器共用：停笔满所选间隔自动落盘，返回/切板块/关窗时立即保存。
+          </p>
+          <div className="display-toggle" role="radiogroup" aria-label="自动保存间隔">
+            {AUTOSAVE_OPTIONS.map((sec) => (
+              <button
+                key={sec}
+                type="button"
+                className={settings.autosaveSec === sec ? "active" : ""}
+                onClick={() => update({ autosaveSec: sec })}
+              >
+                {sec} 秒
+              </button>
+            ))}
           </div>
         </section>
 

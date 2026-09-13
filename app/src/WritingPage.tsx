@@ -37,6 +37,8 @@ import {
   expectationOverdueChapters,
 } from "./types";
 import { errMsg, formatCount } from "./util";
+import { autosaveIntervalMs } from "./settings";
+import { registerFlushSaver } from "./saveFlush";
 import {
   chapterLabel,
   chapterStats,
@@ -50,8 +52,7 @@ import { ForeshadowCollectDialog, ForeshadowNameDialog } from "./ForeshadowDialo
 import { ExpectationFormDialog, ExpectationFulfillDialog } from "./ExpectationDialog";
 import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
 
-/** 自动保存防抖：停笔约 3 秒落盘（用户拍板「自动保存为主」）。 */
-const AUTOSAVE_MS = 3000;
+/** 自动保存防抖：停笔满设置间隔（默认 3 秒，工单 #28 起两编辑器共用）落盘。 */
 const PREFS_KEY = "gongbi.writing.prefs";
 const chapterKey = (dir: string) => `gongbi.writing.chapter.${dir}`;
 
@@ -267,7 +268,7 @@ export default function WritingPage({
     autosaveRef.current = window.setTimeout(() => {
       autosaveRef.current = null;
       void saveNow(false);
-    }, AUTOSAVE_MS);
+    }, autosaveIntervalMs());
   }
 
   function handlePaste(event: ClipboardEvent, view: EditorView): boolean {
@@ -645,8 +646,9 @@ export default function WritingPage({
     void invoke("save_writing_stats", { stats: next }).catch(() => {});
   }
 
-  /** 保存当前章（指纹闸）：成功 true；冲突 false（横幅交人裁决）。 */
-  async function saveNow(force: boolean): Promise<boolean> {
+  /** 保存当前章（指纹闸）：成功 true；冲突 false（横幅交人裁决）。
+   *  quiet＝关窗兜底用：失败只记日志，不拿弹框拦关窗。 */
+  async function saveNow(force: boolean, quiet = false): Promise<boolean> {
     const view = viewRef.current;
     const entry = currentRef.current;
     if (!view || !entry) return true;
@@ -672,8 +674,11 @@ export default function WritingPage({
       fingerprintRef.current = result.fingerprint;
       conflictRef.current = false;
       setConflict(false);
-      dirtyRef.current = false;
-      setDirty(false);
+      // 保存往返窗口里又打过字的不算干净：留着脏标让下一轮自动保存接走。
+      if (view.state.doc.toString() === content) {
+        dirtyRef.current = false;
+        setDirty(false);
+      }
       const s = chapterStats(content);
       const delta = s.wordCount - baselineRef.current;
       baselineRef.current = s.wordCount;
@@ -688,7 +693,11 @@ export default function WritingPage({
       );
       return true;
     } catch (e) {
-      window.alert(`保存失败：${errMsg(e)}`);
+      if (quiet) {
+        console.error("关窗兜底保存失败：", e);
+      } else {
+        window.alert(`保存失败：${errMsg(e)}`);
+      }
       return false;
     } finally {
       savingRef.current = false;
@@ -1084,6 +1093,16 @@ export default function WritingPage({
     // project 在生命周期内不变（父组件按项目重挂载）；prefix 影响文档抬头，变了重挂桥。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefix]);
+
+  // 关窗兜底（工单 #28）：应用级关窗事件里静默落盘——不弹框、不裁决冲突
+  // （冲突时盘上为准，ADR 0004）。saveNow 读 ref，首渲染实例即可。
+  useEffect(
+    () => registerFlushSaver(async () => {
+      await saveNow(false, true);
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   // 右键菜单：点别处或 Esc 关掉（菜单内的 mousedown 不算「别处」）。
   useEffect(() => {

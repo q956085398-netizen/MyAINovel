@@ -35,6 +35,10 @@ export type EditorBackground =
 /** 正文字体（§四）：四选一；「跟随系统」＝不动字体栈。 */
 export type BodyFont = "system" | "宋" | "黑" | "楷";
 
+/** 自动保存间隔档位（工单 #28，spec 拆书保存与模板 §二）：秒。 */
+export const AUTOSAVE_OPTIONS = [1, 2, 3, 5, 10] as const;
+export const DEFAULT_AUTOSAVE_SEC = 3;
+
 export interface AppSettings {
   /** 主题三态（§二）：浅｜深｜跟随系统；跟随＝监听系统深浅偏好。 */
   theme: ThemeMode;
@@ -44,6 +48,8 @@ export interface AppSettings {
   font: BodyFont;
   fontSize: number | null;
   lineHeight: number | null;
+  /** 自动保存间隔（秒）：拆书/书写两编辑器共用，停笔防抖落盘。 */
+  autosaveSec: number;
 }
 
 const KEY = "gongbi.settings";
@@ -54,6 +60,7 @@ const DEFAULTS: AppSettings = {
   font: "system",
   fontSize: null,
   lineHeight: null,
+  autosaveSec: DEFAULT_AUTOSAVE_SEC,
 };
 
 function load(): AppSettings {
@@ -91,6 +98,12 @@ export function updateSettings(patch: Partial<AppSettings>) {
 export function useSettings(): [AppSettings, (patch: Partial<AppSettings>) => void] {
   const settings = useSyncExternalStore(subscribe, getSettings);
   return [settings, updateSettings];
+}
+
+/** 当前自动保存间隔（毫秒）：存坏/缺省回退默认——防抖计时永远拿得到数。 */
+export function autosaveIntervalMs(): number {
+  const sec = Number(cache.autosaveSec);
+  return Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : DEFAULT_AUTOSAVE_SEC * 1000;
 }
 
 // --- 主题应用（§二）：根元素挂 data-theme，变量组按主题重定义 ---

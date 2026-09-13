@@ -12,18 +12,13 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
 use crate::book_file::{
-    billed_word_count, content_fingerprint, han_word_count, has_md_extension, is_hidden,
-    read_text, scalar_to_string, split_frontmatter, strip_bom, write_bytes_atomic,
-    write_screenshot, write_text_atomic, SaveResult,
+    billed_word_count, content_fingerprint, file_stem_of, han_word_count, has_md_extension,
+    is_hidden, read_text, scalar_to_string, snapshot_existing_file, snapshot_files,
+    split_frontmatter, strip_bom, write_screenshot, write_text_atomic, SaveResult,
 };
+use crate::book_file::snapshot_dir as snapshot_dir_under;
 
 pub const ATTACHMENT_DIR: &str = "附件";
-/// 快照根目录（项目内、点开头，Obsidian 与全部扫描天然忽略）。
-pub const SNAPSHOT_ROOT: &str = ".gongbi";
-pub const SNAPSHOT_DIR: &str = "历史";
-pub const MAX_SNAPSHOTS: usize = 200;
-/// 两次快照的最小间隔（自动保存频繁，防额度被十几分钟耗光）。
-pub const SNAPSHOT_MIN_GAP: std::time::Duration = std::time::Duration::from_secs(300);
 pub const DEFAULT_DAILY_GOAL: u32 = 2000;
 pub const STATUS_DRAFT: &str = "草稿";
 pub const STATUS_DONE: &str = "完稿";
@@ -337,90 +332,9 @@ pub fn renumber_chapters(project: &Path) -> Result<Vec<ChapterEntry>, String> {
 
 // ---------- 保存（指纹闸＋保存前快照） ----------
 
+/// 章节快照目录：项目内 `.gongbi/历史/<章文件名>/`（收口在 book_file）。
 pub fn snapshot_dir(project: &Path, chapter: &Path) -> PathBuf {
-    let stem = chapter
-        .file_stem()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    project.join(SNAPSHOT_ROOT).join(SNAPSHOT_DIR).join(stem)
-}
-
-/// 目录内的快照文件，按（修改时间，文件名）升序——取最新用 `pop()`。
-fn snapshot_files(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && has_md_extension(p))
-        .map(|path| {
-            let time = fs::metadata(&path)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            (time, path)
-        })
-        .collect();
-    files.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-    files.into_iter().map(|(_, path)| path).collect()
-}
-
-/// 覆盖前留一份「被覆盖的上一版」；与最近一份快照内容相同则跳过。
-/// 失败不阻断保存——快照是保险，不是闸。
-fn snapshot_before_overwrite(project: &Path, chapter: &Path, old_bytes: &[u8]) -> Result<(), String> {
-    snapshot_with_gap(project, chapter, old_bytes, SNAPSHOT_MIN_GAP)
-}
-
-/// 快照节流：自动保存每几秒写盘一次，逐次留快照会在十几分钟内把每章
-/// 200 份额度耗尽——两次快照至少隔 SNAPSHOT_MIN_GAP，历史才覆盖得了几
-/// 十小时；空白内容（刚建的空章）不留。
-fn snapshot_with_gap(
-    project: &Path,
-    chapter: &Path,
-    old_bytes: &[u8],
-    min_gap: std::time::Duration,
-) -> Result<(), String> {
-    if String::from_utf8_lossy(old_bytes).trim().is_empty() {
-        return Ok(());
-    }
-    let dir = snapshot_dir(project, chapter);
-    if let Some(latest) = snapshot_files(&dir).pop() {
-        if fs::read(&latest).map(|b| b == old_bytes).unwrap_or(false) {
-            return Ok(());
-        }
-        if min_gap > std::time::Duration::ZERO {
-            let too_soon = fs::metadata(&latest)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.elapsed().ok())
-                .is_some_and(|age| age < min_gap);
-            if too_soon {
-                return Ok(());
-            }
-        }
-    }
-    fs::create_dir_all(&dir).map_err(|e| format!("无法创建历史目录 {}：{e}", dir.display()))?;
-    // 毫秒级时间戳：同一秒内连存也保持字典序，且碰撞几乎不可能。
-    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%3f").to_string();
-    let mut name = format!("{stamp}.md");
-    for n in 2.. {
-        if !dir.join(&name).exists() {
-            break;
-        }
-        name = format!("{stamp}-{n}.md");
-    }
-    write_bytes_atomic(&dir.join(&name), old_bytes)?;
-    thin_snapshots(&dir);
-    Ok(())
-}
-
-/// 每章只留最近 MAX_SNAPSHOTS 份，超出删最旧。
-fn thin_snapshots(dir: &Path) {
-    let files = snapshot_files(dir);
-    let overflow = files.len().saturating_sub(MAX_SNAPSHOTS);
-    for path in files.into_iter().take(overflow) {
-        let _ = fs::remove_file(path);
-    }
+    snapshot_dir_under(project, &file_stem_of(chapter))
 }
 
 /// 章节保存：同一道指纹闸（ADR 0004），写盘前留快照。
@@ -441,11 +355,7 @@ pub fn save_chapter_md(
             return Ok(SaveResult::Conflict);
         }
     }
-    if let Ok(old) = fs::read(path) {
-        if let Err(e) = snapshot_before_overwrite(project, path, &old) {
-            eprintln!("快照失败（不影响保存）：{e}");
-        }
-    }
+    snapshot_existing_file(&snapshot_dir(project, path), path);
     write_text_atomic(path, content)?;
     Ok(SaveResult::Saved {
         fingerprint: content_fingerprint(content.as_bytes()).to_string(),
@@ -572,7 +482,6 @@ pub fn save_writing_stats(path: &Path, stats: &WritingStats) -> Result<(), Strin
 mod tests {
     use super::*;
     use std::fs;
-    use std::time::Duration;
     use tempfile::TempDir;
 
     fn write(path: &Path, content: &str) {
@@ -740,37 +649,6 @@ mod tests {
         save_chapter_md(&p, &chapter, "第四版", Some(&fingerprint), true).unwrap();
         assert_eq!(read_text(&chapter).unwrap(), "第四版");
         assert_eq!(list_chapter_snapshots(&p, &chapter).unwrap().len(), 1);
-    }
-
-    #[test]
-    fn 快照_同内容不重复_空白不留_节流生效_超上限删最旧() {
-        let tmp = TempDir::new().unwrap();
-        let p = project(tmp.path());
-        let chapter = p.join("正文/0001 甲.md");
-        write(&chapter, "第一版");
-        let dir = snapshot_dir(&p, &chapter);
-
-        snapshot_with_gap(&p, &chapter, "第一版".as_bytes(), Duration::ZERO).unwrap();
-        assert_eq!(snapshot_files(&dir).len(), 1);
-        // 与最近快照同内容：不重复存
-        snapshot_with_gap(&p, &chapter, "第一版".as_bytes(), Duration::ZERO).unwrap();
-        assert_eq!(snapshot_files(&dir).len(), 1);
-        // 新内容：存
-        snapshot_with_gap(&p, &chapter, "第二版".as_bytes(), Duration::ZERO).unwrap();
-        assert_eq!(snapshot_files(&dir).len(), 2);
-        // 空白内容：不留
-        snapshot_with_gap(&p, &chapter, "  \n".as_bytes(), Duration::ZERO).unwrap();
-        assert_eq!(snapshot_files(&dir).len(), 2);
-        // 距最近快照不足间隔：节流跳过
-        snapshot_with_gap(&p, &chapter, "第三版".as_bytes(), Duration::from_secs(3600)).unwrap();
-        assert_eq!(snapshot_files(&dir).len(), 2);
-
-        // 造 205 份假快照，thin 只留 200
-        for i in 0..205 {
-            write(&dir.join(format!("20200101-{i:06}.md")), "旧");
-        }
-        thin_snapshots(&dir);
-        assert_eq!(snapshot_files(&dir).len(), MAX_SNAPSHOTS);
     }
 
     #[test]

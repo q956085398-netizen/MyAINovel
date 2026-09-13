@@ -18,6 +18,8 @@ import type {
 } from "./types";
 import { emptyBookMeta } from "./types";
 import { errMsg } from "./util";
+import { autosaveIntervalMs } from "./settings";
+import { registerFlushSaver } from "./saveFlush";
 import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
 import BookMetaDialog from "./BookMetaDialog";
 import TropeDialog from "./TropeDialog";
@@ -71,6 +73,8 @@ interface EditorPageProps {
   book: BookEntry;
   /** 库根：桥段标注面板加载词表提示用。 */
   libraryPath: string | null;
+  /** 拆书编辑器是否在前台（书库页签可见）：切走时立即保存（常驻挂载，不卸载）。 */
+  active: boolean;
   onBack: () => void;
   /** 三命令出口：把选区种子递给 App 层的 AI 面板。 */
   onAiCommand: (seed: AiSeed) => void;
@@ -78,11 +82,14 @@ interface EditorPageProps {
   registerBridge: (bridge: EditorBridge | null) => void;
 }
 
-/** 拆书编辑器：前缀推进（Ctrl+Enter）、五插入块、截图粘贴、Ctrl+S 保存。
+/** 拆书编辑器：前缀推进（Ctrl+Enter）、五插入块、截图粘贴、Ctrl+S 保存；
+ *  保存网与书写编辑器同一套（工单 #28，spec 拆书保存与模板 §二）——
+ *  停笔防抖自动存＋返回即存＋切板块/卸载/关窗兜底＋覆盖前快照（Rust 侧）。
  *  父组件以 key=primaryMd 挂载，一本书一次生命周期。 */
 export default function EditorPage({
   book,
   libraryPath,
+  active,
   onBack,
   onAiCommand,
   registerBridge,
@@ -92,7 +99,11 @@ export default function EditorPage({
   const prefixRef = useRef("");
   /** 盘上正文的版本指纹（ADR 0004）：载入/保存成功后更新，保存时带回对账。 */
   const fingerprintRef = useRef<string | null>(null);
+  const dirtyRef = useRef(false);
+  /** 冲突未裁决期间自动保存暂停（与书写编辑器同一纪律），手动保存仍可裁决。 */
+  const conflictRef = useRef(false);
   const savingRef = useRef(false);
+  const autosaveRef = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -151,33 +162,53 @@ export default function EditorPage({
     return true;
   }
 
-  async function save(force = false) {
-    if (savingRef.current) return;
+  /** 保存（门闩在此）：落定（保存成功/本无改动）返回 true。
+   *  自动保存、手动保存、返回即存同走这一条链——指纹对账与冲突裁决不变。
+   *  quiet＝兜底路径（卸载/关窗）：不弹框，冲突时盘上为准（ADR 0004）。 */
+  async function save(force = false, quiet = false): Promise<boolean> {
+    if (quiet && (!dirtyRef.current || conflictRef.current)) return true;
+    if (savingRef.current) return false;
     savingRef.current = true;
     try {
-      await persist(force);
+      return await persist(force, quiet);
     } catch (e) {
-      window.alert(`保存失败：${errMsg(e)}`);
+      if (quiet) {
+        console.error("拆书兜底保存失败：", e);
+      } else {
+        window.alert(`保存失败：${errMsg(e)}`);
+      }
+      return false;
     } finally {
       savingRef.current = false;
     }
   }
 
-  /** 保存本体（门闩由 save 持有）：落盘或进入冲突裁决。 */
-  async function persist(force: boolean) {
+  /** 保存本体（门闩由 save 持有）：落盘或进入冲突裁决。
+   *  返回是否「落定」——保存成功、本无改动、按盘上重载都算。 */
+  async function persist(force: boolean, quiet = false): Promise<boolean> {
     const view = viewRef.current;
-    if (!view) return;
+    if (!view) return true;
+    if (!force && !dirtyRef.current) return true;
+    const content = view.state.doc.toString();
     const result = await invoke<SaveResult>("save_book_md", {
       path: book.primaryMd,
-      content: view.state.doc.toString(),
+      content,
       base: fingerprintRef.current,
       force,
     });
     if (result.status === "saved") {
       fingerprintRef.current = result.fingerprint;
-      setDirty(false);
-      return;
+      conflictRef.current = false;
+      // 保存往返窗口里又打过字的不算干净：留着脏标让下一轮自动保存接走。
+      if (viewRef.current?.state.doc.toString() === content) {
+        dirtyRef.current = false;
+        setDirty(false);
+      }
+      return true;
     }
+    if (quiet) return false;
+    // 指纹对不上：盘上被外部程序改过，交人裁决（既有两段确认）。
+    conflictRef.current = true;
     if (
       window.confirm(
         "保存被拦下：文件在保存前已被其他程序修改（可能是在 Obsidian 里编辑过）。\n\n" +
@@ -188,17 +219,36 @@ export default function EditorPage({
       try {
         const doc = await invoke<MdContent>("read_book_md", { path: book.primaryMd });
         const v = viewRef.current;
-        if (!v) return;
+        if (!v) return true;
         v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: doc.content } });
         fingerprintRef.current = doc.fingerprint;
+        conflictRef.current = false;
+        dirtyRef.current = false;
         setDirty(false);
+        return true;
       } catch (e) {
         window.alert(`重新加载失败：${errMsg(e)}`);
+        return false;
       }
     } else if (window.confirm("要用编辑器里的当前内容覆盖盘上文件吗？\n（盘上被外部修改的内容将丢失）")) {
       // 直接走 persist(true)（force 不可能再冲突），不经 save 以免撞门闩。
-      await persist(true);
+      return await persist(true);
     }
+    return false;
+  }
+
+  /** 停笔防抖自动保存（工单 #28）：docChanged 重置计时，停笔满设置间隔落盘。 */
+  function scheduleAutosave() {
+    if (autosaveRef.current !== null) window.clearTimeout(autosaveRef.current);
+    autosaveRef.current = window.setTimeout(() => {
+      autosaveRef.current = null;
+      if (!dirtyRef.current || conflictRef.current) return;
+      if (savingRef.current) {
+        scheduleAutosave();
+        return;
+      }
+      void save(false);
+    }, autosaveIntervalMs());
   }
 
   function handlePaste(event: ClipboardEvent, view: EditorView): boolean {
@@ -226,8 +276,10 @@ export default function EditorPage({
     return true;
   }
 
-  function handleBack() {
-    if (dirty && !window.confirm("有未保存的修改，返回将丢失，确定吗？")) return;
+  /** 返回即存（工单 #28）：先落盘再退回书库——返回永远不丢内容；
+   *  保存遇冲突时弹既有裁决框，裁决没落定（取消）就留在编辑器。 */
+  async function handleBack() {
+    if (dirtyRef.current && !(await save(false))) return;
     onBack();
   }
 
@@ -366,7 +418,11 @@ export default function EditorPage({
             editorTheme,
             appearanceCompartment.of(editorAppearance()),
             EditorView.updateListener.of((u) => {
-              if (u.docChanged) setDirty(true);
+              if (u.docChanged) {
+                dirtyRef.current = true;
+                setDirty(true);
+                scheduleAutosave();
+              }
             }),
             Prec.highest(
               keymap.of([
@@ -410,6 +466,9 @@ export default function EditorPage({
 
     return () => {
       cancelled = true;
+      if (autosaveRef.current !== null) window.clearTimeout(autosaveRef.current);
+      // 卸载兜底：异步 IPC 在组件销毁后仍会完成，正文先于 destroy 同步取走。
+      void save(false, true);
       registerBridge(null);
       view?.destroy();
       viewRef.current = null;
@@ -417,6 +476,27 @@ export default function EditorPage({
     // 本组件按书重挂载（父组件 key），book 在生命周期内不变。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 关窗兜底（工单 #28）：应用级关窗事件里静默落盘。save 只读 ref，
+  // 首渲染实例即可。
+  useEffect(
+    () =>
+      registerFlushSaver(async () => {
+        await save(false, true);
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  // 切出拆书板块（隐藏不卸载）立即落盘（工单 #28）；切回来焦点还给编辑器。
+  useEffect(() => {
+    if (active) {
+      viewRef.current?.focus();
+    } else if (dirtyRef.current && !conflictRef.current) {
+      void save(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // 设置变化（主题/排版）→ 编辑器外观重配（视图异步就绪前订阅先挂上，
   // dispatch 时 viewRef 没有就不动，挂载时已带最新外观）。
@@ -441,7 +521,7 @@ export default function EditorPage({
   return (
     <div className="editor-page">
       <header className="editor-header">
-        <button className="btn" onClick={handleBack}>
+        <button className="btn" onClick={() => void handleBack()}>
           ← 返回
         </button>
         <h1 className="editor-title">
@@ -483,7 +563,7 @@ export default function EditorPage({
           </button>
         ))}
         <span className="toolbar-hint">
-          Ctrl+Enter 开下一章 · Ctrl+S 保存 · 粘贴图片自动存入附件
+          停笔自动保存 · Ctrl+Enter 开下一章 · Ctrl+S 立即保存 · 粘贴图片自动存入附件
         </span>
       </div>
       <div className="editor-container" ref={containerRef} />

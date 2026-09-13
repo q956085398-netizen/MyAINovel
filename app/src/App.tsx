@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import AiSidebar from "./AiSidebar";
@@ -10,6 +11,7 @@ import InspirationLibrary from "./InspirationLibrary";
 import Writing from "./Writing";
 import SettingsDialog from "./SettingsDialog";
 import { getSettings, initSettings } from "./settings";
+import { flushAllSavers } from "./saveFlush";
 import type { ProjectTab } from "./ProjectPage";
 import type {
   AiSeed,
@@ -69,6 +71,22 @@ function App() {
 
   const registerWritingBridge = useCallback((bridge: WritingBridge | null) => {
     writingBridgeRef.current = bridge;
+  }, []);
+
+  // 关窗兜底（工单 #28，spec 拆书保存与模板 §二）：拦下关窗→拆书/书写两
+  // 编辑器静默落盘→再真正关闭。保存失败也放行——兜底是保险，不是闸。
+  useEffect(() => {
+    const unlistenP = getCurrentWindow().onCloseRequested(async (event) => {
+      event.preventDefault();
+      try {
+        await flushAllSavers();
+      } finally {
+        void getCurrentWindow().destroy();
+      }
+    });
+    return () => {
+      void unlistenP.then((unlisten) => unlisten());
+    };
   }, []);
 
   // 封面/背景图的本地加载走 asset 协议（工单 #23）：库位置用户自选，
@@ -238,6 +256,7 @@ function App() {
                 key={openBook.primaryMd}
                 book={openBook}
                 libraryPath={libraryPath}
+                active={section === "拆书" && libTab === "书库"}
                 onBack={() => setOpenBook(null)}
                 onAiCommand={handleAiCommand}
                 registerBridge={registerBridge}
