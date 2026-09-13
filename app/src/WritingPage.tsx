@@ -51,6 +51,8 @@ import { findQuote } from "./foreshadowAnchor";
 import { ForeshadowCollectDialog, ForeshadowNameDialog } from "./ForeshadowDialog";
 import { ExpectationFormDialog, ExpectationFulfillDialog } from "./ExpectationDialog";
 import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
+import { dirName, editorRender } from "./editorRender";
+import { useImageViewer } from "./ImageViewer";
 
 /** 自动保存防抖：停笔满设置间隔（默认 3 秒，工单 #28 起两编辑器共用）落盘。 */
 const PREFS_KEY = "gongbi.writing.prefs";
@@ -245,6 +247,8 @@ export default function WritingPage({
   const [expAnnotate, setExpAnnotate] = useState<{ quote: string } | null>(null);
   const [expFulfill, setExpFulfill] = useState<{ quote: string } | null>(null);
   const [expectationBusy, setExpectationBusy] = useState(false);
+  // 内联图查看器（工单 #31）：点正文里的截图弹原图。
+  const imageViewer = useImageViewer();
 
   // ---------- 编辑器装配 ----------
 
@@ -312,6 +316,15 @@ export default function WritingPage({
       typewriterCompartment.of(prefs.typewriter ? typewriterExtension() : []),
       dimCompartment.of(prefs.dimming ? dimmingExtension() : []),
       foreshadowCompartment.of([]),
+      // 渲染层（工单 #31/#32）：callout 卡片＋内联图；`../附件/` 相对当前章
+      // 文件解析，asset 授权随库根（项目在库内）已覆盖。
+      editorRender({
+        getResolveDir: () => {
+          const path = currentRef.current?.path;
+          return path ? dirName(path) : undefined;
+        },
+        onImageOpen: imageViewer.open,
+      }),
       EditorView.updateListener.of((u) => {
         if (u.docChanged) {
           dirtyRef.current = true;
@@ -1671,6 +1684,8 @@ export default function WritingPage({
           onSubmit={(name, kind, note) => void fulfillExpectation(name, kind, note)}
         />
       )}
+
+      {imageViewer.node}
     </div>
   );
 }

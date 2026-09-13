@@ -2826,3 +2826,223 @@ details.export-chapters summary {
 .dialog .check-line input {
   width: auto;
 }
+
+/* ---------- 编辑器渲染层（工单 #31/#32，spec 编辑器渲染层.md） ----------
+   文件永远是纯 markdown 源码，以下是编辑器装饰：callout 卡片（隐藏语法、
+   标题行常驻、内容可折叠）＋本地附件图内联（等比缩列宽）。 */
+
+.cm-callout-line {
+  --callout-accent: #8a8274;
+  background: rgba(138, 130, 116, 0.08);
+  box-shadow: inset 3px 0 0 var(--callout-accent);
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.cm-callout-line.cm-callout-first {
+  padding-top: 7px;
+  border-radius: 8px 8px 0 0;
+}
+
+.cm-callout-line.cm-callout-last {
+  padding-bottom: 7px;
+  border-radius: 0 0 8px 8px;
+}
+
+.cm-callout-line.cm-callout-first.cm-callout-last {
+  border-radius: 8px;
+}
+
+/* 六已知块各配色（spec §三）；未知类型走通用灰。 */
+.cm-callout-line[data-callout="点评"] {
+  --callout-accent: #3d7fbf;
+  background: rgba(61, 127, 191, 0.08);
+}
+
+.cm-callout-line[data-callout="如果是我写"] {
+  --callout-accent: #8e6bbf;
+  background: rgba(142, 107, 191, 0.08);
+}
+
+.cm-callout-line[data-callout="原文截图"] {
+  --callout-accent: #b07d3a;
+  background: rgba(176, 125, 58, 0.09);
+}
+
+.cm-callout-line[data-callout="出场人物"] {
+  --callout-accent: #3a9188;
+  background: rgba(58, 145, 136, 0.08);
+}
+
+.cm-callout-line[data-callout="小结"] {
+  --callout-accent: #5a8a4a;
+  background: rgba(90, 138, 74, 0.09);
+}
+
+.cm-callout-line[data-callout="书档"] {
+  --callout-accent: #b04a5a;
+  background: rgba(176, 74, 90, 0.08);
+}
+
+[data-theme="dark"] .cm-callout-line {
+  --callout-accent: #9a9282;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .cm-callout-line[data-callout="点评"] {
+  --callout-accent: #6ea3d8;
+  background: rgba(110, 163, 216, 0.12);
+}
+
+[data-theme="dark"] .cm-callout-line[data-callout="如果是我写"] {
+  --callout-accent: #ab8bd6;
+  background: rgba(171, 139, 214, 0.12);
+}
+
+[data-theme="dark"] .cm-callout-line[data-callout="原文截图"] {
+  --callout-accent: #d0a468;
+  background: rgba(208, 164, 104, 0.12);
+}
+
+[data-theme="dark"] .cm-callout-line[data-callout="出场人物"] {
+  --callout-accent: #5db3a8;
+  background: rgba(93, 179, 168, 0.12);
+}
+
+[data-theme="dark"] .cm-callout-line[data-callout="小结"] {
+  --callout-accent: #8ab878;
+  background: rgba(138, 184, 120, 0.12);
+}
+
+[data-theme="dark"] .cm-callout-line[data-callout="书档"] {
+  --callout-accent: #d07a88;
+  background: rgba(208, 122, 136, 0.12);
+}
+
+.callout-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--callout-accent);
+  padding: 1px 2px;
+  border-radius: 5px;
+  user-select: none;
+}
+
+.callout-title:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="dark"] .callout-title:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.callout-icon {
+  font-size: 1.05em;
+}
+
+.callout-summary {
+  font-weight: 400;
+  font-size: 0.88em;
+  color: var(--ink-soft);
+  max-width: 42em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.callout-chevron {
+  font-size: 0.8em;
+  opacity: 0.65;
+  padding: 0 2px;
+}
+
+/* 内联图片（工单 #31）：等比缩到编辑器列宽、不超原尺寸放大，点击看原图。
+   加载中与缺图都给占位条，异步解码不阻塞输入。 */
+.cm-img-wrap {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+.cm-img-wrap img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  cursor: zoom-in;
+}
+
+.cm-img-wrap.loading::before {
+  content: "读取图片…";
+  display: inline-block;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 2px 10px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+
+.cm-img-wrap.loading img {
+  display: none;
+}
+
+[data-theme="dark"] .cm-img-wrap img {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.cm-img-missing {
+  display: inline-block;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 2px 10px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+
+/* 原图查看器（工单 #31）：遮罩＋缩放＋平移。 */
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 13, 10, 0.88);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.image-viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.image-viewer-scale {
+  min-width: 3.5em;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.image-viewer img {
+  max-width: 94vw;
+  max-height: 84vh;
+  border-radius: 4px;
+  cursor: grab;
+  touch-action: none;
+}
+
+/* 原始大小：去掉适屏上限，按 1:1 像素显示（超出视口拖拽平移）。 */
+.image-viewer img.natural {
+  max-width: none;
+  max-height: none;
+}

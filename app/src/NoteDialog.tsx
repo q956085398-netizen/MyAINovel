@@ -7,6 +7,7 @@ import {
   WORLDVIEW_CATEGORIES,
 } from "./types";
 import { errMsg, splitList } from "./util";
+import { dirName } from "./editorRender";
 import MarkdownEditor from "./MarkdownEditor";
 import VocabInput from "./VocabInput";
 
@@ -273,7 +274,13 @@ export default function NoteDialog({
 
         <label>
           {kind === "单元" ? "正文（桥段安排按次序写）" : "正文"}
-          <MarkdownEditor value={body} onChange={setBody} height="240px" />
+          {/* 编辑既有笔记时以其目录为基准渲染内联图；新建的还没落盘，先不渲染 */}
+          <MarkdownEditor
+            value={body}
+            onChange={setBody}
+            height="240px"
+            resolveDir={prevPath ? dirName(prevPath) : undefined}
+          />
         </label>
         <p className="hint">
           保存写入 构思/{kind}/{name.trim() || "标题"}.md；同名自动续号，

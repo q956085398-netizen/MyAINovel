@@ -21,6 +21,10 @@ import { errMsg } from "./util";
 import { autosaveIntervalMs, chapterPrefixOrDefault } from "./settings";
 import { registerFlushSaver } from "./saveFlush";
 import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
+import { dirName, editorRender, parseBookHeaderValues, applyBookHeaderValues } from "./editorRender";
+import type { BookHeaderValues } from "./editorRender";
+import { useImageViewer } from "./ImageViewer";
+import BookHeaderDialog from "./BookHeaderDialog";
 import TropeDialog from "./TropeDialog";
 
 /** 六插入块（设计共识 §四＋工单 #30 书档入家族）：Obsidian 风格 callout，
@@ -107,6 +111,8 @@ export default function EditorPage({
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const imageViewer = useImageViewer();
+  const [headerForm, setHeaderForm] = useState<BookHeaderValues | null>(null);
   const [tropeDialog, setTropeDialog] = useState<{
     chapters: ChapterAnchor[];
     tropes: TropeSpan[];
@@ -327,6 +333,14 @@ export default function EditorPage({
     setTropeDialog({ chapters, tropes, warning });
   }
 
+  /** 书档卡片点击（工单 #38）：从当前正文（未保存的改动也在内）解析四项
+   *  进表单；保存经 applyBookHeaderValues 写回书档块＝正常编辑路径。 */
+  function openBookHeaderForm() {
+    const view = viewRef.current;
+    if (!view) return;
+    setHeaderForm(parseBookHeaderValues(view.state));
+  }
+
   /** 编辑器三命令：梳理/标注要求先选中文本；小结空选区时落回当前章或全文。 */
   async function runAiCommand(kind: AiCommandKind) {
     const view = viewRef.current;
@@ -420,6 +434,13 @@ export default function EditorPage({
             markdown(),
             editorTheme,
             appearanceCompartment.of(editorAppearance()),
+            // 渲染层（工单 #31/#32）：callout 卡片＋内联图；附件相对路径以
+            // 书所在目录解析，asset 授权随库根（App 层）已覆盖。
+            editorRender({
+              getResolveDir: () => dirName(book.primaryMd),
+              onImageOpen: imageViewer.open,
+              onBookHeaderClick: () => openBookHeaderForm(),
+            }),
             EditorView.updateListener.of((u) => {
               if (u.docChanged) {
                 dirtyRef.current = true;
@@ -567,6 +588,18 @@ export default function EditorPage({
         </span>
       </div>
       <div className="editor-container" ref={containerRef} />
+      {imageViewer.node}
+      {headerForm && (
+        <BookHeaderDialog
+          initial={headerForm}
+          onClose={() => setHeaderForm(null)}
+          onSave={(values) => {
+            const view = viewRef.current;
+            if (view) applyBookHeaderValues(view, values);
+            setHeaderForm(null);
+          }}
+        />
+      )}
       {tropeDialog && (
         <TropeDialog
           mdPath={book.primaryMd}
