@@ -102,7 +102,7 @@ export default function BookLibrary({
     if (book) onOpen(book);
   }
 
-  /** 新建书：建 《书名》/＋空 拆书.md（yaml/附件懒生成），成功直进编辑器。 */
+  /** 新建书：建 《书名》/＋模板初始稿（工单 #29），成功直进编辑器。 */
   async function create() {
     if (!libraryPath || busy) return;
     const title = newTitle.trim();
@@ -120,6 +120,18 @@ export default function BookLibrary({
       window.alert(`新建书失败：${errMsg(e)}`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** 拆书模板（工单 #29）：库根 拆书模板.md 不存在先落默认模板，再以
+   *  同一拆书编辑器打开编辑（同一套保存网），返回回书库。 */
+  async function openTemplate() {
+    if (!libraryPath) return;
+    try {
+      const template = await invoke<BookEntry>("open_book_template", { root: libraryPath });
+      onOpen(template);
+    } catch (e) {
+      window.alert(`打开拆书模板失败：${errMsg(e)}`);
     }
   }
 
@@ -173,6 +185,9 @@ export default function BookLibrary({
             <>
               <button className="btn" disabled={scanning} onClick={() => void scan(libraryPath)}>
                 刷新
+              </button>
+              <button className="btn" disabled={scanning} onClick={() => void openTemplate()}>
+                拆书模板
               </button>
               <button className="btn primary" onClick={() => setCreating(true)}>
                 新建书
@@ -446,8 +461,9 @@ export default function BookLibrary({
               />
             </label>
             <p className="hint">
-              会建 《书名》/ 并放一份空 拆书.md；书级资料与附件随标注/贴图懒生成。
-              同名书已存在时报错，不自动续号。
+              会建 《书名》/ 并放一份初始 拆书.md——内容来自库根「拆书模板」
+              （书库页顶部可编辑），其中 {`{书名}`} 替换为所填书名；
+              yaml 与附件随标注/贴图懒生成。同名书已存在时报错，不自动续号。
             </p>
             <div className="dialog-actions">
               <button className="btn" disabled={busy} onClick={() => setCreating(false)}>

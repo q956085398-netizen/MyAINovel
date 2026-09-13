@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::book_file::{
-    has_md_extension, is_hidden, meta_from_mapping, read_yaml_mapping, sanitize_file_name,
-    sibling_yaml_path, write_text_atomic, BookMeta,
+    has_md_extension, is_hidden, meta_from_mapping, read_text, read_yaml_mapping,
+    sanitize_file_name, sibling_yaml_path, write_text_atomic, BookMeta,
 };
 use crate::inspiration::LIBRARY_DIR;
 use crate::proofread::PROOFREAD_DIR;
@@ -18,6 +18,16 @@ use crate::trope::{tropes_from_mapping, TropeSpan};
 /// 书文件收集）跳过该目录——拆书与构思只经「词表.yaml ＋ 灵感库」通行，
 /// 见 docs/spec/构思数据模型.md。
 pub const PROJECTS_DIR: &str = "项目";
+
+/// 拆书模板（工单 #29，spec 拆书保存与模板 §三）：库根一份、用户自编辑，
+/// 只作用于新建书。首次使用（点「拆书模板」入口或新建书）不存在则落
+/// 默认模板——书档头卡＋空行＋第1章；占位符仅 `{书名}` 一个。
+pub const TEMPLATE_FILE: &str = "拆书模板.md";
+pub const DEFAULT_TEMPLATE: &str = "> [!书档]\n> 书名：{书名}\n> 成绩：\n> 简介：\n> 金手指：\n\n第1章\n";
+
+fn template_path(root: &Path) -> PathBuf {
+    root.join(TEMPLATE_FILE)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -80,9 +90,9 @@ fn cover_dir_for(root: &Path, files: &BookFiles) -> PathBuf {
 }
 
 /// 新建拆书书（工单 #20，spec 书库新建与展示 §二）：一律一书一文件夹——
-/// 建「《书名》/」＋空 拆书.md；yaml 与 附件/ 懒生成（首次结构化标注/贴图
-/// 才落盘，#13 纪律）。重名报错不续号：书是唯一的，同名是误操作
-/// （同 create_project）。
+/// 建「《书名》/」＋初始 拆书.md（v2：套用库根拆书模板，工单 #29）；
+/// yaml 与 附件/ 懒生成（首次结构化标注/贴图才落盘，#13 纪律）。
+/// 重名报错不续号：书是唯一的，同名是误操作（同 create_project）。
 pub fn create_book(root: &Path, title: &str) -> Result<BookEntry, String> {
     if !root.is_dir() {
         return Err(format!("不是有效的文件夹：{}", root.display()));
@@ -96,7 +106,7 @@ pub fn create_book(root: &Path, title: &str) -> Result<BookEntry, String> {
     }
     fs::create_dir_all(&dir).map_err(|e| format!("无法创建文件夹 {}：{e}", dir.display()))?;
     let primary_md = dir.join("拆书.md");
-    write_text_atomic(&primary_md, "")
+    write_text_atomic(&primary_md, &initial_draft(root, &name))
         .map_err(|e| format!("无法创建拆书稿 {}：{e}", primary_md.display()))?;
     Ok(book_entry(
         root,
@@ -105,6 +115,49 @@ pub fn create_book(root: &Path, title: &str) -> Result<BookEntry, String> {
             layout: Layout::FolderBook,
             mds: vec![primary_md.clone()],
             primary_md,
+        },
+    ))
+}
+
+/// 新建书初始稿：库根拆书模板（不存在先落默认模板——懒生成在此触发），
+/// `{书名}` 全文替换。模板读写任何失败都回退空稿、不阻断新建——模板是
+/// 便利，不是闸（spec 拆书保存与模板 §三）。
+fn initial_draft(root: &Path, name: &str) -> String {
+    let path = template_path(root);
+    if !path.is_file() {
+        if let Err(e) = write_text_atomic(&path, DEFAULT_TEMPLATE) {
+            eprintln!("默认拆书模板落盘失败（新建书回退空稿）：{e}");
+            return String::new();
+        }
+    }
+    match read_text(&path) {
+        Ok(template) => template.replace("{书名}", name),
+        Err(e) => {
+            eprintln!("拆书模板读取失败（新建书回退空稿）：{e}");
+            String::new()
+        }
+    }
+}
+
+/// 打开拆书模板（工单 #29，spec 拆书保存与模板 §三）：库根 `拆书模板.md`
+/// 不存在则先落默认模板，再按散文件书形状包一个条目返回——前端以同一
+/// 拆书编辑器编辑（同一套保存网），返回回书库。模板不是书：扫描排除。
+pub fn open_book_template(root: &Path) -> Result<BookEntry, String> {
+    if !root.is_dir() {
+        return Err(format!("不是有效的文件夹：{}", root.display()));
+    }
+    let path = template_path(root);
+    if !path.is_file() {
+        write_text_atomic(&path, DEFAULT_TEMPLATE)
+            .map_err(|e| format!("无法创建拆书模板 {}：{e}", path.display()))?;
+    }
+    Ok(book_entry(
+        root,
+        BookFiles {
+            name: "拆书模板".to_string(),
+            layout: Layout::Scattered,
+            mds: vec![path.clone()],
+            primary_md: path,
         },
     ))
 }
@@ -123,6 +176,11 @@ pub(crate) fn collect_book_files(root: &Path) -> Result<Vec<BookFiles>, String> 
         if path.is_dir() {
             subdirs.push(path);
         } else if has_md_extension(&path) {
+            // 库根的拆书模板不是一本书（工单 #29）：扫描/全文搜索/词表聚合
+            // 共用这里的收集，一处排除三处生效。
+            if path.file_name().and_then(|n| n.to_str()) == Some(TEMPLATE_FILE) {
+                continue;
+            }
             books.push(BookFiles {
                 name: file_stem_of(&path),
                 layout: Layout::Scattered,
@@ -490,7 +548,7 @@ mod tests {
     // --- 新建书（spec 书库新建与展示 §二）---
 
     #[test]
-    fn 新建书_一书一文件夹_空拆书稿_懒生成() {
+    fn 新建书_一书一文件夹_模板初始稿_懒生成() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().to_path_buf();
 
@@ -499,12 +557,20 @@ mod tests {
         assert_eq!(book.name, "《我的新书》");
         assert_eq!(book.layout, Layout::FolderBook);
         assert!(book.primary_md.ends_with("拆书.md"));
-        // 落点：只建《书名》/＋空 拆书.md；yaml 与附件/懒生成，不预建。
-        assert_eq!(fs::read_to_string(&book.primary_md).unwrap(), "");
+        // 落点：只建《书名》/＋初始 拆书.md（模板套用，首次新建顺带落默认
+        // 模板——懒生成）；yaml 与附件/懒生成，不预建。
+        assert_eq!(
+            fs::read_to_string(&book.primary_md).unwrap(),
+            DEFAULT_TEMPLATE.replace("{书名}", "我的新书")
+        );
+        assert_eq!(
+            fs::read_to_string(&root.join(TEMPLATE_FILE)).unwrap(),
+            DEFAULT_TEMPLATE
+        );
         assert!(!root.join("《我的新书》/拆书.yaml").exists());
         assert!(!root.join("《我的新书》/附件").exists());
 
-        // 扫描立刻能认出这本书。
+        // 扫描立刻能认出这本书；库根模板不算书。
         let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 1);
         assert_eq!(books[0].name, "《我的新书》");
@@ -535,7 +601,84 @@ mod tests {
         assert!(create_book(&root, "《  》").is_err());
         assert!(create_book(&root, "《??》").is_err());
         let entries = fs::read_dir(&root).unwrap().count();
-        assert_eq!(entries, 1, "失败的新建不应留下目录");
+        // 成功那次新建留下的：《剑_来：外传》/＋懒生成的 拆书模板.md。
+        assert_eq!(entries, 2, "失败的建不应再留下目录");
+    }
+
+    // --- 拆书模板（工单 #29，spec 拆书保存与模板 §三）---
+
+    #[test]
+    fn 拆书模板_首次打开_落默认模板_已有_不覆盖() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+
+        let entry = open_book_template(&root).unwrap();
+        assert_eq!(entry.name, "拆书模板");
+        assert_eq!(entry.primary_md, root.join(TEMPLATE_FILE));
+        assert_eq!(fs::read_to_string(&root.join(TEMPLATE_FILE)).unwrap(), DEFAULT_TEMPLATE);
+
+        // 用户改过的模板原样保留，不被默认值覆盖。
+        write(&root.join(TEMPLATE_FILE), "> [!书档]\n> 书名：{书名}\n\n第一章\n");
+        assert_eq!(
+            open_book_template(&root).unwrap().primary_md,
+            root.join(TEMPLATE_FILE)
+        );
+        assert_eq!(
+            fs::read_to_string(&root.join(TEMPLATE_FILE)).unwrap(),
+            "> [!书档]\n> 书名：{书名}\n\n第一章\n"
+        );
+    }
+
+    #[test]
+    fn 新建书_套用自编模板_书名替换_含多次出现_其余占位符原样() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        write(
+            &root.join(TEMPLATE_FILE),
+            "> [!书档]\n> 书名：{书名}（{书名}）\n> 备注：{日期}\n\n第1章 {书名}\n",
+        );
+
+        let book = create_book(&root, "我的新书").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&book.primary_md).unwrap(),
+            "> [!书档]\n> 书名：我的新书（我的新书）\n> 备注：{日期}\n\n第1章 我的新书\n"
+        );
+        // 模板本体不动：占位符仍在，下一本书继续套。
+        assert_eq!(
+            fs::read_to_string(&root.join(TEMPLATE_FILE)).unwrap(),
+            "> [!书档]\n> 书名：{书名}（{书名}）\n> 备注：{日期}\n\n第1章 {书名}\n"
+        );
+    }
+
+    #[test]
+    fn 新建书_模板读写失败_回退空稿_不阻断() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        // 占住模板路径的目录：默认模板写不进、也读不了——回退空稿。
+        fs::create_dir_all(&root.join(TEMPLATE_FILE)).unwrap();
+
+        let book = create_book(&root, "我的新书").unwrap();
+        assert_eq!(fs::read_to_string(&book.primary_md).unwrap(), "");
+
+        // 模板入口把失败亮出来（编辑入口需要真实的文件）。
+        assert!(open_book_template(&root).is_err());
+    }
+
+    #[test]
+    fn 扫描与搜索_库根拆书模板_不算书() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("书甲.md"), "第1章");
+        write(&root.join(TEMPLATE_FILE), "> [!书档]\n> 书名：{书名}\n\n第1章\n");
+
+        let books = scan_library(&root).unwrap();
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].name, "书甲");
+
+        // 全文搜索与扫描共用同一套书文件收集（vocabulary 亦然），模板里的
+        // 词不该命中模板这份「书」。
+        let hits = crate::search::search_library(&root, "{书名}").unwrap();
+        assert!(hits.is_empty(), "模板不是书，不该被搜到：{hits:?}");
     }
 
     // --- 封面扫描（工单 #23，spec 书库新建与展示 §五）---

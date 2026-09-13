@@ -44,10 +44,18 @@ fn scan_library(root: String) -> Result<Vec<BookEntry>, String> {
     library::scan_library(&path)
 }
 
-/// 新建拆书书（工单 #20）：一书一文件夹＋空拆书稿，yaml/附件懒生成。
+/// 新建拆书书（工单 #20）：一书一文件夹＋模板初始稿（工单 #29：库根
+/// 拆书模板套用、{书名} 替换），yaml/附件懒生成。
 #[tauri::command]
 fn create_book(root: String, title: String) -> Result<BookEntry, String> {
     library::create_book(&PathBuf::from(&root), &title)
+}
+
+/// 打开拆书模板（工单 #29，spec 拆书保存与模板 §三）：库根 拆书模板.md
+/// 不存在先落默认模板（懒生成），返回的条目交同一拆书编辑器编辑。
+#[tauri::command]
+fn open_book_template(root: String) -> Result<BookEntry, String> {
+    library::open_book_template(&PathBuf::from(&root))
 }
 
 /// 新建库空文件夹判定（工单 #21）：选中的文件夹是否为空（含隐藏项）；
@@ -700,6 +708,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_library,
             create_book,
+            open_book_template,
             is_empty_dir,
             set_cover,
             grant_asset_scope,
