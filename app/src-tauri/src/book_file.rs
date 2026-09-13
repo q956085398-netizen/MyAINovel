@@ -287,6 +287,170 @@ pub(crate) fn han_word_count(content: &str) -> u64 {
     count_han(body_after_frontmatter(content))
 }
 
+// --- 书档（工单 #30，spec 拆书保存与模板 §四/§五）：书级四项上纸面 ---
+
+/// 书档四项：`> [!书档]` 块里键名行（`书名：`等起始行）的解析面，
+/// 书库列表取数与表单编辑共用。章前缀不入书档——它是全局设置（spec §六）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookHeader {
+    pub title: Option<String>,
+    pub track_record: Option<String>,
+    pub summary: Option<String>,
+    pub golden_finger: Option<String>,
+}
+
+/// yaml 侧车里迁往书档的四个键；桥段、章前缀与未知键不在此列。
+const HEADER_YAML_KEYS: [&str; 4] = ["书名", "成绩", "简介", "金手指"];
+
+/// 行的块引用体（去行首空白、`>` 与其后空白）；非引用行返回 None。
+fn quote_body(line: &str) -> Option<&str> {
+    let line = line.trim_start_matches([' ', '\t', '\u{feff}']);
+    let rest = line.strip_prefix('>')?;
+    Some(rest.trim_start_matches(' '))
+}
+
+/// callout 首行引用体里 `[!类型]` 的类型名；折叠标记 `-`/`+` 容忍。
+fn callout_type(quote_body: &str) -> Option<&str> {
+    let rest = quote_body.trim_start().strip_prefix("[!")?;
+    let end = rest.find(']')?;
+    let name = rest[..end].strip_suffix(['-', '+']).unwrap_or(&rest[..end]);
+    (!name.is_empty()).then_some(name)
+}
+
+/// 正文里第一个书档块的（起、止）行号（1 起）：块＝自 `> [!书档]` 行起
+/// 连续的引用行；非书档的引用块整块跳过（callout 标记只在块首才算）。
+fn find_book_header_lines(content: &str) -> Option<(usize, usize)> {
+    let lines: Vec<&str> = strip_bom(content).lines().collect();
+    let mut idx = 0;
+    while idx < lines.len() {
+        if quote_body(lines[idx]).is_some() {
+            let start = idx;
+            while idx + 1 < lines.len() && quote_body(lines[idx + 1]).is_some() {
+                idx += 1;
+            }
+            if callout_type(quote_body(lines[start]).unwrap_or("")) == Some("书档") {
+                return Some((start + 1, idx + 1));
+            }
+        }
+        idx += 1;
+    }
+    None
+}
+
+/// 键名行：四个键之一起始（全角/半角冒号均可），返回（键，值）。
+fn header_key_line(body: &str) -> Option<(&'static str, &str)> {
+    for key in HEADER_YAML_KEYS {
+        if let Some(rest) = body.strip_prefix(key) {
+            if let Some(value) = rest.strip_prefix('：').or_else(|| rest.strip_prefix(':')) {
+                return Some((key, value.trim()));
+            }
+        }
+    }
+    None
+}
+
+/// 解析书档四项：首个书档块的键名行——重复键取首见、空值不算，
+/// 非键名行是自由备注不参与（约定换自由，spec §四）。无书档块返回 None。
+pub fn parse_book_header(content: &str) -> Option<BookHeader> {
+    let (start, end) = find_book_header_lines(content)?;
+    let mut header = BookHeader::default();
+    let mut seen: Vec<&str> = Vec::new();
+    for line in strip_bom(content).lines().take(end).skip(start - 1) {
+        let Some((key, value)) = quote_body(line).and_then(header_key_line) else {
+            continue;
+        };
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        let slot = match key {
+            "书名" => &mut header.title,
+            "成绩" => &mut header.track_record,
+            "简介" => &mut header.summary,
+            _ => &mut header.golden_finger,
+        };
+        *slot = (!value.is_empty()).then(|| value.to_string());
+    }
+    Some(header)
+}
+
+/// 由四项生成书档块文本（只落非空项，块自带尾换行、不带分隔空行）。
+fn book_header_block_text(header: &BookHeader) -> String {
+    let mut block = String::from("> [!书档]\n");
+    for (key, value) in [
+        ("书名", &header.title),
+        ("成绩", &header.track_record),
+        ("简介", &header.summary),
+        ("金手指", &header.golden_finger),
+    ] {
+        if let Some(v) = value.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            block.push_str("> ");
+            block.push_str(key);
+            block.push('：');
+            block.push_str(v);
+            block.push('\n');
+        }
+    }
+    block
+}
+
+/// 书档块插到稿顶（BOM 之后），与原正文隔一个空行；正文为空只落块。
+fn insert_book_header(content: &str, block: &str) -> String {
+    let body = strip_bom(content);
+    let bom = &content[..content.len() - body.len()];
+    if body.trim().is_empty() {
+        format!("{bom}{block}")
+    } else {
+        format!("{bom}{block}\n{body}")
+    }
+}
+
+/// 打开书时的一次性迁移（spec 拆书保存与模板 §五）：md 无书档块且 yaml
+/// 四键有非空值 → 生成书档块插稿顶；md 已有书档块 → 不搬值（md 为准），
+/// yaml 四键一律删除、桥段/未知键/章前缀原样保留（读-合-写）。yaml 无
+/// 四键则不写盘（幂等：迁过一次就查无此键）。yaml 解析失败返回 Err——
+/// 读不懂的表拒绝改写。返回值＝md 是否被改写（true 时调用方应重读）。
+pub fn migrate_book_header(md_path: &Path) -> Result<bool, String> {
+    let yaml = sibling_yaml_path(md_path);
+    if !yaml.is_file() {
+        return Ok(false);
+    }
+    let mut map = read_yaml_mapping(&yaml)?;
+    if !HEADER_YAML_KEYS
+        .iter()
+        .any(|k| map.contains_key(Value::String((*k).to_string())))
+    {
+        return Ok(false);
+    }
+    let meta = meta_from_mapping(&map);
+    let old_md = read_text(md_path)?;
+    let mut md_changed = false;
+    if parse_book_header(&old_md).is_none() {
+        let block = book_header_block_text(&BookHeader {
+            title: meta.title,
+            track_record: meta.track_record,
+            summary: meta.summary,
+            golden_finger: meta.golden_finger,
+        });
+        if block != "> [!书档]\n" {
+            write_text_atomic(md_path, &insert_book_header(&old_md, &block))?;
+            md_changed = true;
+        }
+    }
+    for k in HEADER_YAML_KEYS {
+        map.remove(Value::String(k.to_string()));
+    }
+    if map.is_empty() {
+        // 只剩四个书级键：整文件删除比留一个空 `{}` 干净；桥段标注
+        // 首次落盘时会按懒生成重建。
+        fs::remove_file(&yaml).map_err(|e| format!("无法删除空 yaml {}：{e}", yaml.display()))?;
+    } else {
+        write_yaml_mapping(&yaml, map)?;
+    }
+    Ok(md_changed)
+}
+
 // --- yaml 底图读写：双文件制的 .yaml 侧共用（书级元数据、桥段列表都走这里） ---
 
 /// yaml 读为映射底图：文件不存在视为空底；存在但解析失败返回 Err
@@ -1204,5 +1368,160 @@ mod tests {
         // 与前端 chapterHead 同款：前缀先 trim（界面显示与导出一致）
         assert_eq!(render_chapter_head(7, Some("Chapter {n}: ")), "Chapter 7:");
         assert_eq!(render_chapter_head(7, Some("第")), "第7");
+    }
+
+    // --- 书档（工单 #30，spec 拆书保存与模板 §四/§五）---
+
+    #[test]
+    fn 书档解析_键名行_含自由行与半角冒号() {
+        let content = "> [!书档]\n> 书名：大魏读书人\n> 随手备注一行\n> 成绩:均订两万\n> 简介：少年得金手指\n> 金手指：每日签到\n> 书名：重复的不要\n\n第1章\n";
+        let header = parse_book_header(content).unwrap();
+        assert_eq!(header.title.as_deref(), Some("大魏读书人"));
+        assert_eq!(header.track_record.as_deref(), Some("均订两万"));
+        assert_eq!(header.summary.as_deref(), Some("少年得金手指"));
+        assert_eq!(header.golden_finger.as_deref(), Some("每日签到"));
+    }
+
+    #[test]
+    fn 书档解析_空值不算_多块取首块() {
+        let content = "开场白\n\n> [!书档]\n> 书名：甲\n> 成绩：\n\n正文\n\n> [!书档]\n> 书名：乙\n";
+        let header = parse_book_header(content).unwrap();
+        assert_eq!(header.title.as_deref(), Some("甲"));
+        assert_eq!(header.track_record, None);
+
+        // 无书档块（普通引用、别的 callout）返回 None。
+        assert!(parse_book_header("> [!小结]\n> 书名：不算\n").is_none());
+        assert!(parse_book_header("> 普通引用\n> 书名：不算\n").is_none());
+        assert!(parse_book_header("").is_none());
+    }
+
+    #[test]
+    fn 书档解析_折叠标记与首块判定() {
+        // Obsidian 折叠形态 `[!书档]-` 也认；书档夹在别的引用块后仍取得到首块。
+        let content = "> [!点评]\n> 别的块\n\n> [!书档]-\n> 书名：甲\n";
+        let header = parse_book_header(content).unwrap();
+        assert_eq!(header.title.as_deref(), Some("甲"));
+    }
+
+    #[test]
+    fn 书档块生成_只落非空项() {
+        let block = book_header_block_text(&BookHeader {
+            title: Some(" 甲 ".into()),
+            track_record: None,
+            summary: Some("".into()),
+            golden_finger: Some("签到".into()),
+        });
+        assert_eq!(block, "> [!书档]\n> 书名：甲\n> 金手指：签到\n");
+    }
+
+    #[test]
+    fn 书档插顶_正文为空与有正文() {
+        assert_eq!(insert_book_header("", "> [!书档]\n"), "> [!书档]\n");
+        assert_eq!(
+            insert_book_header("第1章\n正文", "> [!书档]\n"),
+            "> [!书档]\n\n第1章\n正文"
+        );
+        // BOM 保持在最前。
+        assert_eq!(
+            insert_book_header("\u{feff}第1章", "> [!书档]\n"),
+            "\u{feff}> [!书档]\n\n第1章"
+        );
+    }
+
+    #[test]
+    fn 迁移_四键非空_搬值删键_保留桥段未知键章前缀() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("《书》/拆书.md");
+        write(&md, "第1章\n正文");
+        write(
+            &root.join("《书》/拆书.yaml"),
+            "书名: 书甲\n成绩: 均订两万\n简介: 少年得金手指\n金手指: 签到\n章前缀: \"Chapter {n}: \"\n桥段:\n- 起: 1\n  止: 2\n  类型: [掉马甲]\n自定义键: 保留我\n",
+        );
+
+        assert!(migrate_book_header(&md).unwrap(), "md 应被改写");
+        let migrated = read_text(&md).unwrap();
+        assert_eq!(
+            migrated,
+            "> [!书档]\n> 书名：书甲\n> 成绩：均订两万\n> 简介：少年得金手指\n> 金手指：签到\n\n第1章\n正文"
+        );
+        let yaml_text = read_text(&root.join("《书》/拆书.yaml")).unwrap();
+        assert!(!yaml_text.contains("书名:"), "四键应删除：{yaml_text}");
+        assert!(!yaml_text.contains("成绩:"));
+        assert!(yaml_text.contains("章前缀:"));
+        assert!(yaml_text.contains("掉马甲"), "桥段标注无损");
+        assert!(yaml_text.contains("自定义键: 保留我"));
+
+        // 幂等：再跑一次查无四键，不写盘。
+        assert!(!migrate_book_header(&md).unwrap());
+        assert_eq!(read_text(&md).unwrap(), migrated);
+    }
+
+    #[test]
+    fn 迁移_md已有书档_只删键不搬值() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("书乙.md");
+        write(&md, "> [!书档]\n> 书名：纸面上的\n\n第1章");
+        write(&root.join("书乙.yaml"), "书名: yaml里的\n成绩: 均订\n");
+
+        assert!(!migrate_book_header(&md).unwrap(), "md 未被改写");
+        let text = read_text(&md).unwrap();
+        assert!(text.contains("书名：纸面上的"));
+        assert!(!text.contains("yaml里的"), "md 为准、不搬值");
+        assert!(!root.join("书乙.yaml").exists(), "只剩四键的 yaml 整文件删除");
+    }
+
+    #[test]
+    fn 迁移_空值不搬_但键仍清() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("书丙.md");
+        write(&md, "第1章");
+        write(&root.join("书丙.yaml"), "书名: \n成绩: ''\n备注: 留\n");
+
+        assert!(!migrate_book_header(&md).unwrap());
+        assert_eq!(read_text(&md).unwrap(), "第1章", "全空值不生成书档块");
+        let yaml_text = read_text(&root.join("书丙.yaml")).unwrap();
+        assert_eq!(yaml_text, "备注: 留\n");
+    }
+
+    #[test]
+    fn 迁移_无yaml或无四键_不写盘() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("书丁.md");
+        write(&md, "第1章");
+        assert!(!migrate_book_header(&md).unwrap());
+
+        write(&root.join("书丁.yaml"), "桥段: []\n");
+        let before = fs::read(&root.join("书丁.yaml")).unwrap();
+        assert!(!migrate_book_header(&md).unwrap());
+        assert_eq!(fs::read(&root.join("书丁.yaml")).unwrap(), before);
+    }
+
+    #[test]
+    fn 迁移_yaml解析失败_报错不写盘() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("坏书.md");
+        write(&md, "第1章");
+        let yaml = root.join("坏书.yaml");
+        write(&yaml, "{{{{不是 yaml");
+
+        assert!(migrate_book_header(&md).is_err());
+        assert_eq!(read_text(&md).unwrap(), "第1章", "读不懂就不迁");
+        assert!(yaml.is_file(), "坏 yaml 原样保留");
+    }
+
+    #[test]
+    fn 迁移_散文件书_同样插顶() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("散书.md");
+        write(&md, "第一章\n正文");
+        write(&root.join("散书.yaml"), "金手指: 签到\n");
+
+        assert!(migrate_book_header(&md).unwrap());
+        assert_eq!(
+            read_text(&md).unwrap(),
+            "> [!书档]\n> 金手指：签到\n\n第一章\n正文"
+        );
+        // 只剩四键 → yaml 删除；桥段标注懒生成会重建。
+        assert!(!root.join("散书.yaml").exists());
     }
 }

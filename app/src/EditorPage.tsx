@@ -18,14 +18,14 @@ import type {
 } from "./types";
 import { emptyBookMeta } from "./types";
 import { errMsg } from "./util";
-import { autosaveIntervalMs } from "./settings";
+import { autosaveIntervalMs, chapterPrefixOrDefault } from "./settings";
 import { registerFlushSaver } from "./saveFlush";
 import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
-import BookMetaDialog from "./BookMetaDialog";
 import TropeDialog from "./TropeDialog";
 
-/** 五插入块（设计共识 §四）：Obsidian 风格 callout，纯 markdown 可读。 */
-const INSERT_BLOCKS = ["点评", "如果是我写", "原文截图", "出场人物", "小结"] as const;
+/** 六插入块（设计共识 §四＋工单 #30 书档入家族）：Obsidian 风格 callout，
+ *  纯 markdown 可读；书档常规来自模板与迁移，工具栏可补插。 */
+const INSERT_BLOCKS = ["点评", "如果是我写", "原文截图", "出场人物", "小结", "书档"] as const;
 
 /** 编辑器三命令（设计共识 §七）：AI 给初稿，人在侧边栏确认后才落盘。 */
 const AI_COMMANDS: { kind: AiCommandKind; label: string }[] = [
@@ -107,10 +107,6 @@ export default function EditorPage({
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
-  const [metaOpen, setMetaOpen] = useState(false);
-  const [metaInit, setMetaInit] = useState<{ meta: BookMeta; warning?: string }>({
-    meta: emptyBookMeta(),
-  });
   const [tropeDialog, setTropeDialog] = useState<{
     chapters: ChapterAnchor[];
     tropes: TropeSpan[];
@@ -385,6 +381,13 @@ export default function EditorPage({
     let view: EditorView | null = null;
 
     void (async () => {
+      // 打开书先做书档一次性迁移（工单 #30，spec §五）：yaml 四键搬上纸面。
+      // 迁移失败（yaml 读不懂）不拦打开——桥段面板保存时另有显式告警。
+      try {
+        await invoke<boolean>("migrate_book_header", { mdPath: book.primaryMd });
+      } catch (e) {
+        console.warn("书档迁移跳过（yaml 解析失败）：", e);
+      }
       let content: string;
       let fingerprint: string;
       try {
@@ -396,17 +399,17 @@ export default function EditorPage({
         return;
       }
 
+      // 章前缀取值（spec §六）：书 yaml 自定义键 > 全局设置（默认 第{n}章）；
+      // 空值由 Rust 侧回退默认，单一事实源。yaml 读取失败不拦编辑器。
       let meta: BookMeta = emptyBookMeta();
-      let metaWarn: string | undefined;
       try {
         meta = await invoke<BookMeta>("read_book_meta", { mdPath: book.primaryMd });
       } catch (e) {
-        metaWarn = `已有 .yaml 解析失败：${errMsg(e)}。在「书级资料」保存会整文件覆盖，请先确认内容。`;
+        console.warn("读取书 yaml 失败（章前缀回退全局设置）：", e);
       }
       if (cancelled || !containerRef.current) return;
-      prefixRef.current = normalizePrefix(meta.chapterPrefix);
+      prefixRef.current = normalizePrefix(meta.chapterPrefix) || chapterPrefixOrDefault();
       fingerprintRef.current = fingerprint;
-      setMetaInit({ meta, warning: metaWarn });
 
       view = new EditorView({
         parent: containerRef.current,
@@ -529,9 +532,6 @@ export default function EditorPage({
           {dirty && <span className="dirty-dot" title="未保存" />}
         </h1>
         <div className="page-actions">
-          <button className="btn" disabled={!ready} onClick={() => setMetaOpen(true)}>
-            书级资料
-          </button>
           <button className="btn" disabled={!ready} onClick={() => void openTropePanel()}>
             桥段标注
           </button>
@@ -567,19 +567,6 @@ export default function EditorPage({
         </span>
       </div>
       <div className="editor-container" ref={containerRef} />
-      {metaOpen && (
-        <BookMetaDialog
-          mdPath={book.primaryMd}
-          initial={metaInit.meta}
-          warning={metaInit.warning}
-          onClose={() => setMetaOpen(false)}
-          onSaved={(m) => {
-            prefixRef.current = normalizePrefix(m.chapterPrefix);
-            setMetaInit({ meta: m });
-            setMetaOpen(false);
-          }}
-        />
-      )}
       {tropeDialog && (
         <TropeDialog
           mdPath={book.primaryMd}

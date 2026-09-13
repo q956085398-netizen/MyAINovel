@@ -1017,6 +1017,10 @@ body {
   flex: 1;
 }
 
+.settings-input {
+  width: 100%;
+}
+
 /* ---------- 设置面板（工单 #24） ---------- */
 
 .settings-dialog {

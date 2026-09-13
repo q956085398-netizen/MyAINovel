@@ -39,6 +39,10 @@ export type BodyFont = "system" | "宋" | "黑" | "楷";
 export const AUTOSAVE_OPTIONS = [1, 2, 3, 5, 10] as const;
 export const DEFAULT_AUTOSAVE_SEC = 3;
 
+/** 拆书·章前缀缺省（工单 #30，spec 拆书保存与模板 §六）：{n}＝章号占位。
+ *  书 yaml 已有自定义 `章前缀` 键时继续优先生效（Rust 侧同规则回退默认）。 */
+export const DEFAULT_CHAPTER_PREFIX = "第{n}章";
+
 export interface AppSettings {
   /** 主题三态（§二）：浅｜深｜跟随系统；跟随＝监听系统深浅偏好。 */
   theme: ThemeMode;
@@ -50,6 +54,8 @@ export interface AppSettings {
   lineHeight: number | null;
   /** 自动保存间隔（秒）：拆书/书写两编辑器共用，停笔防抖落盘。 */
   autosaveSec: number;
+  /** 拆书·章前缀（全局缺省）：开下一章/章标题识别用；空值回退默认。 */
+  chapterPrefix: string;
 }
 
 const KEY = "gongbi.settings";
@@ -61,6 +67,7 @@ const DEFAULTS: AppSettings = {
   fontSize: null,
   lineHeight: null,
   autosaveSec: DEFAULT_AUTOSAVE_SEC,
+  chapterPrefix: DEFAULT_CHAPTER_PREFIX,
 };
 
 function load(): AppSettings {
@@ -104,6 +111,12 @@ export function useSettings(): [AppSettings, (patch: Partial<AppSettings>) => vo
 export function autosaveIntervalMs(): number {
   const sec = Number(cache.autosaveSec);
   return Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : DEFAULT_AUTOSAVE_SEC * 1000;
+}
+
+/** 当前拆书·章前缀（全局缺省）：空值回退默认；Rust 侧对空模板同规则。 */
+export function chapterPrefixOrDefault(): string {
+  const prefix = cache.chapterPrefix?.trim();
+  return prefix ? prefix : DEFAULT_CHAPTER_PREFIX;
 }
 
 // --- 主题应用（§二）：根元素挂 data-theme，变量组按主题重定义 ---

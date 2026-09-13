@@ -151,7 +151,7 @@ pub fn open_book_template(root: &Path) -> Result<BookEntry, String> {
         write_text_atomic(&path, DEFAULT_TEMPLATE)
             .map_err(|e| format!("无法创建拆书模板 {}：{e}", path.display()))?;
     }
-    Ok(book_entry(
+    let mut entry = book_entry(
         root,
         BookFiles {
             name: "拆书模板".to_string(),
@@ -159,7 +159,10 @@ pub fn open_book_template(root: &Path) -> Result<BookEntry, String> {
             mds: vec![path.clone()],
             primary_md: path,
         },
-    ))
+    );
+    // 模板里的书档键名行是 `{书名}` 占位符——模板不是书，条目名固定。
+    entry.name = "拆书模板".to_string();
+    Ok(entry)
 }
 
 pub(crate) fn collect_book_files(root: &Path) -> Result<Vec<BookFiles>, String> {
@@ -241,11 +244,31 @@ fn book_entry(root: &Path, files: BookFiles) -> BookEntry {
         .map(|md| md_stats(md))
         .fold((0u32, 0u64), |(c, w), s| (c + s.chapters, w + s.words));
 
-    let (meta, tropes) = meta_and_tropes(&files.primary_md);
+    let (mut meta, tropes) = meta_and_tropes(&files.primary_md);
+    // 书档四项上纸面（工单 #30，spec 拆书保存与模板 §四/§五）：列表取数
+    // md 书档 > yaml 残键（未迁移旧书的过渡显示）> 空——扫描只读不写盘。
+    // 主名口径＝书档书名 > yaml 书名 > 文件夹名（散文件书＝文件名）。
+    if let Ok(text) = read_text(&files.primary_md) {
+        if let Some(header) = crate::book_file::parse_book_header(&text) {
+            if header.title.is_some() {
+                meta.title = header.title.clone();
+            }
+            if header.track_record.is_some() {
+                meta.track_record = header.track_record.clone();
+            }
+            if header.summary.is_some() {
+                meta.summary = header.summary.clone();
+            }
+            if header.golden_finger.is_some() {
+                meta.golden_finger = header.golden_finger.clone();
+            }
+        }
+    }
+    let name = meta.title.clone().unwrap_or_else(|| files.name.clone());
     let cover_dir = cover_dir_for(root, &files);
     let cover = crate::cover::find_cover(&cover_dir);
     BookEntry {
-        name: files.name,
+        name,
         layout: files.layout,
         primary_md: files.primary_md,
         md_count: files.mds.len() as u32,
@@ -392,7 +415,8 @@ mod tests {
         let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 1);
         let book = &books[0];
-        assert_eq!(book.name, "《书丙》");
+        // 主名＝书名 > 文件夹名（yaml 残键过渡，工单 #30）。
+        assert_eq!(book.name, "书丙");
         assert_eq!(book.layout, Layout::FolderBook);
         assert!(book.primary_md.ends_with("拆书.md"));
         assert_eq!(book.meta.title.as_deref(), Some("书丙"));
@@ -554,7 +578,8 @@ mod tests {
 
         let book = create_book(&root, "我的新书").unwrap();
 
-        assert_eq!(book.name, "《我的新书》");
+        // 主名＝书档书名（模板里 `书名：{书名}` 已替换）> 文件夹名。
+        assert_eq!(book.name, "我的新书");
         assert_eq!(book.layout, Layout::FolderBook);
         assert!(book.primary_md.ends_with("拆书.md"));
         // 落点：只建《书名》/＋初始 拆书.md（模板套用，首次新建顺带落默认
@@ -573,7 +598,11 @@ mod tests {
         // 扫描立刻能认出这本书；库根模板不算书。
         let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 1);
-        assert_eq!(books[0].name, "《我的新书》");
+        assert_eq!(books[0].name, "我的新书");
+        assert_eq!(
+            books[0].meta.track_record, None,
+            "模板空成绩列显示空"
+        );
     }
 
     #[test]
@@ -594,7 +623,8 @@ mod tests {
         let root = tmp.path().to_path_buf();
 
         let book = create_book(&root, " 《剑/来：外传》 ").unwrap();
-        assert_eq!(book.name, "《剑_来：外传》");
+        // 主名＝书档书名（模板占位符替换后的净书名）；文件夹仍是书名号形态。
+        assert_eq!(book.name, "剑_来：外传");
         assert!(root.join("《剑_来：外传》/拆书.md").is_file());
 
         // 只剩符号/空串报错，不建目录。
@@ -765,5 +795,63 @@ mod tests {
         assert!(!is_empty_library_dir(&occupied).unwrap());
 
         assert!(is_empty_library_dir(&tmp.path().join("不存在")).is_err());
+    }
+
+    // --- 列表取数（工单 #30，spec 拆书保存与模板 §五「列表列过渡」）---
+
+    #[test]
+    fn 列表取数_md书档优先_yaml残键过渡_两者皆无为空() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        // 甲：md 书档与 yaml 残键都有——md 优先。
+        write(
+            &root.join("书甲.md"),
+            "> [!书档]\n> 书名：纸面名\n> 成绩：纸面成绩\n> 金手指：纸面金手指\n\n第1章",
+        );
+        write(&root.join("书甲.yaml"), "书名: yaml名\n成绩: yaml成绩\n金手指: yaml金手指\n");
+        // 乙：只有 yaml 残键（还没打开过的旧书）。
+        write(&root.join("书乙.md"), "第1章");
+        write(&root.join("书乙.yaml"), "成绩: 均订两万\n");
+        // 丙：两处皆无。
+        write(&root.join("书丙.md"), "第1章");
+
+        let books = scan_library(&root).unwrap();
+        let 甲 = books.iter().find(|b| b.primary_md.ends_with("书甲.md")).unwrap();
+        assert_eq!(甲.name, "纸面名");
+        assert_eq!(甲.meta.track_record.as_deref(), Some("纸面成绩"));
+        assert_eq!(甲.meta.golden_finger.as_deref(), Some("纸面金手指"));
+        let 乙 = books.iter().find(|b| b.primary_md.ends_with("书乙.md")).unwrap();
+        assert_eq!(乙.name, "书乙", "无书档无yaml书名→文件夹名兜底");
+        assert_eq!(乙.meta.track_record.as_deref(), Some("均订两万"));
+        let 丙 = books.iter().find(|b| b.primary_md.ends_with("书丙.md")).unwrap();
+        assert_eq!(丙.name, "书丙");
+        assert_eq!(丙.meta, BookMeta::default());
+    }
+
+    #[test]
+    fn 列表取数_迁移后与纸面一致_扫描不写盘() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let md = root.join("《旧书》/拆书.md");
+        write(&md, "第1章\n正文");
+        write(
+            &root.join("《旧书》/拆书.yaml"),
+            "书名: 旧书\n成绩: 均订三万\n桥段:\n- 起: 1\n  止: 2\n  类型: [掉马甲]\n",
+        );
+
+        // 扫描只读：迁移前后 yaml/md 都不动。
+        let before = (fs::read(&md).unwrap(), fs::read(&root.join("《旧书》/拆书.yaml")).unwrap());
+        let books = scan_library(&root).unwrap();
+        assert_eq!(books[0].name, "旧书", "yaml 残键过渡显示");
+        assert_eq!(
+            (fs::read(&md).unwrap(), fs::read(&root.join("《旧书》/拆书.yaml")).unwrap()),
+            before,
+            "书库扫描绝不写盘"
+        );
+
+        // 打开书迁移一次后，列表成绩列与纸面一致。
+        crate::book_file::migrate_book_header(&md).unwrap();
+        let books = scan_library(&root).unwrap();
+        assert_eq!(books[0].name, "旧书");
+        assert_eq!(books[0].meta.track_record.as_deref(), Some("均订三万"));
+        assert_eq!(books[0].tropes.len(), 1, "桥段标注无损");
     }
 }

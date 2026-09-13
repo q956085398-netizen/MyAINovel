@@ -97,6 +97,15 @@ fn read_book_md(path: String) -> Result<MdContent, String> {
     book_file::read_book_md(Path::new(&path))
 }
 
+/// 打开书时的一次性迁移（工单 #30，spec 拆书保存与模板 §五）：yaml 四键
+/// 非空值生成书档块插稿顶、yaml 四键删除（桥段/未知键/章前缀原样）。
+/// 返回 md 是否被改写（true 时前端重读正文）；yaml 解析失败报 Err——
+/// 前端只记警告不拦打开（读不懂的表拒绝改写）。
+#[tauri::command]
+fn migrate_book_header(md_path: String) -> Result<bool, String> {
+    book_file::migrate_book_header(Path::new(&md_path))
+}
+
 /// base＝载入时的指纹；盘上不符判冲突（force＝用户确认覆盖）。
 #[tauri::command]
 fn save_book_md(
@@ -713,6 +722,7 @@ pub fn run() {
             set_cover,
             grant_asset_scope,
             read_book_md,
+            migrate_book_header,
             save_book_md,
             read_book_meta,
             save_book_meta,

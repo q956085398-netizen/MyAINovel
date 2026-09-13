@@ -213,6 +213,20 @@ export default function SettingsDialog({
         </section>
 
         <section className="settings-section">
+          <h3>拆书 · 章前缀</h3>
+          <p className="hint">
+            「开下一章」与章标题识别的模板，{`{n}`} 为章号占位；留空用默认「第{"{n}"}章」。
+            某本书 yaml 里已自定义的章前缀继续优先。
+          </p>
+          <input
+            className="settings-input"
+            value={settings.chapterPrefix}
+            placeholder="第{n}章"
+            onChange={(e) => update({ chapterPrefix: e.target.value })}
+          />
+        </section>
+
+        <section className="settings-section">
           <h3>库位置</h3>
           <p className="hint" title={libraryPath ?? undefined}>
             {libraryPath ?? "还没有库——选一个文件夹开始，或新建一个空库。"}
