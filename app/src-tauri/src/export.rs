@@ -55,7 +55,8 @@ impl Default for ExportTemplate {
             chapter_heading: true,
             heading_template: None,
             blank_lines: 1,
-            indent: false,
+            // 工单 #33：默认勾选——复制到发布渠道后免逐段重缩进。
+            indent: true,
             min_words: DEFAULT_MIN_WORDS,
             max_words: 0,
         }
@@ -673,10 +674,18 @@ mod tests {
         dir
     }
 
+    /// 工单 #33 起默认模板「段首缩进」默认开；按「不缩进」口径断言的旧用例
+    /// 显式关掉，不随默认值漂。
+    fn no_indent() -> ExportTemplate {
+        let mut t = ExportTemplate::default();
+        t.indent = false;
+        t
+    }
+
     #[test]
     fn 清洗_去frontmatter与标记_保留正文() {
         let raw = "---\n状态: 完稿\n---\n\n# 第一节\n\n**粗**与*斜*，还有`码`。\n\n> 引用一句\n- 列表项\n1. 有序项\n\n[文字](https://x.com)与![截图](../附件/截图-1.png)";
-        let cleaned = clean_body(raw, &ExportTemplate::default());
+        let cleaned = clean_body(raw, &no_indent());
         assert!(!cleaned.unclosed_frontmatter);
         assert_eq!(cleaned.images, 1);
         assert_eq!(
@@ -687,13 +696,13 @@ mod tests {
 
     #[test]
     fn 清洗_落单标记保留_成对才去() {
-        let cleaned = clean_body("傻*\n他说 *重要\n成对的**粗**去掉", &ExportTemplate::default());
+        let cleaned = clean_body("傻*\n他说 *重要\n成对的**粗**去掉", &no_indent());
         assert_eq!(cleaned.body, "傻*\n他说 *重要\n成对的粗去掉");
     }
 
     #[test]
     fn 清洗_词边界单星号去标记() {
-        let cleaned = clean_body("*斜体* 与 a_b_c", &ExportTemplate::default());
+        let cleaned = clean_body("*斜体* 与 a_b_c", &no_indent());
         assert_eq!(cleaned.body, "斜体 与 a_b_c");
     }
 
@@ -711,7 +720,7 @@ mod tests {
 
     #[test]
     fn 清洗_分隔线与打码星号不被吃掉() {
-        let cleaned = clean_body("他说***，然后\n---\n甲", &ExportTemplate::default());
+        let cleaned = clean_body("他说***，然后\n---\n甲", &no_indent());
         assert_eq!(cleaned.body, "他说***，然后\n---\n甲");
     }
 
@@ -740,7 +749,7 @@ mod tests {
         write(&p.join("正文/随手记.md"), "不参与");
         write(&p.join("项目.yaml"), "书名: 大魏读书人\n章前缀: 第{n}章\n");
 
-        let report = export_book(&p, ChapterRange::default(), &ExportTemplate::default()).unwrap();
+        let report = export_book(&p, ChapterRange::default(), &no_indent()).unwrap();
         assert_eq!(report.chapter_count, 2);
         assert_eq!(report.chapters[0].ordinal, 1);
         assert_eq!(report.chapters[1].ordinal, 2);
@@ -829,7 +838,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
         write(&p.join("正文/0007 初入江湖.md"), "正文");
-        let mut template = ExportTemplate::default();
+        let mut template = no_indent();
         template.heading_template = Some("{标题}｜{章号}".to_string());
         let report = export_book(&p, ChapterRange::default(), &template).unwrap();
         let text = fs::read_to_string(&report.path).unwrap();
@@ -904,7 +913,7 @@ mod tests {
 
         let template: ExportTemplate = serde_json::from_str(
             r#"{"name":"默认","format":"txt","chapterHeading":true,"headingTemplate":null,
-                "blankLines":1,"indent":false,"minWords":2000,"maxWords":0}"#,
+                "blankLines":1,"indent":true,"minWords":2000,"maxWords":0}"#,
         )
         .unwrap();
         assert_eq!(template, ExportTemplate::default());

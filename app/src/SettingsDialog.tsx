@@ -3,9 +3,11 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   AUTOSAVE_OPTIONS,
   BUILTIN_BACKGROUNDS,
+  FONT_OPTIONS,
+  INDENT_OPTIONS,
+  PROSE_ALIGNS,
   useSettings,
   type BuiltinBackground,
-  type BodyFont,
   type ThemeMode,
 } from "./settings";
 import { errMsg } from "./util";
@@ -14,13 +16,6 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: "light", label: "浅色" },
   { value: "dark", label: "深色" },
   { value: "system", label: "跟随系统" },
-];
-
-const FONT_OPTIONS: { value: BodyFont; label: string }[] = [
-  { value: "system", label: "跟随系统" },
-  { value: "宋", label: "宋" },
-  { value: "黑", label: "黑" },
-  { value: "楷", label: "楷" },
 ];
 
 /** 设置面板（工单 #24 骨架，spec 个性化设置.md §五）：侧栏底部齿轮打开。
@@ -129,8 +124,8 @@ export default function SettingsDialog({
         <section className="settings-section">
           <h3>排版</h3>
           <p className="hint">
-            拆书与书写两个编辑器共用；与书写板块的打字机滚动/沉浸模式互不影响。
-            未调整时保持各编辑器现状。
+            拆书与书写两个编辑器共用，编辑器顶部工具栏同源同步；对齐与首行缩进只是
+            显示效果，不改动 md 内容。未调整字号/行距时保持各编辑器现状。
           </p>
           <div className="settings-field">
             <span className="settings-label">字体</span>
@@ -190,6 +185,36 @@ export default function SettingsDialog({
             >
               恢复默认
             </button>
+          </div>
+          <div className="settings-field">
+            <span className="settings-label">对齐</span>
+            <div className="display-toggle" role="radiogroup" aria-label="对齐方式">
+              {PROSE_ALIGNS.map((a) => (
+                <button
+                  key={a.value}
+                  type="button"
+                  className={settings.align === a.value ? "active" : ""}
+                  onClick={() => update({ align: a.value })}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="settings-field">
+            <span className="settings-label">首行缩进</span>
+            <div className="display-toggle" role="radiogroup" aria-label="首行缩进">
+              {INDENT_OPTIONS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className={settings.firstLineIndent === n ? "active" : ""}
+                  onClick={() => update({ firstLineIndent: n })}
+                >
+                  {n === 0 ? "关" : `${n} 字符`}
+                </button>
+              ))}
+            </div>
           </div>
         </section>
 

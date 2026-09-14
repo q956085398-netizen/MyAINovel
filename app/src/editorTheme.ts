@@ -1,9 +1,21 @@
 import { useEffect, type RefObject } from "react";
-import { Compartment, type Extension } from "@codemirror/state";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { EditorView } from "@codemirror/view";
+import { Compartment, RangeSetBuilder, type Extension } from "@codemirror/state";
+import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
+import {
+  Decoration,
+  EditorView,
+  ViewPlugin,
+  type DecorationSet,
+  type ViewUpdate,
+} from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import { getSettings, resolvedTheme, subscribeSettings, type BodyFont } from "./settings";
+import {
+  getSettings,
+  resolvedTheme,
+  subscribeSettings,
+  type BodyFont,
+  type ProseAlign,
+} from "./settings";
 
 /** 排版三件套（工单 #26，spec 个性化设置.md §四）：两个编辑器共用，
  *  未设置的项不产生规则＝各编辑器现状（拆书 15px／书写 17px、行距 1.9）。 */
@@ -17,16 +29,72 @@ function typographyRules(
   font: BodyFont,
   fontSize: number | null,
   lineHeight: number | null,
+  align: ProseAlign,
+  firstLineIndent: number,
 ): Record<string, Record<string, string>> {
   const spec: Record<string, Record<string, string>> = {};
   if (font !== "system") spec["&"] = { fontFamily: FONT_STACKS[font] };
   if (fontSize != null) {
     spec["&"] = { ...spec["&"], fontSize: `${fontSize}px` };
   }
+  // 对齐（v2 工单 #33）：挂在 .cm-content 上随行继承；标题/列表等一并生效（Word 同款语义）。
+  spec[".cm-content"] = { ...spec[".cm-content"], textAlign: align };
   if (lineHeight != null) {
-    spec[".cm-content"] = { lineHeight: String(lineHeight) };
+    spec[".cm-content"] = { ...spec[".cm-content"], lineHeight: String(lineHeight) };
+  }
+  // 首行缩进（v2 工单 #33）：量挂 CSS 变量，行装饰只加类名（见 proseIndentExtension）。
+  if (firstLineIndent > 0) {
+    spec["&"] = { ...spec["&"], "--editor-prose-indent": `${firstLineIndent}em` };
+  } else {
+    spec["&"] = { ...spec["&"], "--editor-prose-indent": "0" };
   }
   return spec;
+}
+
+/** 首行缩进的散文行装饰（工单 #33）：只给 markdown 语法树的顶层「段落」行
+ *  挂类名——标题/列表/引用（callout 卡片行也是引用）/代码块/表格不缩进；
+ *  缩进量来自主题注入的 --editor-prose-indent（App.css 消费）。 */
+const proseLineDeco = Decoration.line({ class: "cm-prose" });
+
+function proseLines(view: EditorView): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  const tree = syntaxTree(view.state);
+  for (const { from, to } of view.visibleRanges) {
+    for (let pos = from; pos <= to; ) {
+      const line = view.state.doc.lineAt(pos);
+      if (line.text.trim()) {
+        // 从行首向上走到顶层块节点：段落才缩进（列表项内的段落也跳过）。
+        let node = tree.resolveInner(line.from, 1);
+        while (node.parent && node.parent.name !== "Document") node = node.parent;
+        if (node.name === "Paragraph") {
+          builder.add(line.from, line.from, proseLineDeco);
+        }
+      }
+      pos = line.to + 1;
+    }
+  }
+  return builder.finish();
+}
+
+function proseIndentExtension(): Extension {
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = proseLines(view);
+      }
+      update(update: ViewUpdate) {
+        if (
+          update.docChanged ||
+          update.viewportChanged ||
+          syntaxTree(update.startState) !== syntaxTree(update.state)
+        ) {
+          this.decorations = proseLines(update.view);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
 }
 
 interface EditorThemeOptions {
@@ -85,14 +153,19 @@ export interface EditorAppearanceOptions {
 }
 
 export function editorAppearance({ typography = true }: EditorAppearanceOptions = {}): Extension[] {
-  const { background, font, fontSize, lineHeight } = getSettings();
+  const { background, font, fontSize, lineHeight, align, firstLineIndent } = getSettings();
   const dark =
     resolvedTheme() === "dark" ||
     (background.kind === "builtin" && background.id === "暮山");
-  const rules = typography ? typographyRules(font, fontSize, lineHeight) : {};
+  if (!typography) {
+    return dark ? [darkEditorTheme, syntaxHighlighting(darkHighlight)] : [];
+  }
+  // 排版五项（§四）：对齐/缩进默认两端＋2字符，规则恒非空（v2 起总有主题）。
+  const rules = typographyRules(font, fontSize, lineHeight, align, firstLineIndent);
   return [
     ...(dark ? [darkEditorTheme, syntaxHighlighting(darkHighlight)] : []),
-    ...(Object.keys(rules).length > 0 ? [EditorView.theme(rules)] : []),
+    EditorView.theme(rules),
+    proseIndentExtension(),
   ];
 }
 

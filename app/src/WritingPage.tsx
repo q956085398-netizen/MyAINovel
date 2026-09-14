@@ -54,6 +54,7 @@ import { ExpectationFormDialog, ExpectationFulfillDialog } from "./ExpectationDi
 import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
 import { dirName, editorRender } from "./editorRender";
 import { useImageViewer } from "./ImageViewer";
+import TypographyToolbar from "./TypographyToolbar";
 
 /** 自动保存防抖：停笔满设置间隔（默认 3 秒，工单 #28 起两编辑器共用）落盘。 */
 const PREFS_KEY = "gongbi.writing.prefs";
@@ -1243,6 +1244,8 @@ export default function WritingPage({
           </button>
         </div>
       )}
+
+      {!immersive && <TypographyToolbar />}
 
       <div className="writing-body">
         {listOpen && (

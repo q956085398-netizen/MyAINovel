@@ -35,6 +35,34 @@ export type EditorBackground =
 /** 正文字体（§四）：四选一；「跟随系统」＝不动字体栈。 */
 export type BodyFont = "system" | "宋" | "黑" | "楷";
 
+export const FONT_OPTIONS: { value: BodyFont; label: string }[] = [
+  { value: "system", label: "跟随系统" },
+  { value: "宋", label: "宋" },
+  { value: "黑", label: "黑" },
+  { value: "楷", label: "楷" },
+];
+
+/** 对齐（§四 v2，工单 #33）：视图层显示效果，不改动 md 内容；
+ *  默认两端对齐（中文小说排版习惯）。 */
+export type ProseAlign = "left" | "center" | "right" | "justify";
+
+export const PROSE_ALIGNS: { value: ProseAlign; label: string }[] = [
+  { value: "justify", label: "两端" },
+  { value: "left", label: "左对齐" },
+  { value: "center", label: "居中" },
+  { value: "right", label: "右对齐" },
+];
+
+/** 首行缩进档位（§四 v2，工单 #33）：字符数，0＝关；默认 2（同只影响显示）。 */
+export const INDENT_OPTIONS = [0, 1, 2, 3, 4] as const;
+
+/** 字号/行距的滑选范围（工具栏下拉与设置面板滑杆共用一套边界）。 */
+export const FONT_SIZE_MIN = 12;
+export const FONT_SIZE_MAX = 28;
+export const LINE_HEIGHT_MIN = 1.2;
+export const LINE_HEIGHT_MAX = 2.6;
+export const LINE_HEIGHT_STEP = 0.1;
+
 /** 自动保存间隔档位（工单 #28，spec 拆书保存与模板 §二）：秒。 */
 export const AUTOSAVE_OPTIONS = [1, 2, 3, 5, 10] as const;
 export const DEFAULT_AUTOSAVE_SEC = 3;
@@ -48,10 +76,13 @@ export interface AppSettings {
   theme: ThemeMode;
   /** 编辑器背景（§三）：只铺拆书/书写两个编辑器，沉浸式。 */
   background: EditorBackground;
-  /** 排版三件套（§四）：两个编辑器共用；null＝未设置＝各编辑器现状。 */
+  /** 排版（§四；v2 五项）：两个编辑器共用；字号/行距 null＝未设置＝各编辑器现状。
+   *  对齐与首行缩进（v2）＝视图层显示效果，默认两端对齐＋缩进 2 字符。 */
   font: BodyFont;
   fontSize: number | null;
   lineHeight: number | null;
+  align: ProseAlign;
+  firstLineIndent: number;
   /** 自动保存间隔（秒）：拆书/书写两编辑器共用，停笔防抖落盘。 */
   autosaveSec: number;
   /** 拆书·章前缀（全局缺省）：开下一章/章标题识别用；空值回退默认。 */
@@ -66,6 +97,8 @@ const DEFAULTS: AppSettings = {
   font: "system",
   fontSize: null,
   lineHeight: null,
+  align: "justify",
+  firstLineIndent: 2,
   autosaveSec: DEFAULT_AUTOSAVE_SEC,
   chapterPrefix: DEFAULT_CHAPTER_PREFIX,
 };

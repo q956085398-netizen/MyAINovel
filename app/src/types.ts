@@ -297,7 +297,8 @@ export function defaultExportTemplate(): ExportTemplate {
     chapterHeading: true,
     headingTemplate: null,
     blankLines: 1,
-    indent: false,
+    // 工单 #33：默认勾选——复制到发布渠道后免逐段重缩进。
+    indent: true,
     minWords: 2000,
     maxWords: 0,
   };

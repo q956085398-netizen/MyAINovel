@@ -715,6 +715,27 @@ body {
   font-size: 12px;
 }
 
+/* --- 排版工具栏（工单 #33）：编辑器顶部的即时排版控件 --- */
+
+.typo-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.typo-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+
 .toolbar-hint {
   color: var(--ink-soft);
   font-size: 12px;
@@ -1878,6 +1899,12 @@ body {
 
 .cm-dim-line {
   opacity: 0.45;
+}
+
+/* 首行缩进（工单 #33）：只作用于散文段行装饰（editorTheme 的 proseIndentExtension），
+ * 量为排版主题注入的 --editor-prose-indent（0＝关）；标题/列表/引用/代码不挂类名。 */
+.cm-line.cm-prose {
+  text-indent: var(--editor-prose-indent, 0);
 }
 
 .writing-sidebar {

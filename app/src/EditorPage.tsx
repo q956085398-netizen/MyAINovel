@@ -25,6 +25,7 @@ import { dirName, editorRender, parseBookHeaderValues, applyBookHeaderValues } f
 import type { BookHeaderValues } from "./editorRender";
 import { useImageViewer } from "./ImageViewer";
 import BookHeaderDialog from "./BookHeaderDialog";
+import TypographyToolbar from "./TypographyToolbar";
 import TropeDialog from "./TropeDialog";
 
 /** 六插入块（设计共识 §四＋工单 #30 书档入家族）：Obsidian 风格 callout，
@@ -587,6 +588,7 @@ export default function EditorPage({
           停笔自动保存 · Ctrl+Enter 开下一章 · Ctrl+S 立即保存 · 粘贴图片自动存入附件
         </span>
       </div>
+      <TypographyToolbar />
       <div className="editor-container" ref={containerRef} />
       {imageViewer.node}
       {headerForm && (
