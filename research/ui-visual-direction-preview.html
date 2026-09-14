@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>工笔 · UI 视觉方向预览（工单 #39）</title>
+<!--
+  工单 #39 的「可挑选视觉方向」预览。纯静态、零依赖、可离线双击打开。
+  三个方向共用同一份结构与同一套色相（既定设计共识锁定：暖纸 + 朱砂 + 深色侧栏），
+  只改「结构参数」：间距刻度 / 圆角 / 阴影层次 / 动效 / 图标 / 字号层级。
+  真实应用不引用本文件；本文件只是给用户挑方向用的示意（moodboard）。
+  图标路径取自 Lucide（ISC 许可，此处内联示意用）。
+-->
+<style>
+  /* ============ 公共底座：色相三方向一致（锁定），只暴露结构参数 ============ */
+  :root {
+    --bg: #f5f2ec;
+    --panel: #fffdf8;
+    --paper: #fff;
+    --ink: #2b2a26;
+    --ink-soft: #7c766a;
+    --accent: #a8432f;
+    --accent-soft: #f3e3de;
+    --line: #e3ded4;
+    --sidebar-bg: #2e2c28;
+    --sidebar-ink: #d8d3c8;
+    --ok: #2f7a4f;
+    --goal: #4b6b8a;
+    --page-bg: #f5f2ec;
+    --ui-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  [data-theme="dark"] {
+    --bg: #1e1c18;
+    --panel: #26241e;
+    --paper: #34312a;
+    --ink: #e2dccf;
+    --ink-soft: #9a9282;
+    --accent: #cf7a62;
+    --accent-soft: #452f27;
+    --line: #3b382e;
+    --sidebar-bg: #171511;
+    --sidebar-ink: #c6c0b1;
+    --ok: #8cbb98;
+    --goal: #7ea3c4;
+    --page-bg: #1e1c18;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 28px 96px;
+    background: #eae6de;
+    color: var(--ink);
+    font-family: var(--ui-font);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  .lead { color: #6b6558; margin: 0 0 26px; max-width: 900px; font-size: 13px; }
+
+  .dir { margin: 0 0 44px; }
+  .dir-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
+  .dir-head h2 { font-size: 19px; margin: 0; }
+  .dir-head .tag {
+    font-size: 12px; color: #6b6558; border: 1px solid #cdc7ba;
+    border-radius: 999px; padding: 2px 10px; background: #fff;
+  }
+  .dir-desc { color: #55503f; font-size: 13px; margin: 0 0 14px; max-width: 980px; }
+  .pair { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+  .col { flex: 0 0 620px; max-width: 100%; }
+  .col-cap { font-size: 12px; color: #6b6558; margin: 0 0 6px; letter-spacing: .04em; }
+
+  /* ============ 各方向的结构参数（这就是要挑的东西） ============ */
+  /* 甲 · 纸墨精修：低圆角、线为主、静 */
+  .d-a {
+    --r-ctl: 4px; --r-card: 6px; --r-dialog: 8px; --r-chip: 999px;
+    --sh-card: none; --sh-hover: none;
+    --sh-dialog: 0 12px 32px rgba(43, 42, 38, .18);
+    --dur: 120ms; --ease: cubic-bezier(.2, 0, 0, 1);
+    --pad-page: 30px 34px; --gap-ui: 8px; --pad-ctl: 6px 14px; --pad-card: 12px 14px;
+    --fs-ui: 13px; --fs-sub: 12px; --fs-h1: 20px; --fs-card: 13px;
+    --ico: 16px; --stroke: 1.5;
+    --row-pad: 8px 12px;
+  }
+  /* 乙 · 现代通透：中圆角、柔和阴影、有呼吸的动效 */
+  .d-b {
+    --r-ctl: 8px; --r-card: 10px; --r-dialog: 14px; --r-chip: 999px;
+    --sh-card: 0 1px 2px rgba(43, 42, 38, .06);
+    --sh-hover: 0 4px 12px rgba(43, 42, 38, .10);
+    --sh-dialog: 0 16px 48px rgba(43, 42, 38, .22);
+    --dur: 180ms; --ease: cubic-bezier(.2, .8, .2, 1);
+    --pad-page: 32px 40px; --gap-ui: 10px; --pad-ctl: 7px 16px; --pad-card: 14px 16px;
+    --fs-ui: 13px; --fs-sub: 12px; --fs-h1: 22px; --fs-card: 13px;
+    --ico: 18px; --stroke: 1.75;
+    --row-pad: 9px 14px;
+  }
+  /* 丙 · 紧凑专业：小圆角、零阴影、快动效、高密度 */
+  .d-c {
+    --r-ctl: 3px; --r-card: 4px; --r-dialog: 6px; --r-chip: 3px;
+    --sh-card: none; --sh-hover: none;
+    --sh-dialog: 0 8px 24px rgba(0, 0, 0, .28);
+    --dur: 90ms; --ease: ease-out;
+    --pad-page: 20px 26px; --gap-ui: 6px; --pad-ctl: 4px 10px; --pad-card: 8px 10px;
+    --fs-ui: 12px; --fs-sub: 11.5px; --fs-h1: 17px; --fs-card: 12px;
+    --ico: 14px; --stroke: 1.5;
+    --row-pad: 5px 9px;
+  }
+  .d-c { --line: #d8d2c6; }
+  [data-theme="dark"] .d-c { --line: #46423a; }
+
+  /* ============ 迷你应用mock（三方向共用结构，吃上面的变量） ============ */
+  .mock {
+    display: flex; min-height: 440px; border-radius: var(--r-card);
+    overflow: hidden; border: 1px solid #d5cfc2;
+    background: var(--page-bg); color: var(--ink);
+    font-size: var(--fs-ui);
+  }
+  [data-theme="dark"] .mock { border-color: #46423a; }
+  .mock .sb {
+    width: 150px; flex: 0 0 150px; background: var(--sidebar-bg); color: var(--sidebar-ink);
+    padding: 16px 10px; display: flex; flex-direction: column;
+  }
+  .mock .brand { font-size: 20px; letter-spacing: .28em; color: #f0ece2; padding: 0 8px 16px; font-weight: 600; }
+  .mock .nav {
+    display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--r-ctl);
+    color: inherit; background: transparent; border: 0; font: inherit; text-align: left; cursor: pointer;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+    width: 100%;
+  }
+  .mock .nav svg { width: var(--ico); height: var(--ico); stroke-width: var(--stroke); flex: 0 0 auto; }
+  .mock .nav:hover { background: rgba(255, 255, 255, .07); }
+  .mock .nav.on { background: var(--accent); color: #fff9f3; }
+  .mock .sb .bottom { margin-top: auto; }
+  .mock .mn { flex: 1; min-width: 0; padding: var(--pad-page); display: flex; flex-direction: column; gap: var(--gap-ui); }
+  .mock .ed { margin-top: auto; }
+  .mock .ph { display: flex; align-items: center; justify-content: space-between; }
+  .mock .ph h1 { margin: 0; font-size: var(--fs-h1); font-weight: 600; }
+  .mock .acts { display: flex; gap: var(--gap-ui); }
+  .mock .btn {
+    font: inherit; padding: var(--pad-ctl); border-radius: var(--r-ctl); cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    transition: background var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
+                border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
+  }
+  .mock .btn:hover { box-shadow: var(--sh-hover); border-color: var(--ink-soft); }
+  .mock .btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mock .btn.pri:hover { background: #8f3826; box-shadow: var(--sh-hover); }
+  .mock .stats { color: var(--ink-soft); font-size: var(--fs-sub); }
+  .mock table { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; }
+  .mock th, .mock td { text-align: left; padding: var(--row-pad); border-bottom: 1px solid var(--line); font-size: var(--fs-ui); }
+  .mock thead th { color: var(--ink-soft); font-weight: 500; background: var(--panel); }
+  .mock tbody tr:last-child td { border-bottom: 0; }
+  .mock tbody tr { transition: background var(--dur) var(--ease); cursor: pointer; }
+  .mock tbody tr:hover { background: #f2ece1; }
+  .mock td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .mock .cards { display: flex; gap: var(--gap-ui); }
+  .mock .card {
+    flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--r-card); padding: var(--pad-card); box-shadow: var(--sh-card);
+    transition: box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease);
+  }
+  .mock .card:hover { box-shadow: var(--sh-hover); }
+  .mock .chip {
+    display: inline-block; font-size: var(--fs-sub); padding: 1px 8px; border-radius: var(--r-chip);
+    background: var(--accent-soft); color: var(--accent); margin-bottom: 6px;
+  }
+  .mock .chip.g { background: #e8eef4; color: var(--goal); }
+  [data-theme="dark"] .mock .chip.g { background: #2b3238; }
+  .mock .card h3 { margin: 0 0 4px; font-size: var(--fs-card); font-weight: 600; }
+  .mock .card p { margin: 0; color: var(--ink-soft); font-size: var(--fs-sub); }
+  .mock .dlg {
+    border-radius: var(--r-dialog); background: var(--panel); border: 1px solid var(--line);
+    box-shadow: var(--sh-dialog); padding: var(--pad-card);
+  }
+  .mock .dlg h3 { margin: 0 0 8px; font-size: var(--fs-card); }
+  .mock .dlg input {
+    width: 100%; font: inherit; padding: var(--pad-ctl); border: 1px solid var(--line);
+    border-radius: var(--r-ctl); background: var(--paper); color: var(--ink);
+  }
+  .mock .dlg .row { display: flex; gap: var(--gap-ui); justify-content: flex-end; margin-top: 10px; }
+  /* 编辑器条：宣纸纹理示意 + 正文 */
+  .mock .ed { border: 1px solid var(--line); border-radius: var(--r-card); overflow: hidden; display: flex; flex-direction: column; }
+  .mock .ed .etb {
+    display: flex; gap: 10px; align-items: center; padding: 4px 10px; background: var(--panel);
+    border-bottom: 1px solid var(--line); color: var(--ink-soft); font-size: var(--fs-sub);
+  }
+  .mock .ed .pg {
+    padding: 14px 18px 20px; flex: 1; font-size: 15px; line-height: 1.9;
+    background-color: #fbf7ee;
+    background-image:
+      repeating-linear-gradient(90deg, rgba(150, 130, 90, .05) 0 1px, transparent 1px 7px),
+      repeating-linear-gradient(0deg, rgba(150, 130, 90, .04) 0 1px, transparent 1px 9px);
+    color: #33302a;
+  }
+  [data-theme="dark"] .mock .ed .pg { background-color: #2b2822; color: #dcd6c8;
+    background-image:
+      repeating-linear-gradient(90deg, rgba(255, 240, 210, .035) 0 1px, transparent 1px 7px),
+      repeating-linear-gradient(0deg, rgba(255, 240, 210, .03) 0 1px, transparent 1px 9px); }
+  .mock .ed .pg p { margin: 0; text-indent: 2em; }
+
+  /* ============ 参数表 ============ */
+  table.spec { width: 100%; max-width: 620px; border-collapse: collapse; margin-top: 12px; font-size: 12.5px; background: #fff; border: 1px solid #ded8cb; }
+  table.spec th, table.spec td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #eae5da; vertical-align: top; }
+  table.spec th { color: #6b6558; font-weight: 500; width: 96px; background: #faf7f0; }
+  table.spec tr:last-child td, table.spec tr:last-child th { border-bottom: 0; }
+  .swatches { display: flex; gap: 6px; margin-top: 8px; }
+  .sw { width: 44px; height: 26px; border-radius: 5px; border: 1px solid rgba(0,0,0,.12); font-size: 10px; color: #fff; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 2px; }
+</style>
+</head>
+<body>
+<h1>工笔 · UI 视觉方向预览</h1>
+<p class="lead">
+  工单 <b>#39</b> 的可挑选方向示意。三个方向<b>共用同一套色相</b>（既定设计共识已锁定：暖纸底 + 朱砂强调 + 深色侧栏），
+  差别只在<b>结构参数</b>——间距刻度 / 圆角 / 阴影层次 / 动效时长与缓动 / 图标描边与尺寸 / 字号层级。
+  下面的小应用是<b>示意稿</b>，不是最终界面；请把鼠标移到导航、按钮、表格行、卡片上感受动效差异。
+</p>
+
+<!-- ================================================================ 甲 -->
+<section class="dir">
+  <div class="dir-head"><h2>甲 · 纸墨精修</h2><span class="tag">低圆角 · 线为主 · 静</span></div>
+  <p class="dir-desc">
+    延续现有纸墨气质，把散落的硬编码收成刻度；层级靠<b>线 + 表面色阶</b>表达，不用阴影（纸不会浮起来）。
+    动效克制、几乎只在状态变化时出现。最稳、最像「文房」，但「现代化」的观感提升最小。
+  </p>
+  <div class="pair">
+    <div class="col">
+      <p class="col-cap">浅色</p>
+      <div class="mock d-a">
+        <aside class="sb">
+          <div class="brand">工笔</div>
+          <button class="nav on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>拆书</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8-5.8 1.9 5.8 1.9L12 18.4l1.9-5.8 5.8-1.9-5.8-1.9z"/></svg>灵感库</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/></svg>构思</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>书写</button>
+          <div class="bottom"><button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 7"/></svg>设置</button></div>
+        </aside>
+        <main class="mn">
+          <div class="ph"><h1>书库</h1><div class="acts"><button class="btn">新建库</button><button class="btn pri">新建书</button></div></div>
+          <div class="stats">共 12 本 · 最近打开 3 天前</div>
+          <table>
+            <thead><tr><th>书名</th><th>类型</th><th class="num">字数</th></tr></thead>
+            <tbody>
+              <tr><td>剑与灯</td><td>玄幻</td><td class="num">128,400</td></tr>
+              <tr><td>山雨欲来</td><td>都市</td><td class="num">42,100</td></tr>
+            </tbody>
+          </table>
+          <div class="cards">
+            <div class="card"><span class="chip">期待</span><h3>身世之谜</h3><p>短 · 第 3 章埋 · 欠 5 章</p></div>
+            <div class="card dlg"><h3>新建书</h3><input value="剑与灯" /><div class="row"><button class="btn">取消</button><button class="btn pri">创建</button></div></div>
+          </div>
+          <div class="ed">
+            <div class="etb">宋 · 17px · 行距 1.9 · 两端</div>
+            <div class="pg"><p>他站在渡口，看着雾里的灯。灯还没亮，江风先来了。</p></div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div class="col">
+      <p class="col-cap">深色（同一变量组重定义，背景压暗、纸面提亮一档）</p>
+      <div class="mock d-a" data-theme="dark">
+        <aside class="sb">
+          <div class="brand">工笔</div>
+          <button class="nav on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>拆书</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8-5.8 1.9 5.8 1.9L12 18.4l1.9-5.8 5.8-1.9-5.8-1.9z"/></svg>灵感库</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/></svg>构思</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>书写</button>
+        </aside>
+        <main class="mn">
+          <div class="ph"><h1>书库</h1><div class="acts"><button class="btn pri">新建书</button></div></div>
+          <table>
+            <thead><tr><th>书名</th><th>类型</th><th class="num">字数</th></tr></thead>
+            <tbody>
+              <tr><td>剑与灯</td><td>玄幻</td><td class="num">128,400</td></tr>
+              <tr><td>山雨欲来</td><td>都市</td><td class="num">42,100</td></tr>
+            </tbody>
+          </table>
+          <div class="cards">
+            <div class="card"><span class="chip">期待</span><h3>身世之谜</h3><p>短 · 第 3 章埋 · 欠 5 章</p></div>
+            <div class="card"><span class="chip g">目标</span><h3>拿下擂台</h3><p>中 · 第 7 章埋 · 欠 12 章</p></div>
+          </div>
+          <div class="ed">
+            <div class="etb">暮山 · 17px · 行距 1.9</div>
+            <div class="pg"><p>他站在渡口，看着雾里的灯。灯还没亮，江风先来了。</p></div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+  <table class="spec">
+    <tr><th>间距</th><td>4px 基准刻度：2 / 4 / 8 / 12 / 16 / 24 / 32 / 48；页面 30·34，控件 6·14，卡片 12·14</td></tr>
+    <tr><th>圆角</th><td>控件 4 · 卡片/表格 6 · 弹窗 8 · 徽标胶囊 999</td></tr>
+    <tr><th>阴影</th><td>只弹窗一档 <code>0 12px 32px rgba(43,42,38,.18)</code>；卡片零阴影，靠 1px 线 + surface 色阶</td></tr>
+    <tr><th>动效</th><td>120ms <code>cubic-bezier(.2,0,0,1)</code>；只做底色/描边/透明度，禁位移与缩放</td></tr>
+    <tr><th>图标</th><td>Lucide 线性，16px / 1.5 描边（正文内 14px），单色随文本</td></tr>
+    <tr><th>色彩层级</th><td>4 层表面 bg→surface→panel→paper + 1 描边层；强调色只出现在可点动作与当前项</td></tr>
+    <tr><th>字号</th><td>UI 13 / 次要 12 / 页题 20 / 编辑器正文 15·17（不动）</td></tr>
+    <tr><th>背景适配</th><td>六套纹理原样保留（编辑器本就是"纸"，方向甲不与其抢戏）；深色按既有规矩压暗 + 浅字</td></tr>
+  </table>
+</section>
+
+<!-- ================================================================ 乙 -->
+<section class="dir">
+  <div class="dir-head"><h2>乙 · 现代通透</h2><span class="tag">中圆角 · 柔和阴影 · 有呼吸的动效</span></div>
+  <p class="dir-desc">
+    向 Typora / Notion / Linear 的现代感靠：面板轻微浮起、圆角柔和、动效有呼吸感，间距整体放宽一档。
+    最贴近「优化、美化、现代化」的原始诉求，但纸墨的「静」会淡一点。
+  </p>
+  <div class="pair">
+    <div class="col">
+      <p class="col-cap">浅色</p>
+      <div class="mock d-b">
+        <aside class="sb">
+          <div class="brand">工笔</div>
+          <button class="nav on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>拆书</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8-5.8 1.9 5.8 1.9L12 18.4l1.9-5.8 5.8-1.9-5.8-1.9z"/></svg>灵感库</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/></svg>构思</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>书写</button>
+          <div class="bottom"><button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 7"/></svg>设置</button></div>
+        </aside>
+        <main class="mn">
+          <div class="ph"><h1>书库</h1><div class="acts"><button class="btn">新建库</button><button class="btn pri">新建书</button></div></div>
+          <div class="stats">共 12 本 · 最近打开 3 天前</div>
+          <table>
+            <thead><tr><th>书名</th><th>类型</th><th class="num">字数</th></tr></thead>
+            <tbody>
+              <tr><td>剑与灯</td><td>玄幻</td><td class="num">128,400</td></tr>
+              <tr><td>山雨欲来</td><td>都市</td><td class="num">42,100</td></tr>
+            </tbody>
+          </table>
+          <div class="cards">
+            <div class="card"><span class="chip">期待</span><h3>身世之谜</h3><p>短 · 第 3 章埋 · 欠 5 章</p></div>
+            <div class="card dlg"><h3>新建书</h3><input value="剑与灯" /><div class="row"><button class="btn">取消</button><button class="btn pri">创建</button></div></div>
+          </div>
+          <div class="ed">
+            <div class="etb">宋 · 17px · 行距 1.9 · 两端</div>
+            <div class="pg"><p>他站在渡口，看着雾里的灯。灯还没亮，江风先来了。</p></div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div class="col">
+      <p class="col-cap">深色（阴影退场，改用「表面提亮」表达层级）</p>
+      <div class="mock d-b" data-theme="dark">
+        <aside class="sb">
+          <div class="brand">工笔</div>
+          <button class="nav on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>拆书</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8-5.8 1.9 5.8 1.9L12 18.4l1.9-5.8 5.8-1.9-5.8-1.9z"/></svg>灵感库</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/></svg>构思</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>书写</button>
+        </aside>
+        <main class="mn">
+          <div class="ph"><h1>书库</h1><div class="acts"><button class="btn pri">新建书</button></div></div>
+          <table>
+            <thead><tr><th>书名</th><th>类型</th><th class="num">字数</th></tr></thead>
+            <tbody>
+              <tr><td>剑与灯</td><td>玄幻</td><td class="num">128,400</td></tr>
+              <tr><td>山雨欲来</td><td>都市</td><td class="num">42,100</td></tr>
+            </tbody>
+          </table>
+          <div class="cards">
+            <div class="card"><span class="chip">期待</span><h3>身世之谜</h3><p>短 · 第 3 章埋 · 欠 5 章</p></div>
+            <div class="card"><span class="chip g">目标</span><h3>拿下擂台</h3><p>中 · 第 7 章埋 · 欠 12 章</p></div>
+          </div>
+          <div class="ed">
+            <div class="etb">暮山 · 17px · 行距 1.9</div>
+            <div class="pg"><p>他站在渡口，看着雾里的灯。灯还没亮，江风先来了。</p></div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+  <table class="spec">
+    <tr><th>间距</th><td>4px 刻度放宽一档：8 / 12 / 16 / 24 / 32 / 40；页面 32·40，控件 7·16，卡片 14·16</td></tr>
+    <tr><th>圆角</th><td>控件 8 · 卡片 10 · 弹窗 14 · 徽标胶囊 999；表格外框随卡片</td></tr>
+    <tr><th>阴影</th><td>三档：静置 <code>0 1px 2px .06</code> / hover <code>0 4px 12px .10</code> / 浮层 <code>0 16px 48px .22</code>；深色下阴影退场，改表面提亮</td></tr>
+    <tr><th>动效</th><td>180ms <code>cubic-bezier(.2,.8,.2,1)</code>；hover 微抬（阴影加深）＋弹窗 scale .98→1＋切换淡入</td></tr>
+    <tr><th>图标</th><td>Lucide 线性，18px / 1.75 描边；侧栏导航图标与文字同列，可配淡色底 chip</td></tr>
+    <tr><th>色彩层级</th><td>3 层表面 + 阴影表达高度；hover / active / 选中 三档状态色齐全</td></tr>
+    <tr><th>字号</th><td>UI 13 / 次要 12 / 页题 22 / 编辑器正文 15·17（不动）</td></tr>
+    <tr><th>背景适配</th><td>六套纹理照旧；编辑器纸面加一层极淡内描边（1px 线，不用阴影）与外围浮起区分开</td></tr>
+  </table>
+</section>
+
+<!-- ================================================================ 丙 -->
+<section class="dir">
+  <div class="dir-head"><h2>丙 · 紧凑专业</h2><span class="tag">小圆角 · 零阴影 · 快动效 · 高密度</span></div>
+  <p class="dir-desc">
+    向 Obsidian / 专业工具靠：信息密度优先，线更清晰、动效近乎瞬时，适合看板、关系画布、表格这类密集界面。
+    一屏能看的更多，但字更小、节奏更硬，与「沉浸写作」的柔软感相反。
+  </p>
+  <div class="pair">
+    <div class="col">
+      <p class="col-cap">浅色</p>
+      <div class="mock d-c">
+        <aside class="sb">
+          <div class="brand">工笔</div>
+          <button class="nav on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>拆书</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8-5.8 1.9 5.8 1.9L12 18.4l1.9-5.8 5.8-1.9-5.8-1.9z"/></svg>灵感库</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/></svg>构思</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>书写</button>
+          <div class="bottom"><button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 7"/></svg>设置</button></div>
+        </aside>
+        <main class="mn">
+          <div class="ph"><h1>书库</h1><div class="acts"><button class="btn">新建库</button><button class="btn pri">新建书</button></div></div>
+          <div class="stats">共 12 本 · 最近打开 3 天前</div>
+          <table>
+            <thead><tr><th>书名</th><th>类型</th><th class="num">字数</th></tr></thead>
+            <tbody>
+              <tr><td>剑与灯</td><td>玄幻</td><td class="num">128,400</td></tr>
+              <tr><td>山雨欲来</td><td>都市</td><td class="num">42,100</td></tr>
+              <tr><td>雾中灯塔</td><td>悬疑</td><td class="num">9,860</td></tr>
+              <tr><td>旧信</td><td>言情</td><td class="num">3,200</td></tr>
+            </tbody>
+          </table>
+          <div class="cards">
+            <div class="card"><span class="chip">期待</span><h3>身世之谜</h3><p>短 · 第 3 章埋 · 欠 5 章</p></div>
+            <div class="card"><span class="chip g">目标</span><h3>拿下擂台</h3><p>中 · 第 7 章埋 · 欠 12 章</p></div>
+            <div class="card"><span class="chip">伏笔</span><h3>断刀的主人</h3><p>已埋 · 第 9 章 · 未收</p></div>
+          </div>
+          <div class="ed">
+            <div class="etb">宋 · 17px · 行距 1.9 · 两端</div>
+            <div class="pg"><p>他站在渡口，看着雾里的灯。灯还没亮，江风先来了。</p></div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div class="col">
+      <p class="col-cap">深色（线提对比、面压深，零阴影在深色下天然成立）</p>
+      <div class="mock d-c" data-theme="dark">
+        <aside class="sb">
+          <div class="brand">工笔</div>
+          <button class="nav on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>拆书</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8-5.8 1.9 5.8 1.9L12 18.4l1.9-5.8 5.8-1.9-5.8-1.9z"/></svg>灵感库</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/></svg>构思</button>
+          <button class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>书写</button>
+        </aside>
+        <main class="mn">
+          <div class="ph"><h1>书库</h1><div class="acts"><button class="btn pri">新建书</button></div></div>
+          <table>
+            <thead><tr><th>书名</th><th>类型</th><th class="num">字数</th></tr></thead>
+            <tbody>
+              <tr><td>剑与灯</td><td>玄幻</td><td class="num">128,400</td></tr>
+              <tr><td>山雨欲来</td><td>都市</td><td class="num">42,100</td></tr>
+              <tr><td>雾中灯塔</td><td>悬疑</td><td class="num">9,860</td></tr>
+            </tbody>
+          </table>
+          <div class="cards">
+            <div class="card"><span class="chip">期待</span><h3>身世之谜</h3><p>短 · 第 3 章埋 · 欠 5 章</p></div>
+            <div class="card"><span class="chip g">目标</span><h3>拿下擂台</h3><p>中 · 第 7 章埋 · 欠 12 章</p></div>
+          </div>
+          <div class="ed">
+            <div class="etb">暮山 · 17px · 行距 1.9</div>
+            <div class="pg"><p>他站在渡口，看着雾里的灯。灯还没亮，江风先来了。</p></div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+  <table class="spec">
+    <tr><th>间距</th><td>2px 基准刻度：2 / 4 / 6 / 8 / 12 / 16 / 24；页面 20·26，控件 4·10，卡片 8·10，表格行 5·9</td></tr>
+    <tr><th>圆角</th><td>控件 3 · 卡片 4 · 弹窗 6；徽标也是小圆角，不用胶囊</td></tr>
+    <tr><th>阴影</th><td>零阴影（全部靠 1px 描边 + 色阶）；只弹窗一档硬阴影 <code>0 8px 24px .28</code></td></tr>
+    <tr><th>动效</th><td>90ms ease-out；只做颜色与透明度，无位移无缩放</td></tr>
+    <tr><th>图标</th><td>Lucide/Tabler 线性，14px / 1.5 描边；纯单色，可与文字同栏对齐</td></tr>
+    <tr><th>色彩层级</th><td>2 层表面 bg / panel + 描边层；线色对比度整体提高一档</td></tr>
+    <tr><th>字号</th><td>UI 12 / 次要 11.5 / 页题 17 / 编辑器正文 15·17（不动）</td></tr>
+    <tr><th>背景适配</th><td>六套纹理照旧，但编辑器四周留白收窄（更满屏）；深色下纹理压暗幅度需上调（否则六套里浅色的会发白）</td></tr>
+  </table>
+</section>
+
+<p class="lead" style="margin-top:8px">
+  <b>怎么挑：</b>把三个方向的小应用都滚一遍，重点看①卡片/表格边缘的圆角与阴影、②按钮和导航按下时的「手感」（快慢）、
+  ③一屏能看多少行字。选定后回帖工单 #39 记录即可（也可以在方向之间取混搭，例如"乙的圆角 + 甲的零阴影"）。
+</p>
+</body>
+</html>
