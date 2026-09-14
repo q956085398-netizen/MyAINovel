@@ -19,6 +19,7 @@ import ForeshadowBoard from "./ForeshadowBoard";
 import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
 import RelationshipCanvas from "./RelationshipCanvas";
+import { ArrowLeft, Icon } from "./icons";
 
 // 「三线」拆为「期待感」「目标」两页签（工单 #36）：名字自解释，
 // 数据模型不动（三线.yaml 的类别枚举仍是 期待｜目标），只按类别过滤复用看板。
@@ -219,8 +220,9 @@ export default function ProjectPage({
           </p>
         </div>
         <div className="page-actions">
-          <button className="btn" onClick={onBack}>
-            ← 项目列表
+          <button className="btn with-icon" onClick={onBack}>
+            <Icon as={ArrowLeft} size={16} />
+            项目列表
           </button>
           <button className="btn" onClick={() => setReloadKey((k) => k + 1)}>
             刷新

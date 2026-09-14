@@ -11,6 +11,8 @@ import InspirationLibrary from "./InspirationLibrary";
 import Writing from "./Writing";
 import SettingsDialog from "./SettingsDialog";
 import { getSettings, initSettings } from "./settings";
+import type { Glyph } from "./icons";
+import { BookOpen, Icon, Layers, MessageCircle, PenLine, Settings, Sparkles } from "./icons";
 import { flushAllSavers } from "./saveFlush";
 import type { ProjectTab } from "./ProjectPage";
 import type {
@@ -27,6 +29,14 @@ import type {
 // 灵感库升为一级板块，顺序 拆书 → 灵感库 → 构思 → 书写。
 const SECTIONS = ["拆书", "灵感库", "构思", "书写"] as const;
 type Section = (typeof SECTIONS)[number];
+
+// 板块图标（工单 #35，方向乙）：一处映射，侧栏导航四项共用。
+const SECTION_ICONS: Record<Section, Glyph> = {
+  拆书: BookOpen,
+  灵感库: Sparkles,
+  构思: Layers,
+  书写: PenLine,
+};
 
 const PATH_KEY = "gongbi.libraryPath";
 
@@ -215,6 +225,7 @@ function App() {
               className={`nav-item ${section === s ? "active" : ""}`}
               onClick={() => setSection(s)}
             >
+              <Icon as={SECTION_ICONS[s]} />
               {s}
             </button>
           ))}
@@ -224,6 +235,7 @@ function App() {
           title="AI 助手侧边栏"
           onClick={() => setAiOpen((v) => !v)}
         >
+          <Icon as={MessageCircle} />
           AI 助手
         </button>
         <button
@@ -231,7 +243,8 @@ function App() {
           title="设置"
           onClick={() => setSettingsOpen(true)}
         >
-          ⚙ 设置
+          <Icon as={Settings} />
+          设置
         </button>
         <div className="sidebar-foot">拆书积累 · 灵感沉淀 · 构思写作</div>
       </aside>

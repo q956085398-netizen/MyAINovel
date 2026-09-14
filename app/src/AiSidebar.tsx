@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Check, Icon, X } from "./icons";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import {
   DEFAULT_SYSTEM_PROMPT,
@@ -460,8 +461,8 @@ export default function AiSidebar({
         <button className="btn small" onClick={() => setSettingsOpen(true)}>
           设置
         </button>
-        <button className="btn small" onClick={onClose} title="收起面板">
-          ×
+        <button className="btn small with-icon" onClick={onClose} title="收起面板" aria-label="收起面板">
+          <Icon as={X} size={16} />
         </button>
       </header>
 
@@ -669,12 +670,18 @@ function AdoptActions({
     return (
       <div className="ai-adopt">
         <button
-          className="btn small"
+          className="btn small with-icon"
           disabled={!parsed || adopted}
           title={parsed ? "按建议预填桥段标注，确认后才写入 .yaml" : "未能从回复解析出类型/解法"}
           onClick={onAdopt}
         >
-          {adopted ? "已预填标注 ✓" : "按建议预填桥段标注"}
+          {adopted ? (
+            <>
+              <Icon as={Check} size={16} />已预填标注
+            </>
+          ) : (
+            "按建议预填桥段标注"
+          )}
         </button>
         {parsed && (
           <span className="hint">
@@ -690,12 +697,19 @@ function AdoptActions({
   return (
     <div className="ai-adopt">
       <button
-        className="btn small"
+        className="btn small with-icon"
         disabled={adopted}
         title={kind === "润色" ? "用润色稿替换正文里那段选区（可 Ctrl+Z 撤销）" : undefined}
         onClick={onAdopt}
       >
-        {adopted ? (kind === "润色" ? "已替换 ✓" : "已插入 ✓") : label}
+        {adopted ? (
+          <>
+            <Icon as={Check} size={16} />
+            {kind === "润色" ? "已替换" : "已插入"}
+          </>
+        ) : (
+          label
+        )}
       </button>
     </div>
   );
