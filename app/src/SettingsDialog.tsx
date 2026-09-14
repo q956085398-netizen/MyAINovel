@@ -4,13 +4,25 @@ import {
   AUTOSAVE_OPTIONS,
   BUILTIN_BACKGROUNDS,
   FONT_OPTIONS,
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
   INDENT_OPTIONS,
+  LINE_HEIGHT_MAX,
+  LINE_HEIGHT_MIN,
+  LINE_HEIGHT_STEP,
   PROSE_ALIGNS,
   useSettings,
   type BuiltinBackground,
   type ThemeMode,
 } from "./settings";
 import { errMsg } from "./util";
+import OptionToggle from "./OptionToggle";
+
+/** 首行缩进档位的按钮文案（与工具栏下拉同一套用词）。 */
+const INDENT_TOGGLE_OPTIONS = INDENT_OPTIONS.map((n) => ({
+  value: n as number,
+  label: n === 0 ? "关" : `${n} 字符`,
+}));
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: "light", label: "浅色" },
@@ -146,8 +158,8 @@ export default function SettingsDialog({
             <span className="settings-label">字号</span>
             <input
               type="range"
-              min={12}
-              max={28}
+              min={FONT_SIZE_MIN}
+              max={FONT_SIZE_MAX}
               step={1}
               value={settings.fontSize ?? 16}
               onChange={(e) => update({ fontSize: Number(e.target.value) })}
@@ -168,9 +180,9 @@ export default function SettingsDialog({
             <span className="settings-label">行距</span>
             <input
               type="range"
-              min={1.2}
-              max={2.6}
-              step={0.1}
+              min={LINE_HEIGHT_MIN}
+              max={LINE_HEIGHT_MAX}
+              step={LINE_HEIGHT_STEP}
               value={settings.lineHeight ?? 1.9}
               onChange={(e) => update({ lineHeight: Number(e.target.value) })}
             />
@@ -188,33 +200,21 @@ export default function SettingsDialog({
           </div>
           <div className="settings-field">
             <span className="settings-label">对齐</span>
-            <div className="display-toggle" role="radiogroup" aria-label="对齐方式">
-              {PROSE_ALIGNS.map((a) => (
-                <button
-                  key={a.value}
-                  type="button"
-                  className={settings.align === a.value ? "active" : ""}
-                  onClick={() => update({ align: a.value })}
-                >
-                  {a.label}
-                </button>
-              ))}
-            </div>
+            <OptionToggle
+              label="对齐方式"
+              value={settings.align}
+              options={PROSE_ALIGNS}
+              onChange={(align) => update({ align })}
+            />
           </div>
           <div className="settings-field">
             <span className="settings-label">首行缩进</span>
-            <div className="display-toggle" role="radiogroup" aria-label="首行缩进">
-              {INDENT_OPTIONS.map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  className={settings.firstLineIndent === n ? "active" : ""}
-                  onClick={() => update({ firstLineIndent: n })}
-                >
-                  {n === 0 ? "关" : `${n} 字符`}
-                </button>
-              ))}
-            </div>
+            <OptionToggle
+              label="首行缩进"
+              value={settings.firstLineIndent}
+              options={INDENT_TOGGLE_OPTIONS}
+              onChange={(firstLineIndent) => update({ firstLineIndent })}
+            />
           </div>
         </section>
 

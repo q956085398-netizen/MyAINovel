@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Expectation } from "./types";
+import { expectationKindLabel } from "./types";
 import {
   EXPECTATION_HORIZONS,
   EXPECTATION_PAYOFF_FINAL,
@@ -139,7 +140,7 @@ export function ExpectationFulfillDialog({
               <select value={name} onChange={(e) => setName(e.target.value)}>
                 {sorted.map((e) => (
                   <option key={e.name} value={e.name}>
-                    {e.name}（{e.kind === "期待" ? "期待感" : e.kind}·{e.horizon}·{e.state}）
+                    {e.name}（{expectationKindLabel(e.kind)}·{e.horizon}·{e.state}）
                   </option>
                 ))}
               </select>

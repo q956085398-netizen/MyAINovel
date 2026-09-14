@@ -9,8 +9,9 @@ import {
   PROSE_ALIGNS,
   useSettings,
   type BodyFont,
-  type ProseAlign,
 } from "./settings";
+import OptionToggle from "./OptionToggle";
+
 
 const SIZE_CHOICES = Array.from(
   { length: FONT_SIZE_MAX - FONT_SIZE_MIN + 1 },
@@ -80,18 +81,12 @@ export default function TypographyToolbar() {
       </label>
       <span className="typo-field" title="对齐方式（只影响显示，默认两端对齐）">
         对齐
-        <span className="display-toggle" role="radiogroup" aria-label="对齐方式">
-          {PROSE_ALIGNS.map((a) => (
-            <button
-              key={a.value}
-              type="button"
-              className={settings.align === a.value ? "active" : ""}
-              onClick={() => update({ align: a.value as ProseAlign })}
-            >
-              {a.label}
-            </button>
-          ))}
-        </span>
+        <OptionToggle
+          label="对齐方式"
+          value={settings.align}
+          options={PROSE_ALIGNS}
+          onChange={(align) => update({ align })}
+        />
       </span>
       <label className="typo-field" title="段首缩进几个字符（只影响显示，默认 2 字符）">
         首行缩进

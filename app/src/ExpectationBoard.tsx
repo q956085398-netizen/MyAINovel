@@ -12,6 +12,7 @@ import {
   EXPECTATION_STATE_PARTIAL,
   EXPECTATION_STATE_PLANTED,
   EXPECTATION_STATES,
+  expectationKindLabel,
   expectationOverdueChapters,
 } from "./types";
 import { chapterHead } from "./chapterFile";
@@ -33,16 +34,6 @@ interface ExpectationBoardProps {
 
 /** 档位主名（工单 #36：行标签带含义，名字不再让人猜）。 */
 const HORIZON_LABELS: Record<string, string> = { 短: "短期", 中: "中期", 长: "长期" };
-
-/** 数据类别值 → 页签名/文案（期待→期待感；未知类别原样显示）。 */
-const KIND_LABELS: Record<string, string> = {
-  [EXPECTATION_KIND_EXPECT]: "期待感",
-  [EXPECTATION_KIND_GOAL]: "目标",
-};
-
-function kindLabel(kind: string): string {
-  return KIND_LABELS[kind] ?? kind;
-}
 
 /** 档位第二行小注（阈值即超期阈值，与 Rust 侧一致）。 */
 function horizonSub(horizon: string): string | null {
@@ -143,7 +134,7 @@ export default function ExpectationBoard({
       setBoard(await invoke<ExpectationBoard>("expectation_board", { project }));
     } catch (e) {
       setBoard(null);
-      setError(`读取${kindLabel(kind)}失败：${errMsg(e)}`);
+      setError(`读取${expectationKindLabel(kind)}失败：${errMsg(e)}`);
     } finally {
       setLoading(false);
     }
@@ -153,7 +144,7 @@ export default function ExpectationBoard({
     void scan();
   }, [scan]);
 
-  const label = kindLabel(kind);
+  const label = expectationKindLabel(kind);
   const goalTab = kind === EXPECTATION_KIND_GOAL;
   const items = (board?.items ?? []).filter((v) =>
     goalTab ? v.kind === EXPECTATION_KIND_GOAL : v.kind !== EXPECTATION_KIND_GOAL,
@@ -409,7 +400,7 @@ export default function ExpectationBoard({
             <section className="exp-detail">
               <div className="exp-detail-head">
                 <h3>{selectedView.name}</h3>
-                <span className="card-cat">{kindLabel(selectedView.kind)}</span>
+                <span className="card-cat">{expectationKindLabel(selectedView.kind)}</span>
                 <span className="card-cat">{selectedView.horizon}</span>
                 {selectedView.overdue && (
                   <span className="card-cat danger">
@@ -430,11 +421,11 @@ export default function ExpectationBoard({
                     }
                   >
                     {!(EXPECTATION_KINDS as readonly string[]).includes(selectedView.kind) && (
-                      <option value={selectedView.kind}>{kindLabel(selectedView.kind)}</option>
+                      <option value={selectedView.kind}>{expectationKindLabel(selectedView.kind)}</option>
                     )}
                     {EXPECTATION_KINDS.map((k) => (
                       <option key={k} value={k}>
-                        {kindLabel(k)}
+                        {expectationKindLabel(k)}
                       </option>
                     ))}
                   </select>

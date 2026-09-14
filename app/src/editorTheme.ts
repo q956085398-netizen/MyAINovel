@@ -64,9 +64,10 @@ function proseLines(view: EditorView): DecorationSet {
       const line = view.state.doc.lineAt(pos);
       if (line.text.trim()) {
         // 从行首向上走到顶层块节点：段落才缩进（列表项内的段落也跳过）。
+        // 只在段落起始行缩进——硬换行的段落（无空行断段）后续行不再缩进。
         let node = tree.resolveInner(line.from, 1);
         while (node.parent && node.parent.name !== "Document") node = node.parent;
-        if (node.name === "Paragraph") {
+        if (node.name === "Paragraph" && node.from === line.from) {
           builder.add(line.from, line.from, proseLineDeco);
         }
       }

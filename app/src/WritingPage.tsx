@@ -30,11 +30,11 @@ import type {
 import {
   CHAPTER_STATUS_VALUES,
   EXPECTATION_HORIZON_MID,
-  EXPECTATION_KIND_EXPECT,
   EXPECTATION_KINDS,
   STATUS_DONE,
   STATUS_DRAFT,
   emptyWritingStats,
+  expectationKindLabel,
   expectationOverdueChapters,
 } from "./types";
 import { errMsg, formatCount } from "./util";
@@ -1401,7 +1401,7 @@ export default function WritingPage({
                         {e.name}
                       </button>
                       <span className="card-cat">
-                        {e.kind === "期待" ? "期待感" : e.kind} · {e.horizon}
+                        {expectationKindLabel(e.kind)} · {e.horizon}
                       </span>
                       {a.quote && <span className="foreshadow-quote">「{a.quote}」</span>}
                       {findQuote(docText, a.quote) === null && (
@@ -1419,7 +1419,7 @@ export default function WritingPage({
                         {e.name}
                       </button>
                       <span className="card-cat">
-                        兑现 · {p.kind} · {e.kind === "期待" ? "期待感" : e.kind}
+                        兑现 · {p.kind} · {expectationKindLabel(e.kind)}
                       </span>
                       {p.quote && <span className="foreshadow-quote">「{p.quote}」</span>}
                       {p.note && <span className="foreshadow-note">{p.note}</span>}
@@ -1440,7 +1440,7 @@ export default function WritingPage({
                     <li key={e.name}>
                       <span>{e.name}</span>
                       <span className="card-cat">
-                        {e.kind === "期待" ? "期待感" : e.kind} · {e.horizon}
+                        {expectationKindLabel(e.kind)} · {e.horizon}
                       </span>
                       {e.overdue ? (
                         <span className="card-cat danger">超期 {unadvanced} 章</span>
@@ -1633,7 +1633,7 @@ export default function WritingPage({
                 setExpAnnotate({ quote: menu.text, kind: k });
               }}
             >
-              记为{k === EXPECTATION_KIND_EXPECT ? "期待感" : k}
+              记为{expectationKindLabel(k)}
             </button>
           ))}
           <button
@@ -1673,7 +1673,7 @@ export default function WritingPage({
 
       {expAnnotate && (
         <ExpectationFormDialog
-          title={`记为${expAnnotate.kind === EXPECTATION_KIND_EXPECT ? "期待感" : expAnnotate.kind}`}
+          title={`记为${expectationKindLabel(expAnnotate.kind)}`}
           hint="选中这段文字会成为这条线的锚点；同名线会追加一条埋设（档位以已有为准），不新建。"
           initial={expAnnotate.quote.slice(0, 12)}
           fixedKind={expAnnotate.kind}

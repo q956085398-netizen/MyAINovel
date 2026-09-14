@@ -477,6 +477,12 @@ export function expectationOverdueChapters(horizon: string): number {
   return EXPECTATION_OVERDUE_CHAPTERS[horizon] ?? EXPECTATION_OVERDUE_CHAPTERS["中"];
 }
 
+/** 类别值 → 界面用词（工单 #36）：数据里是「期待」，页签与文案叫「期待感」；
+ *  手写的未知类别原样显示。看板/侧栏/弹窗统一走这里，别在各处再写三元。 */
+export function expectationKindLabel(kind: string): string {
+  return kind === EXPECTATION_KIND_EXPECT ? "期待感" : kind;
+}
+
 export function emptyBookMeta(): BookMeta {
   return { title: null, trackRecord: null, summary: null, goldenFinger: null, chapterPrefix: null };
 }
