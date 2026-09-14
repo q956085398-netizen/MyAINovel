@@ -23,11 +23,10 @@ import type {
   WritingBridge,
 } from "./types";
 
-const SECTIONS = ["拆书", "构思", "书写"] as const;
+// 灵感库独立侧栏导航（工单 #37）：拆书板块的书库/灵感库子页签取消，
+// 灵感库升为一级板块，顺序 拆书 → 灵感库 → 构思 → 书写。
+const SECTIONS = ["拆书", "灵感库", "构思", "书写"] as const;
 type Section = (typeof SECTIONS)[number];
-
-const LIB_TABS = ["书库", "灵感库"] as const;
-type LibTab = (typeof LIB_TABS)[number];
 
 const PATH_KEY = "gongbi.libraryPath";
 
@@ -36,7 +35,6 @@ initSettings();
 
 function App() {
   const [section, setSection] = useState<Section>("拆书");
-  const [libTab, setLibTab] = useState<LibTab>("书库");
   const [openBook, setOpenBook] = useState<BookEntry | null>(null);
   // 库根路径为书库与灵感库共用，上提到这里统一选择与持久化。
   const [libraryPath, setLibraryPath] = useState<string | null>(() =>
@@ -143,10 +141,10 @@ function App() {
     setLibraryPath(picked);
   }, [pickLibraryFolder]);
 
-  /** 从灵感库跳书：打开拆书稿并切到书库页。 */
+  /** 从灵感库跳书：切到拆书板块并打开拆书稿。 */
   const openBookFromInspiration = useCallback((book: BookEntry) => {
     setOpenBook(book);
-    setLibTab("书库");
+    setSection("拆书");
   }, []);
 
   /** 从灵感库跳构思项目（卡片转生的去向）：切到构思板块并打开该项目。 */
@@ -239,38 +237,26 @@ function App() {
       </aside>
       <main className="main">
         <div className={`section-wrap ${section === "拆书" ? "" : "hidden"}`}>
-          <div className="subtabs">
-            {LIB_TABS.map((t) => (
-              <button
-                key={t}
-                className={`subtab ${libTab === t ? "active" : ""}`}
-                onClick={() => setLibTab(t)}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-          <div className={`section-wrap ${libTab === "书库" ? "" : "hidden"}`}>
-            {openBook ? (
-              <EditorPage
-                key={openBook.primaryMd}
-                book={openBook}
-                libraryPath={libraryPath}
-                active={section === "拆书" && libTab === "书库"}
-                onBack={() => setOpenBook(null)}
-                onAiCommand={handleAiCommand}
-                registerBridge={registerBridge}
-              />
-            ) : (
-              <BookLibrary
-                libraryPath={libraryPath}
-                onChooseFolder={chooseLibraryFolder}
-                onCreateLibrary={createLibraryFolder}
-                onOpen={setOpenBook}
-              />
-            )}
-          </div>
-          <div className={`section-wrap ${libTab === "灵感库" ? "" : "hidden"}`}>
+          {openBook ? (
+            <EditorPage
+              key={openBook.primaryMd}
+              book={openBook}
+              libraryPath={libraryPath}
+              active={section === "拆书"}
+              onBack={() => setOpenBook(null)}
+              onAiCommand={handleAiCommand}
+              registerBridge={registerBridge}
+            />
+          ) : (
+            <BookLibrary
+              libraryPath={libraryPath}
+              onChooseFolder={chooseLibraryFolder}
+              onCreateLibrary={createLibraryFolder}
+              onOpen={setOpenBook}
+            />
+          )}
+        </div>
+        <div className={`section-wrap ${section === "灵感库" ? "" : "hidden"}`}>
           <InspirationLibrary
             libraryPath={libraryPath}
             onChooseFolder={chooseLibraryFolder}
@@ -279,7 +265,6 @@ function App() {
             onOpenProject={openProjectFromInspiration}
             onGoIdeation={() => setSection("构思")}
           />
-          </div>
         </div>
         <div className={`section-wrap ${section === "构思" ? "" : "hidden"}`}>
           <Ideation
