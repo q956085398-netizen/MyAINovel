@@ -3,6 +3,7 @@
   "productName": "工笔",
   "version": "0.1.0",
   "identifier": "com.gongbi.app",
+  "mainBinaryName": "工笔",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
