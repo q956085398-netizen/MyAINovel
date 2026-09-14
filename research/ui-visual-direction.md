@@ -123,9 +123,22 @@
 
 ## 六、调研依据
 
-（本节由后台调研子代理按一手来源整理，见同日 `research/ui-visual-research.md`；下表为最关键的硬数字。）
+调研子代理按**一手来源**（官方文档、上游 CSS/TS 源文件）整理，全量见同日 `research/ui-visual-research.md`。与三方向直接相关的硬数字：
 
-<!-- 待填：一手来源硬数字汇总（间距/圆角/阴影/动效/图标/字号） -->
+| 维度 | 参考数值（一手来源） |
+|---|---|
+| 间距 | Obsidian `--size-4-N` 4px 网格（4/8/12/16/24/32/48…不连续，另有 2/4/6px 细网格）；Fluent 2 spacing `0/2/4/6/8/10/12/16/20/24/32`；SiYuan `--b3-layout-space: 4px` |
+| 圆角 | Obsidian `--radius-s/m/l/xl = 4/8/12/16`；Windows 11 窗口/flyout/dialog **8px**、页内控件 **4px**（`OverlayCornerRadius=8`、`ControlCornerRadius=4`）；Fluent 2 `2/4/6/8/12/16/24`；SiYuan `3/6/12`（12 为弹窗专用） |
+| 阴影层次 | Windows elevation 数值分层：Window/Dialog **128**、Flyout **32**、Tooltip 16、Card 8、Control 2，**全部配 1px 描边**；Fluent `0 0 2px ambient + 0 Npx Npx key`（N=2/4/8/16/28/64），浅色 alpha .12/.14、**深色 .24/.28**；SiYuan 弹窗 `0 8px 24px rgba(0,0,0,.2)`，**暗色改 `rgba(0,0,0,.8)`＋`0 0 0 1px rgba(255,255,255,.12)` 白描边** |
+| 动效 | Windows 11 控件时长 **250 / 167 / 83ms**，进入 `cubic-bezier(0,0,0,1)`、退出 `cubic-bezier(1,0,1,1)`；Fluent 2 duration 50–500ms 八档、curve 九条（含 `easyEase (0.33,0,0.67,1)`）；Material 3 Short1–4 50/100/150/200、Medium1–4 250–400，Emphasized `(0.2,0,0,1)`；SiYuan 弹窗 `transform 150ms cubic-bezier(0,0,.2,1)` |
+| 图标 | Obsidian 官方表 **14px/2、16px/2、18px/1.75、32px/1.25**（越大越细），图标源直接用 Lucide；Lucide 24×24 网格、ISC、tree-shakeable；Tabler 6,184 个 MIT；SiYuan 自绘 231 个 symbol 统一 `stroke-width="1.7"` |
+| 字号 | Obsidian UI `12/13/15/20`（正文 16，行高只 1.5/1.3）；Windows 字阶 `12/16`、`14/20`、`18/24`、`20/28`；Fluent 2 `caption1 12/16`、`body1 14/20`、`subtitle1 20/28`、`title2 28/36` |
+| 纸面/写作列 | Typora github 主题 `#f3f2ee` 底、正文 16px/1.6、`#write max-width: 860px`（newsprint 40em，≥1400px 时 914px）；SiYuan 正文有效宽 760px 居中；正文行高 Obsidian 1.5 / Typora 1.5–1.6 / SiYuan 1.625 |
+
+两点与本方向的取舍直接相关：
+- **深色不用阴影、改表面提亮＋1px 描边**不是自创：SiYuan 暗色弹窗就是「更重的黑阴影＋白描边」，Windows 也要求每层 elevation 配 1px stroke。
+- **图标「越大越细」有官方表**：18px 配 1.75 描边正是 Obsidian 的一手取值，乙方向不是拍脑袋选的数。
+
 
 ## 七、选择记录
 
