@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Icon, X } from "./icons";
+import { Check, Icon, ICON_SIZE_DENSE, X } from "./icons";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import {
   DEFAULT_SYSTEM_PROMPT,
@@ -462,7 +462,7 @@ export default function AiSidebar({
           设置
         </button>
         <button className="btn small with-icon" onClick={onClose} title="收起面板" aria-label="收起面板">
-          <Icon as={X} size={16} />
+          <Icon as={X} size={ICON_SIZE_DENSE} />
         </button>
       </header>
 
@@ -677,7 +677,7 @@ function AdoptActions({
         >
           {adopted ? (
             <>
-              <Icon as={Check} size={16} />已预填标注
+              <Icon as={Check} size={ICON_SIZE_DENSE} />已预填标注
             </>
           ) : (
             "按建议预填桥段标注"
@@ -704,7 +704,7 @@ function AdoptActions({
       >
         {adopted ? (
           <>
-            <Icon as={Check} size={16} />
+            <Icon as={Check} size={ICON_SIZE_DENSE} />
             {kind === "润色" ? "已替换" : "已插入"}
           </>
         ) : (

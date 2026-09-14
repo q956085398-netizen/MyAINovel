@@ -55,7 +55,7 @@ import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editor
 import { dirName, editorRender } from "./editorRender";
 import { useImageViewer } from "./ImageViewer";
 import TypographyToolbar from "./TypographyToolbar";
-import { ArrowLeft, Icon } from "./icons";
+import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 /** 自动保存防抖：停笔满设置间隔（默认 3 秒，工单 #28 起两编辑器共用）落盘。 */
 const PREFS_KEY = "gongbi.writing.prefs";
@@ -1176,7 +1176,7 @@ export default function WritingPage({
             <h1>{project.title}</h1>
           </div>
           <button className="btn with-icon" onClick={onBack}>
-            <Icon as={ArrowLeft} size={16} />
+            <Icon as={ArrowLeft} size={ICON_SIZE_DENSE} />
             项目列表
           </button>
         </header>
@@ -1189,7 +1189,7 @@ export default function WritingPage({
     <div className={`writing-page ${immersive ? "immersive" : ""}`}>
       <header className="editor-header">
         <button className="btn with-icon" onClick={() => void handleBack()}>
-          <Icon as={ArrowLeft} size={16} />
+          <Icon as={ArrowLeft} size={ICON_SIZE_DENSE} />
           项目列表
         </button>
         <h1 className="editor-title">

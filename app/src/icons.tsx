@@ -12,14 +12,16 @@ export type Glyph = ComponentType<
   SVGProps<SVGSVGElement> & { size?: number | string; strokeWidth?: number | string }
 >;
 
-/** 默认尺寸：侧栏导航、页面动作。密集控件与正文内联用 16。 */
+/** 默认尺寸：侧栏导航、页面动作。 */
 export const ICON_SIZE = 18;
+/** 密集控件尺寸：按钮内图标（按钮文字 13px，18px 图标会比文字重；方向乙「正文内联可 16px」的延伸）。 */
+export const ICON_SIZE_DENSE = 16;
 /** 默认描边（方向乙）。 */
 export const ICON_STROKE = 1.75;
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "ref"> {
   as: Glyph;
-  /** 缺省 18；密集控件用 16。 */
+  /** 缺省 ICON_SIZE；按钮等密集控件用 ICON_SIZE_DENSE。 */
   size?: number;
   strokeWidth?: number;
 }

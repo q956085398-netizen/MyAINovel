@@ -27,7 +27,7 @@ import { useImageViewer } from "./ImageViewer";
 import BookHeaderDialog from "./BookHeaderDialog";
 import TypographyToolbar from "./TypographyToolbar";
 import TropeDialog from "./TropeDialog";
-import { ArrowLeft, Icon } from "./icons";
+import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 /** 六插入块（设计共识 §四＋工单 #30 书档入家族）：Obsidian 风格 callout，
  *  纯 markdown 可读；书档常规来自模板与迁移，工具栏可补插。 */
@@ -548,7 +548,7 @@ export default function EditorPage({
     <div className="editor-page">
       <header className="editor-header">
         <button className="btn with-icon" onClick={() => void handleBack()}>
-          <Icon as={ArrowLeft} size={16} />
+          <Icon as={ArrowLeft} size={ICON_SIZE_DENSE} />
           返回
         </button>
         <h1 className="editor-title">

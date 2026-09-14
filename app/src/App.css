@@ -49,6 +49,9 @@
   --sh-1: 0 1px 2px rgba(43, 42, 38, 0.06);
   --sh-2: 0 4px 12px rgba(43, 42, 38, 0.1);
   --sh-3: 0 16px 48px rgba(43, 42, 38, 0.22);
+  /* 浮在封面图上的控件：背后是任意图片，不是本应用的表面，
+     所以深浅两主题都得与背后分离，不跟 --sh-2 一起退场（深色组另给值）。 */
+  --sh-media: var(--sh-2);
   /* 动效：一处呼吸节奏，全站引用 */
   --dur: 180ms;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -95,6 +98,7 @@
   --sh-1: none;
   --sh-2: none;
   --sh-3: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --sh-media: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 * {
@@ -955,12 +959,19 @@ body {
   bottom: 16px;
   opacity: 0;
   transition: opacity var(--dur) var(--ease);
-  box-shadow: var(--sh-2);
+  box-shadow: var(--sh-media);
 }
 
 .cover-card:hover .set-cover-btn,
 .cover-card:focus-within .set-cover-btn {
   opacity: 1;
+}
+
+/* 这两个按钮都是 .btn，悬停时 .btn:hover 会把阴影换回 --sh-2（深色下是 none）——
+   浮在封面图上的控件不跟着退场，故 hover 态同样锁 --sh-media（本规则在 .btn:hover 之后，同特异度靠源序取胜）。 */
+.set-cover-btn:hover,
+.cover-action:hover {
+  box-shadow: var(--sh-media);
 }
 
 .cover-action {
@@ -969,7 +980,7 @@ body {
   right: 16px;
   opacity: 0;
   transition: opacity var(--dur) var(--ease);
-  box-shadow: var(--sh-2);
+  box-shadow: var(--sh-media);
 }
 
 .cover-card:hover .cover-action {
@@ -1163,7 +1174,7 @@ body {
 .dialog {
   background: var(--panel);
   border-radius: var(--r-dialog);
-  padding: var(--sp-6) var(--sp-6);
+  padding: var(--sp-6);
   width: 540px;
   max-width: 92vw;
   max-height: 85vh;
@@ -1582,7 +1593,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  padding: 28px 36px 0;
+  padding: var(--sp-7) var(--sp-8) 0;
 }
 
 .project-body {
@@ -1931,6 +1942,7 @@ body {
 
 .chapter-item.active {
   background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .chapter-label {
@@ -2184,6 +2196,7 @@ body {
 
 .history-item.active {
   background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .history-preview {
@@ -2342,8 +2355,7 @@ body {
 }
 
 .context-item:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface-hover);
 }
 
 .cm-foreshadow-planted {
