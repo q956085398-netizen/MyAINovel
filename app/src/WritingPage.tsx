@@ -31,6 +31,7 @@ import {
   CHAPTER_STATUS_VALUES,
   EXPECTATION_HORIZON_MID,
   EXPECTATION_KIND_EXPECT,
+  EXPECTATION_KINDS,
   STATUS_DONE,
   STATUS_DRAFT,
   emptyWritingStats,
@@ -244,7 +245,8 @@ export default function WritingPage({
     maxChapter: 0,
     items: [],
   });
-  const [expAnnotate, setExpAnnotate] = useState<{ quote: string } | null>(null);
+  // 记为期待线：右键菜单一步定类别（期待感/目标，工单 #36），弹窗只填名字＋档位。
+  const [expAnnotate, setExpAnnotate] = useState<{ quote: string; kind: string } | null>(null);
   const [expFulfill, setExpFulfill] = useState<{ quote: string } | null>(null);
   const [expectationBusy, setExpectationBusy] = useState(false);
   // 内联图查看器（工单 #31）：点正文里的截图弹原图。
@@ -566,7 +568,7 @@ export default function WritingPage({
     } catch (e) {
       // 三线.yaml 损坏：显式提示，但不挡写作（三线只是旁路数据）。
       setExpectations({ maxChapter: 0, items: [] });
-      window.alert(`读取三线失败：${errMsg(e)}`);
+      window.alert(`读取期待线失败：${errMsg(e)}`);
     }
   }
 
@@ -586,7 +588,7 @@ export default function WritingPage({
       setExpAnnotate(null);
       await loadExpectations();
     } catch (e) {
-      window.alert(`记为三线失败：${errMsg(e)}`);
+      window.alert(`记为期待线失败：${errMsg(e)}`);
     } finally {
       setExpectationBusy(false);
     }
@@ -608,13 +610,14 @@ export default function WritingPage({
       setExpFulfill(null);
       await loadExpectations();
     } catch (e) {
-      window.alert(`兑现三线失败：${errMsg(e)}`);
+      window.alert(`兑现期待线失败：${errMsg(e)}`);
     } finally {
       setExpectationBusy(false);
     }
   }
 
-  /** 右键菜单：有选区才出（设为伏笔／回收伏笔／记为三线／兑现三线），不抢编辑器默认菜单。 */
+  /** 右键菜单：有选区才出（设为伏笔／回收伏笔／记为期待感／记为目标／兑现期待线），
+   *  不抢编辑器默认菜单。 */
   function handleContextMenu(event: MouseEvent, view: EditorView): boolean {
     const sel = view.state.selection.main;
     if (sel.empty) return false;
@@ -1211,7 +1214,7 @@ export default function WritingPage({
               <button
                 className="btn"
                 disabled={!ready || !current}
-                title="AI 体检：对照章节拍与本章伏笔/三线现状（只出报告，不改正文）"
+                title="AI 体检：对照章节拍与本章伏笔/期待线现状（只出报告，不改正文）"
                 onClick={() => void runChapterCheck()}
               >
                 AI 体检
@@ -1383,7 +1386,7 @@ export default function WritingPage({
 
             {(chapterPlantedExp.length > 0 || chapterFulfilledExp.length > 0) && (
               <>
-                <h2 className="sidebar-title">本章三线</h2>
+                <h2 className="sidebar-title">本章期待线</h2>
                 <ul className="foreshadow-side-list">
                   {chapterPlantedExp.map(({ e, a }, i) => (
                     <li key={`ep${i}`}>
@@ -1395,7 +1398,7 @@ export default function WritingPage({
                         {e.name}
                       </button>
                       <span className="card-cat">
-                        {e.kind} · {e.horizon}
+                        {e.kind === "期待" ? "期待感" : e.kind} · {e.horizon}
                       </span>
                       {a.quote && <span className="foreshadow-quote">「{a.quote}」</span>}
                       {findQuote(docText, a.quote) === null && (
@@ -1413,7 +1416,7 @@ export default function WritingPage({
                         {e.name}
                       </button>
                       <span className="card-cat">
-                        兑现 · {p.kind} · {e.kind}
+                        兑现 · {p.kind} · {e.kind === "期待" ? "期待感" : e.kind}
                       </span>
                       {p.quote && <span className="foreshadow-quote">「{p.quote}」</span>}
                       {p.note && <span className="foreshadow-note">{p.note}</span>}
@@ -1434,7 +1437,7 @@ export default function WritingPage({
                     <li key={e.name}>
                       <span>{e.name}</span>
                       <span className="card-cat">
-                        {e.kind} · {e.horizon}
+                        {e.kind === "期待" ? "期待感" : e.kind} · {e.horizon}
                       </span>
                       {e.overdue ? (
                         <span className="card-cat danger">超期 {unadvanced} 章</span>
@@ -1444,7 +1447,7 @@ export default function WritingPage({
                     </li>
                   ))}
                 </ul>
-                <p className="hint">共 {openLines.length} 条未兑现，见「构思 → 三线」。</p>
+                <p className="hint">共 {openLines.length} 条未兑现，见「构思 → 期待感/目标」。</p>
               </>
             )}
           </aside>
@@ -1617,16 +1620,19 @@ export default function WritingPage({
           >
             回收伏笔
           </button>
-          <button
-            className="context-item"
-            onClick={() => {
-              setMenu(null);
-              if (requireOrdinal() === null) return;
-              setExpAnnotate({ quote: menu.text });
-            }}
-          >
-            记为三线
-          </button>
+          {EXPECTATION_KINDS.map((k) => (
+            <button
+              key={k}
+              className="context-item"
+              onClick={() => {
+                setMenu(null);
+                if (requireOrdinal() === null) return;
+                setExpAnnotate({ quote: menu.text, kind: k });
+              }}
+            >
+              记为{k === EXPECTATION_KIND_EXPECT ? "期待感" : k}
+            </button>
+          ))}
           <button
             className="context-item"
             onClick={() => {
@@ -1635,7 +1641,7 @@ export default function WritingPage({
               setExpFulfill({ quote: menu.text });
             }}
           >
-            兑现三线
+            兑现期待线
           </button>
         </div>
       )}
@@ -1664,10 +1670,10 @@ export default function WritingPage({
 
       {expAnnotate && (
         <ExpectationFormDialog
-          title="记为三线"
-          hint="选中这段文字会成为这条线的锚点；同名线会追加一条埋设（类别/档位以已有为准），不新建。"
+          title={`记为${expAnnotate.kind === EXPECTATION_KIND_EXPECT ? "期待感" : expAnnotate.kind}`}
+          hint="选中这段文字会成为这条线的锚点；同名线会追加一条埋设（档位以已有为准），不新建。"
           initial={expAnnotate.quote.slice(0, 12)}
-          initialKind={EXPECTATION_KIND_EXPECT}
+          fixedKind={expAnnotate.kind}
           initialHorizon={EXPECTATION_HORIZON_MID}
           busy={expectationBusy}
           onCancel={() => setExpAnnotate(null)}

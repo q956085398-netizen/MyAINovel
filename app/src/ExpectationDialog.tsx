@@ -2,8 +2,6 @@ import { useState } from "react";
 import type { Expectation } from "./types";
 import {
   EXPECTATION_HORIZONS,
-  EXPECTATION_KINDS,
-  EXPECTATION_KIND_EXPECT,
   EXPECTATION_PAYOFF_FINAL,
   EXPECTATION_PAYOFF_KINDS,
   EXPECTATION_STATE_DONE,
@@ -21,12 +19,14 @@ const HORIZON_OPTIONS = EXPECTATION_HORIZONS.map((value) => ({
   label: HORIZON_LABELS[value],
 }));
 
-/** 名字＋类别＋档位弹窗（看板新建待埋 / 从正文记为三线共用）。 */
+/** 名字＋类别＋档位弹窗（看板新建待埋 / 从正文记为期待线共用）。
+ *  v2（工单 #36）：类别不再弹窗里选——入口已一步定类别（期待感/目标页签、
+ *  右键「记为期待感/记为目标」），传 fixedKind 锁死，弹窗只填名字＋档位。 */
 export function ExpectationFormDialog({
   title,
   hint,
   initial,
-  initialKind,
+  fixedKind,
   initialHorizon,
   busy,
   onCancel,
@@ -35,14 +35,14 @@ export function ExpectationFormDialog({
   title: string;
   hint?: string;
   initial: string;
-  initialKind: string;
+  /** 类别（期待｜目标）：随入口固定，弹窗内不再可改。 */
+  fixedKind: string;
   initialHorizon: string;
   busy: boolean;
   onCancel: () => void;
   onSubmit: (name: string, kind: string, horizon: string) => void;
 }) {
   const [name, setName] = useState(initial);
-  const [kind, setKind] = useState(initialKind);
   const [horizon, setHorizon] = useState(initialHorizon);
   return (
     <div
@@ -61,23 +61,10 @@ export function ExpectationFormDialog({
             placeholder="如：主角何时亮出金手指"
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && name.trim()) onSubmit(name.trim(), kind, horizon);
+              if (e.key === "Enter" && name.trim()) onSubmit(name.trim(), fixedKind, horizon);
               if (e.key === "Escape") onCancel();
             }}
           />
-        </label>
-        <label>
-          类别
-          <select value={kind} onChange={(e) => setKind(e.target.value)}>
-            {EXPECTATION_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {k}
-                {k === EXPECTATION_KIND_EXPECT
-                  ? "（读者想知道结果）"
-                  : "（主角下一步去哪里）"}
-              </option>
-            ))}
-          </select>
         </label>
         <label>
           档位
@@ -97,7 +84,7 @@ export function ExpectationFormDialog({
           <button
             className="btn primary"
             disabled={busy || !name.trim()}
-            onClick={() => onSubmit(name.trim(), kind, horizon)}
+            onClick={() => onSubmit(name.trim(), fixedKind, horizon)}
           >
             确定
           </button>
@@ -107,7 +94,7 @@ export function ExpectationFormDialog({
   );
 }
 
-/** 兑现三线弹窗：选中正文后，挑一条线、填阶段/终结与说明。 */
+/** 兑现期待线弹窗：选中正文后，挑一条线、填阶段/终结与说明。 */
 export function ExpectationFulfillDialog({
   quote,
   expectations,
@@ -139,10 +126,12 @@ export function ExpectationFulfillDialog({
       }}
     >
       <div className="dialog">
-        <h2>兑现三线</h2>
+        <h2>兑现期待线</h2>
         <p className="foreshadow-quote block">「{quote}」</p>
         {sorted.length === 0 ? (
-          <p className="hint">这本书还没有三线。先在正文里选中文字右键「记为三线」。</p>
+          <p className="hint">
+            这本书还没有期待线。先在正文里选中文字右键「记为期待感」或「记为目标」。
+          </p>
         ) : (
           <>
             <label>
@@ -150,7 +139,7 @@ export function ExpectationFulfillDialog({
               <select value={name} onChange={(e) => setName(e.target.value)}>
                 {sorted.map((e) => (
                   <option key={e.name} value={e.name}>
-                    {e.name}（{e.kind}·{e.horizon}·{e.state}）
+                    {e.name}（{e.kind === "期待" ? "期待感" : e.kind}·{e.horizon}·{e.state}）
                   </option>
                 ))}
               </select>

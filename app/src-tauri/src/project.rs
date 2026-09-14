@@ -65,8 +65,10 @@ pub struct ProjectEntry {
     pub opening_count: u32,
     /// 伏笔条数（伏笔.yaml；损坏降级为 0，不拖垮扫描）。
     pub foreshadow_count: u32,
-    /// 三线条数（三线.yaml；损坏降级为 0，不拖垮扫描）。
-    pub expectation_count: u32,
+    /// 期待线条数按类别拆（三线.yaml；损坏降级为 0，不拖垮扫描）。
+    /// 「期待感」「目标」两页签各自的徽标；手写的未知类别并入期待（缺省读作期待）。
+    pub expectation_expect_count: u32,
+    pub expectation_goal_count: u32,
     /// 封面文件（约定文件名 附件/封面.png|jpg|webp，现查现识别，零 yaml 键）；
     /// 无封面为 None，前端以书名首字占位。
     pub cover: Option<PathBuf>,
@@ -121,6 +123,12 @@ fn project_entry(dir: &Path) -> ProjectEntry {
     let meta = read_project_meta(dir).unwrap_or_default();
     let (chapter_count, word_count) = text_stats(&dir.join(TEXT_DIR));
     let cover_dir = dir.join("附件");
+    // 伏笔.yaml 读不了＝0 条（与项目.yaml 同款降级，打开看板时再显式报错）。
+    let foreshadow_count = crate::foreshadow::read_foreshadows(dir)
+        .map(|list| list.len() as u32)
+        .unwrap_or(0);
+    // 三线.yaml 同款降级；计数按类别拆（工单 #36 期待感/目标两页签的徽标）。
+    let expectations = crate::expectation::read_expectations(dir).unwrap_or_default();
     ProjectEntry {
         dir: dir.to_path_buf(),
         title: meta.title.unwrap_or_else(|| strip_book_marks(&name)),
@@ -132,13 +140,15 @@ fn project_entry(dir: &Path) -> ProjectEntry {
         character_count: count_md(&notes_dir(dir, NoteKind::Character)),
         worldview_count: count_md(&notes_dir(dir, NoteKind::Worldview)),
         opening_count: count_md(&notes_dir(dir, NoteKind::Opening)),
-        // 伏笔.yaml 读不了＝0 条（与项目.yaml 同款降级，打开看板时再显式报错）。
-        foreshadow_count: crate::foreshadow::read_foreshadows(dir)
-            .map(|list| list.len() as u32)
-            .unwrap_or(0),
-        expectation_count: crate::expectation::read_expectations(dir)
-            .map(|list| list.len() as u32)
-            .unwrap_or(0),
+        foreshadow_count,
+        expectation_expect_count: expectations
+            .iter()
+            .filter(|e| e.kind != crate::expectation::KIND_GOAL)
+            .count() as u32,
+        expectation_goal_count: expectations
+            .iter()
+            .filter(|e| e.kind == crate::expectation::KIND_GOAL)
+            .count() as u32,
         cover: crate::cover::find_cover(&cover_dir),
         cover_dir,
     }
@@ -1140,14 +1150,16 @@ mod tests {
             worldview_count: 6,
             opening_count: 7,
             foreshadow_count: 8,
-            expectation_count: 9,
+            expectation_expect_count: 9,
+            expectation_goal_count: 10,
             cover: None,
             cover_dir: PathBuf::from("项目/《书》/附件"),
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("\"chapterCount\""));
         assert!(json.contains("\"contradictionCount\""));
-        assert!(json.contains("\"expectationCount\""));
+        assert!(json.contains("\"expectationExpectCount\""));
+        assert!(json.contains("\"expectationGoalCount\""));
         assert!(json.contains("\"coverDir\""));
 
         assert_eq!(serde_json::to_string(&NoteKind::Unit).unwrap(), "\"单元\"");

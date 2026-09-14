@@ -619,9 +619,9 @@ fn chapter_context(project: &Path, ordinal: u32) -> Result<String, String> {
 
     let expectation_lines = expectation_events(&expectations.items, ordinal);
     if expectation_lines.is_empty() {
-        out.push_str("【本章三线】（本章没有期待线的埋设或兑现）\n");
+        out.push_str("【本章期待线】（本章没有期待线的埋设或兑现）\n");
     } else {
-        out.push_str(&format!("【本章三线】共 {} 条\n", expectation_lines.len()));
+        out.push_str(&format!("【本章期待线】共 {} 条\n", expectation_lines.len()));
         for line in &expectation_lines {
             out.push_str(&format!("{line}\n"));
         }
@@ -981,7 +981,7 @@ mod tests {
             text.contains("- 师父的伤 ｜ 状态：部分收 ｜ 本章兑现（阶段）｜ 引文：伤口裂开"),
             "{text}"
         );
-        assert!(text.contains("【本章三线】共 2 条"), "{text}");
+        assert!(text.contains("【本章期待线】共 2 条"), "{text}");
         assert!(
             text.contains("- 谁杀了师父 ｜ 中·期待 ｜ 状态：已埋 ｜ 埋于本章 ｜ 引文：血衣"),
             "{text}"
@@ -1056,7 +1056,7 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("【本章伏笔】（本章没有伏笔的埋设或回收）"), "{text}");
-        assert!(text.contains("【本章三线】（本章没有期待线的埋设或兑现）"), "{text}");
+        assert!(text.contains("【本章期待线】（本章没有期待线的埋设或兑现）"), "{text}");
         assert!(text.contains("【全书未收的线】（没有未收的线）"), "{text}");
     }
 

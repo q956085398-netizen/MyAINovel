@@ -10,7 +10,7 @@ import type {
   ProjectMeta,
   Vocabulary,
 } from "./types";
-import { emptyProjectMeta } from "./types";
+import { emptyProjectMeta, EXPECTATION_KIND_EXPECT, EXPECTATION_KIND_GOAL } from "./types";
 import { errMsg, formatCount } from "./util";
 import ArrangementView from "./ArrangementView";
 import CircleView from "./CircleView";
@@ -20,7 +20,20 @@ import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
 import RelationshipCanvas from "./RelationshipCanvas";
 
-const TABS = ["类型圈", "矛盾", "单元", "伏笔", "三线", "排布", "人物", "世界观", "开头"] as const;
+// 「三线」拆为「期待感」「目标」两页签（工单 #36）：名字自解释，
+// 数据模型不动（三线.yaml 的类别枚举仍是 期待｜目标），只按类别过滤复用看板。
+const TABS = [
+  "类型圈",
+  "矛盾",
+  "单元",
+  "伏笔",
+  "期待感",
+  "目标",
+  "排布",
+  "人物",
+  "世界观",
+  "开头",
+] as const;
 /** 项目页签；跨板块跳转（灵感库关联 → 项目）也用它指路。 */
 export type ProjectTab = (typeof TABS)[number];
 type Tab = ProjectTab;
@@ -238,8 +251,11 @@ export default function ProjectPage({
               {t === "伏笔" && project.foreshadowCount > 0 && (
                 <span className="nav-badge">{project.foreshadowCount}</span>
               )}
-              {t === "三线" && project.expectationCount > 0 && (
-                <span className="nav-badge">{project.expectationCount}</span>
+              {t === "期待感" && project.expectationExpectCount > 0 && (
+                <span className="nav-badge">{project.expectationExpectCount}</span>
+              )}
+              {t === "目标" && project.expectationGoalCount > 0 && (
+                <span className="nav-badge">{project.expectationGoalCount}</span>
               )}
               {t === "人物" && project.characterCount > 0 && (
                 <span className="nav-badge">{project.characterCount}</span>
@@ -315,9 +331,10 @@ export default function ProjectPage({
               onOpenChapter={(ordinal, quote) => onOpenChapter(project.dir, ordinal, quote)}
             />
           )}
-          {tab === "三线" && (
+          {(tab === "期待感" || tab === "目标") && (
             <ExpectationBoard
               project={project.dir}
+              kind={tab === "期待感" ? EXPECTATION_KIND_EXPECT : EXPECTATION_KIND_GOAL}
               chapterPrefix={meta.chapterPrefix}
               onChanged={refreshAll}
               onOpenChapter={(ordinal, quote) => onOpenChapter(project.dir, ordinal, quote)}

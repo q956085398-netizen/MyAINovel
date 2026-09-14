@@ -86,8 +86,9 @@ export interface ProjectEntry {
   openingCount: number;
   /** 伏笔条数（伏笔.yaml）。 */
   foreshadowCount: number;
-  /** 三线条数（三线.yaml）。 */
-  expectationCount: number;
+  /** 期待线条数按类别拆（三线.yaml）；期待感/目标两页签各自的徽标。 */
+  expectationExpectCount: number;
+  expectationGoalCount: number;
   /** 封面文件（约定文件名 附件/封面.png|jpg|webp 现查现识别）；无封面为 null。 */
   cover: string | null;
   /** 封面目录（「设封面」的拷贝落点）＝项目内 附件/。 */

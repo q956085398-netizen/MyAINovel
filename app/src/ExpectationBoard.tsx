@@ -20,12 +20,34 @@ import { ExpectationFormDialog } from "./ExpectationDialog";
 
 interface ExpectationBoardProps {
   project: string;
+  /** 页签类别（期待｜目标）：看板只显示本类别的线，新建的类别也随它（工单 #36）。
+   *  手写的未知类别归「期待感」页（与 Rust 侧计数、缺省读数一致）。 */
+  kind: string;
   /** 项目章前缀，用于渲染「第N章」。 */
   chapterPrefix: string | null;
   /** 三线变了：让项目页刷新计数。 */
   onChanged: () => void;
   /** 点章名：跳到书写板块打开该章并选中引文。 */
   onOpenChapter: (ordinal: number, quote: string) => void;
+}
+
+/** 档位主名（工单 #36：行标签带含义，名字不再让人猜）。 */
+const HORIZON_LABELS: Record<string, string> = { 短: "短期", 中: "中期", 长: "长期" };
+
+/** 数据类别值 → 页签名/文案（期待→期待感；未知类别原样显示）。 */
+const KIND_LABELS: Record<string, string> = {
+  [EXPECTATION_KIND_EXPECT]: "期待感",
+  [EXPECTATION_KIND_GOAL]: "目标",
+};
+
+function kindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? kind;
+}
+
+/** 档位第二行小注（阈值即超期阈值，与 Rust 侧一致）。 */
+function horizonSub(horizon: string): string | null {
+  if (!(EXPECTATION_HORIZONS as readonly string[]).includes(horizon)) return null;
+  return horizon === "短" ? `约${expectationOverdueChapters(horizon)}章内兑现` : `约${expectationOverdueChapters(horizon)}章`;
 }
 
 /** 每章一列的宽度（时间线网格的横向刻度）。 */
@@ -97,10 +119,12 @@ function barClass(view: ExpectationView): string {
   return parts.join(" ");
 }
 
-/** 三线看板（工单 #7，docs/spec/期待感三线.md）：时间线网格——
- *  行＝档位（短/中/长），列＝章；未兑现的线延伸到当前章，尾巴虚线，超期标红。 */
+/** 三线看板（工单 #7，docs/spec/期待感三线.md；工单 #36 拆页签）：时间线网格——
+ *  行＝档位（短/中/长），列＝章；未兑现的线延伸到当前章，尾巴虚线，超期标红。
+ *  期待感/目标两页签各挂一张，按 kind 过滤复用。 */
 export default function ExpectationBoard({
   project,
+  kind,
   chapterPrefix,
   onChanged,
   onOpenChapter,
@@ -119,17 +143,21 @@ export default function ExpectationBoard({
       setBoard(await invoke<ExpectationBoard>("expectation_board", { project }));
     } catch (e) {
       setBoard(null);
-      setError(`读取三线失败：${errMsg(e)}`);
+      setError(`读取${kindLabel(kind)}失败：${errMsg(e)}`);
     } finally {
       setLoading(false);
     }
-  }, [project]);
+  }, [project, kind]);
 
   useEffect(() => {
     void scan();
   }, [scan]);
 
-  const items = board?.items ?? [];
+  const label = kindLabel(kind);
+  const goalTab = kind === EXPECTATION_KIND_GOAL;
+  const items = (board?.items ?? []).filter((v) =>
+    goalTab ? v.kind === EXPECTATION_KIND_GOAL : v.kind !== EXPECTATION_KIND_GOAL,
+  );
   const axis = board?.maxChapter ?? 0;
   const placed = items.filter((v) => geometry(v, axis) !== null);
   const pending = items.filter((v) => geometry(v, axis) === null);
@@ -138,10 +166,11 @@ export default function ExpectationBoard({
   const known = EXPECTATION_HORIZONS as readonly string[];
 
   // 行＝短/中/长；手写的未知档位单列一行（只提示不校验）。
-  const rowDefs: { key: string; label: string; bars: Bar[] }[] = [
+  const rowDefs: { key: string; label: string; sub: string | null; bars: Bar[] }[] = [
     ...EXPECTATION_HORIZONS.map((h) => ({
       key: h as string,
-      label: h as string,
+      label: HORIZON_LABELS[h as string] ?? (h as string),
+      sub: horizonSub(h as string),
       bars: placed
         .filter((v) => v.horizon === h)
         .map((v) => geometry(v, axis))
@@ -152,7 +181,8 @@ export default function ExpectationBoard({
     .filter((v) => !known.includes(v.horizon))
     .map((v) => geometry(v, axis))
     .filter((b): b is Bar => b !== null);
-  if (otherBars.length > 0) rowDefs.push({ key: "其他", label: "其他档位", bars: otherBars });
+  if (otherBars.length > 0)
+    rowDefs.push({ key: "其他", label: "其他档位", sub: null, bars: otherBars });
   const rows = rowDefs.map((row) => ({ ...row, ...layout(row.bars) }));
 
   const ticks: number[] = [];
@@ -190,7 +220,7 @@ export default function ExpectationBoard({
 
   async function remove(name: string) {
     if (busy) return;
-    if (!window.confirm(`删除三线「${name}」？\n（三线.yaml 里的这一条会整条删掉）`)) return;
+    if (!window.confirm(`删除期待线「${name}」？\n（三线.yaml 里的这一条会整条删掉）`)) return;
     setBusy(true);
     try {
       await invoke("delete_expectation", { project, name });
@@ -212,7 +242,7 @@ export default function ExpectationBoard({
       await scan();
       onChanged();
     } catch (e) {
-      window.alert(`新建三线失败：${errMsg(e)}`);
+      window.alert(`新建${label}失败：${errMsg(e)}`);
     } finally {
       setBusy(false);
     }
@@ -222,14 +252,15 @@ export default function ExpectationBoard({
     <div className="note-pane">
       <div className="pane-head">
         <div>
-          <h2>三线看板</h2>
+          <h2>{label}看板</h2>
           <p className="hint">
-            期待/目标按档位铺在章节轴上：写作时选中正文右键「记为三线」「兑现三线」；
+            {goalTab ? "主角下一步去哪里" : "读者想知道结果"}的线，按档位铺在章节轴上：
+            写作时选中正文右键「记为{label}」「兑现期待线」；
             这里看哪条线多久没推进、哪章埋的还没兑现。
           </p>
         </div>
         <button className="btn primary" onClick={() => setCreating(true)}>
-          新建三线
+          新建{label}
         </button>
       </div>
 
@@ -241,11 +272,11 @@ export default function ExpectationBoard({
 
       {!loading && !error && items.length === 0 && (
         <div className="empty-state">
-          <p>还没有三线。</p>
+          <p>还没有{label}。</p>
           <p className="hint">
-            先到「书写」里写第一章，选中一段正文右键「记为三线」，这里就会出现它；
+            到「书写」板块写正文，选中一段文字右键「记为{label}」，这里就会出现它；
             <br />
-            也可以先「新建三线」记下名字（待埋），写作时再标注。
+            也可以先「新建{label}」把名字记下来（待埋），写作时再标注落位。
           </p>
         </div>
       )}
@@ -253,19 +284,25 @@ export default function ExpectationBoard({
       {!loading && !error && items.length > 0 && (
         <>
           {pending.length > 0 && (
-            <div className="exp-lane">
-              <span className="exp-lane-label">还没落位（待埋）</span>
-              {pending.map((v) => (
-                <button
-                  key={v.name}
-                  className={`exp-chip ${v.name === selected ? "active" : ""}`}
-                  title="还没在正文里标注；标注后自动落到档位行"
-                  onClick={() => setSelected(v.name)}
-                >
-                  {v.name}
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="exp-lane">
+                <span className="exp-lane-label">还没落位（待埋）</span>
+                {pending.map((v) => (
+                  <button
+                    key={v.name}
+                    className={`exp-chip ${v.name === selected ? "active" : ""}`}
+                    title="还没在正文里标注；标注后自动落到档位行"
+                    onClick={() => setSelected(v.name)}
+                  >
+                    {v.name}
+                  </button>
+                ))}
+              </div>
+              <p className="hint">
+                「还没落位」＝记了名字、还没写进正文；到「书写」板块选中一段文字
+                右键「记为{label}」，同名线就会落位到档位行。
+              </p>
+            </>
           )}
 
           {axis > 0 && placed.length > 0 && (
@@ -278,7 +315,8 @@ export default function ExpectationBoard({
                     className="exp-row-label"
                     style={{ height: TRACK_PAD + row.lanes * LANE_H }}
                   >
-                    {row.label}
+                    <span>{row.label}</span>
+                    {row.sub && <span className="exp-row-sub">{row.sub}</span>}
                   </div>
                 ))}
               </div>
@@ -371,7 +409,7 @@ export default function ExpectationBoard({
             <section className="exp-detail">
               <div className="exp-detail-head">
                 <h3>{selectedView.name}</h3>
-                <span className="card-cat">{selectedView.kind}</span>
+                <span className="card-cat">{kindLabel(selectedView.kind)}</span>
                 <span className="card-cat">{selectedView.horizon}</span>
                 {selectedView.overdue && (
                   <span className="card-cat danger">
@@ -386,17 +424,17 @@ export default function ExpectationBoard({
                     className="select small"
                     value={selectedView.kind}
                     disabled={busy}
-                    title="类别（约定值只提示不校验）"
+                    title="类别（约定值只提示不校验）；改成另一类会换到另一个页签"
                     onChange={(e) =>
                       void changeMeta(selectedView.name, e.target.value, selectedView.horizon)
                     }
                   >
                     {!(EXPECTATION_KINDS as readonly string[]).includes(selectedView.kind) && (
-                      <option value={selectedView.kind}>{selectedView.kind}</option>
+                      <option value={selectedView.kind}>{kindLabel(selectedView.kind)}</option>
                     )}
                     {EXPECTATION_KINDS.map((k) => (
                       <option key={k} value={k}>
-                        {k}
+                        {kindLabel(k)}
                       </option>
                     ))}
                   </select>
@@ -481,7 +519,7 @@ export default function ExpectationBoard({
                 </p>
               ))}
               {selectedView.planted.length === 0 && selectedView.fulfilled.length === 0 && (
-                <p className="hint">还没落位：到正文里选中文字右键「记为三线」。</p>
+                <p className="hint">还没落位：到正文里选中文字右键「记为{label}」。</p>
               )}
             </section>
           )}
@@ -490,10 +528,10 @@ export default function ExpectationBoard({
 
       {creating && (
         <ExpectationFormDialog
-          title="新建三线（待埋）"
+          title={`新建${label}（待埋）`}
           hint="只是先记下这条线；写作时在正文里选中文字标注，它就会升为「已埋」并落到对应档位行。"
           initial=""
-          initialKind={EXPECTATION_KIND_EXPECT}
+          fixedKind={kind}
           initialHorizon={EXPECTATION_HORIZON_MID}
           busy={busy}
           onCancel={() => setCreating(false)}
