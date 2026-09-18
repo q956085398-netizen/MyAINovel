@@ -42,11 +42,23 @@ const PERSONA_BODY_LIMIT: usize = 4000;
 
 /// 组装命令材料。`subjects` 只有「人物关系梳理」用（选中的人名）；
 /// 其余命令传空切片。`润色` 由前端带选区，不进这里。
+#[cfg(test)]
 pub fn build_context(
     kind: &str,
     project: &Path,
     chapter: Option<u32>,
     subjects: &[String],
+) -> Result<String, String> {
+    build_context_with_chapter_content(kind, project, chapter, subjects, None)
+}
+
+/// IPC 入口可为陪看命令提供作者点击按钮那一刻的正文快照；其他命令忽略它。
+pub fn build_context_with_chapter_content(
+    kind: &str,
+    project: &Path,
+    chapter: Option<u32>,
+    subjects: &[String],
+    chapter_content: Option<&str>,
 ) -> Result<String, String> {
     match kind {
         KIND_ARRANGEMENT => arrangement_context(project),
@@ -58,7 +70,7 @@ pub fn build_context(
         }
         KIND_CHAPTER_COMPANION => {
             let ordinal = chapter.ok_or_else(|| "「AI 陪看本章」需要指定章序".to_string())?;
-            chapter_companion_context(project, ordinal, None)
+            chapter_companion_context(project, ordinal, chapter_content)
         }
         KIND_CHARACTER_DIALOGUE => character_context(project, subjects),
         other => Err(format!("未知的 AI 命令「{other}」")),

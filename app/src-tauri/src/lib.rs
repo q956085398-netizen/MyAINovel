@@ -771,19 +771,12 @@ fn build_ai_context(
     subjects: Option<Vec<String>>,
     chapter_content: Option<String>,
 ) -> Result<String, String> {
-    if kind == ai_context::KIND_CHAPTER_COMPANION {
-        let ordinal = chapter.ok_or_else(|| "「AI 陪看本章」需要指定章序".to_string())?;
-        return ai_context::chapter_companion_context(
-            Path::new(&project),
-            ordinal,
-            chapter_content.as_deref(),
-        );
-    }
-    ai_context::build_context(
+    ai_context::build_context_with_chapter_content(
         &kind,
         Path::new(&project),
         chapter,
         subjects.as_deref().unwrap_or(&[]),
+        chapter_content.as_deref(),
     )
 }
 
