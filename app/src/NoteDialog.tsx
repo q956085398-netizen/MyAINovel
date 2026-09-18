@@ -54,6 +54,7 @@ export default function NoteDialog({
   const [group, setGroup] = useState(initial.group ?? "");
   const [aliasesText, setAliasesText] = useState(initial.aliases.join("、"));
   const [category, setCategory] = useState(initial.category ?? "");
+  const [emotionGoal, setEmotionGoal] = useState(initial.emotionGoal ?? "");
   const [startChapter, setStartChapter] = useState(
     initial.startChapter === null ? "" : String(initial.startChapter),
   );
@@ -85,6 +86,7 @@ export default function NoteDialog({
       group: group.trim() || null,
       aliases: splitList(aliasesText),
       category: category.trim() || null,
+      emotionGoal: emotionGoal.trim() || null,
       startChapter: parseChapter(startChapter),
       endChapter: parseChapter(endChapter),
       body,
@@ -204,6 +206,14 @@ export default function NoteDialog({
                 onChange={setTypesText}
                 words={vocab?.types ?? []}
                 placeholder="如：掉马甲、打脸"
+              />
+            </label>
+            <label>
+              单元情绪目标（可选）
+              <input
+                value={emotionGoal}
+                onChange={(e) => setEmotionGoal(e.target.value)}
+                placeholder="如：沉冤得雪的痛快"
               />
             </label>
             <label>

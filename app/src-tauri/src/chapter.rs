@@ -64,6 +64,8 @@ pub struct UnitBrief {
     pub name: String,
     pub core: Option<String>,
     pub types: Vec<String>,
+    /// 单元整体情绪承诺；桥段局部情绪曲线另由本章意图读取。
+    pub emotion_goal: Option<String>,
     pub body: String,
     pub start_chapter: Option<u32>,
     pub end_chapter: Option<u32>,
@@ -421,6 +423,7 @@ pub fn find_unit_for_chapter(project: &Path, ordinal: u32) -> Result<Option<Unit
         name: unit.name.clone(),
         core: unit.core.clone(),
         types: unit.types.clone(),
+        emotion_goal: unit.emotion_goal.clone(),
         body: unit.body.clone(),
         start_chapter: unit.start_chapter,
         end_chapter: unit.end_chapter,

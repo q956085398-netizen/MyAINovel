@@ -94,6 +94,7 @@ export default function ChatAdoptDialog({
           group: null,
           aliases: [],
           category: null,
+          emotionGoal: null,
           startChapter: null,
           endChapter: null,
           body: body.trim(),

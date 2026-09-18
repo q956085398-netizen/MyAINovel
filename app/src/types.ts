@@ -203,6 +203,8 @@ export interface NoteDraft {
   aliases: string[];
   /** 世界观＝力量体系｜地理｜势力｜其他。 */
   category: string | null;
+  /** 单元专用：本单元最终要给读者的整体感受或高潮承诺。 */
+  emotionGoal: string | null;
   /** 单元专用：单元区间（起章/止章，书写侧栏按它反查「本章属于哪个单元」）。 */
   startChapter: number | null;
   endChapter: number | null;
@@ -221,6 +223,7 @@ export function emptyNoteDraft(kind: NoteKind, name = ""): NoteDraft {
     group: null,
     aliases: [],
     category: null,
+    emotionGoal: null,
     startChapter: null,
     endChapter: null,
     body: "",
@@ -305,6 +308,7 @@ export interface UnitBrief {
   name: string;
   core: string | null;
   types: string[];
+  emotionGoal: string | null;
   body: string;
   startChapter: number | null;
   endChapter: number | null;
@@ -315,6 +319,13 @@ export interface UnitBrief {
   map: string | null;
   upgradeBattle: string | null;
   pace: string | null;
+}
+
+/** 书写页从构思规划读取的安静提示；缺规划不是错误。 */
+export interface ChapterIntent {
+  unit: UnitBrief | null;
+  bridge: Bridge | null;
+  warnings: string[];
 }
 
 /** 与 Rust 侧 chapter.rs::WritingStats 对应（应用状态，不进创作目录）。 */

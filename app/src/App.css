@@ -2357,6 +2357,44 @@ body {
   color: var(--ink-soft);
 }
 
+.chapter-intent-card {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+.chapter-intent-card summary {
+  cursor: pointer;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-ui);
+  font-weight: 600;
+}
+
+.chapter-intent-card summary span {
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
+.chapter-intent-content {
+  padding: 0 var(--sp-4) var(--sp-4);
+}
+
+.intent-field {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-ui);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.intent-warnings {
+  margin: var(--sp-3) 0 0;
+  padding-left: var(--sp-5);
+  color: var(--ink-soft);
+  font-size: var(--fs-sub);
+  line-height: 1.6;
+}
+
 .unit-head {
   display: flex;
   align-items: baseline;

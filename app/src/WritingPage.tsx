@@ -14,6 +14,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AiSeed,
+  ChapterIntent,
   ChapterEntry,
   ExpectationBoard,
   Foreshadow,
@@ -22,7 +23,6 @@ import type {
   ProjectMeta,
   SaveResult,
   SnapshotEntry,
-  UnitBrief,
   WritingBridge,
   WritingLocate,
   WritingStats,
@@ -223,7 +223,7 @@ export default function WritingPage({
   const [counts, setCounts] = useState({ billed: 0, han: 0, sel: 0 });
   const [stats, setStats] = useState<WritingStats>(emptyWritingStats());
   const [status, setStatus] = useState(STATUS_DRAFT);
-  const [unit, setUnit] = useState<UnitBrief | null>(null);
+  const [intent, setIntent] = useState<ChapterIntent | null>(null);
   const [listOpen, setListOpen] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [immersive, setImmersive] = useState(false);
@@ -253,6 +253,7 @@ export default function WritingPage({
   const [expectationBusy, setExpectationBusy] = useState(false);
   // 内联图查看器（工单 #31）：点正文里的截图弹原图。
   const imageViewer = useImageViewer();
+  const unit = intent?.unit ?? null;
 
   // ---------- 编辑器装配 ----------
 
@@ -404,20 +405,21 @@ export default function WritingPage({
     return list;
   }
 
-  async function loadUnit(entry: ChapterEntry) {
+  async function loadIntent(entry: ChapterEntry) {
     if (entry.ordinal === null) {
-      setUnit(null);
+      setIntent(null);
       return;
     }
     try {
-      setUnit(
-        await invoke<UnitBrief | null>("find_unit_for_chapter", {
+      setIntent(
+        await invoke<ChapterIntent>("find_chapter_intent", {
           project: project.dir,
           ordinal: entry.ordinal,
         }),
       );
     } catch {
-      setUnit(null);
+      // 规划读取是写作旁路；失败时照常可写，只显示自由写作提示。
+      setIntent({ unit: null, bridge: null, warnings: [] });
     }
   }
 
@@ -644,7 +646,7 @@ export default function WritingPage({
       setConflict(false);
       loadContent(doc.content);
       localStorage.setItem(chapterKey(project.dir), entry.path);
-      void loadUnit(entry);
+      void loadIntent(entry);
       return true;
     } catch (e) {
       window.alert(`读取章节失败：${errMsg(e)}`);
@@ -819,7 +821,7 @@ export default function WritingPage({
       await invoke("delete_chapter", { path: entry.path });
       currentRef.current = null;
       setCurrent(null);
-      setUnit(null);
+      setIntent(null);
       const list = await rescan();
       const next = list.length > 0 ? list[Math.min(Math.max(index, 0), list.length - 1)] : null;
       if (next) await openChapter(next);
@@ -1309,9 +1311,13 @@ export default function WritingPage({
 
         {sidebarOpen && (
           <aside className="writing-sidebar">
-            <h2 className="sidebar-title">本章在书里的位置</h2>
-            {unit ? (
-              <>
+            <h2 className="sidebar-title">本章意图</h2>
+            {unit && intent?.bridge ? (
+              <details className="chapter-intent-card" open>
+                <summary>
+                  {unit.name} <span>→</span> {intent.bridge.name}
+                </summary>
+                <div className="chapter-intent-content">
                 <div className="unit-head">
                   <span className="unit-name">{unit.name}</span>
                   {unit.index !== null && unit.total > 0 && (
@@ -1327,6 +1333,12 @@ export default function WritingPage({
                     {unit.core}
                   </p>
                 )}
+                {unit.emotionGoal && (
+                  <p className="unit-core">
+                    <span className="field-label">单元情绪目标</span>
+                    {unit.emotionGoal}
+                  </p>
+                )}
                 <p className="unit-attrs">
                   {[
                     unit.line && `线：${unit.line}`,
@@ -1337,18 +1349,31 @@ export default function WritingPage({
                     .filter(Boolean)
                     .join(" · ") || "排布里还没给这个单元定属性"}
                 </p>
-                <div className="unit-body">
-                  <span className="field-label">桥段安排</span>
-                  <pre>{unit.body.trim() || "（单元里还没写桥段安排）"}</pre>
+                {([
+                  ["情绪曲线", intent.bridge.emotionCurve],
+                  ["关键转折", intent.bridge.keyTurn],
+                  ["期待钩子", intent.bridge.expectationHook],
+                  ["章节拍安排", intent.bridge.beatPlan],
+                ] as const).map(([label, value]) =>
+                  value ? (
+                    <p className="intent-field" key={label}>
+                      <span className="field-label">{label}</span>
+                      {value}
+                    </p>
+                  ) : null,
+                )}
                 </div>
-              </>
+              </details>
             ) : (
               <p className="hint">
-                {current?.ordinal === null
-                  ? "这一章的文件名没有章号，无法对应到单元。"
-                  : "本章还没归入单元。到「构思 → 单元」里给单元填上起章/止章，这里就会显示它所在的位置。"}
+                本章还没有设定写作意图，可以先自由写；形成明确剧情后，再整理为桥段草案。
               </p>
             )}
+            {unit && intent?.bridge && intent.warnings.length ? (
+              <ul className="intent-warnings">
+                {intent.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+              </ul>
+            ) : null}
 
             {(chapterPlanted.length > 0 || chapterRecovered.length > 0) && (
               <>

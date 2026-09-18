@@ -371,18 +371,30 @@ pub struct Bridge {
     pub draft: BridgeDraft,
 }
 
-impl Bridge {
-    pub fn name(&self) -> &str {
-        &self.draft.name
-    }
-}
-
 impl std::ops::Deref for Bridge {
     type Target = BridgeDraft;
 
     fn deref(&self) -> &Self::Target {
         &self.draft
     }
+}
+
+/// 书写页按当前章序读取的规划提示。它是纯读取结果：缺规划也始终可写。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterIntent {
+    pub unit: Option<crate::chapter::UnitBrief>,
+    pub bridge: Option<Bridge>,
+    /// 规划里的区间或次序不一致只作提示，绝不阻断书写或保存。
+    pub warnings: Vec<String>,
+}
+
+/// 桥段次序是人工确定的叙事次序；未填顺序的项只排在最后作稳定兜底。
+fn compare_bridge_order(left: &Bridge, right: &Bridge) -> std::cmp::Ordering {
+    left.order
+        .unwrap_or(u32::MAX)
+        .cmp(&right.order.unwrap_or(u32::MAX))
+        .then_with(|| left.name.cmp(&right.name))
 }
 
 fn bridges_dir(project: &Path) -> std::path::PathBuf {
@@ -410,15 +422,89 @@ pub fn scan_bridges(project: &Path) -> Result<Vec<Bridge>, String> {
         left.draft
             .unit
             .cmp(&right.draft.unit)
-            .then_with(|| {
-                left.draft
-                    .order
-                    .unwrap_or(u32::MAX)
-                    .cmp(&right.draft.order.unwrap_or(u32::MAX))
-            })
-            .then_with(|| left.name().cmp(right.name()))
+            .then_with(|| compare_bridge_order(left, right))
     });
     Ok(bridges)
+}
+
+/// 先按单元区间定位，再只在该单元已安排的桥段中找覆盖当前章的项。
+/// 桥段区间可晚填；重叠时沿用人工桥段次序，取最靠前的一张并给出提示。
+pub fn find_chapter_intent(project: &Path, ordinal: u32) -> Result<ChapterIntent, String> {
+    let unit = crate::chapter::find_unit_for_chapter(project, ordinal)?;
+    let Some(ref unit_brief) = unit else {
+        return Ok(ChapterIntent {
+            unit: None,
+            bridge: None,
+            warnings: Vec::new(),
+        });
+    };
+
+    let bridges = scan_bridges(project)?
+        .into_iter()
+        .filter(|bridge| bridge.unit.as_deref() == Some(unit_brief.name.as_str()))
+        .collect::<Vec<_>>();
+    let mut warnings = chapter_intent_warnings(unit_brief, &bridges);
+    let mut matches = bridges
+        .into_iter()
+        .filter(|bridge| {
+            matches!(
+                (bridge.start_chapter, bridge.end_chapter),
+                (Some(start), Some(end)) if start <= end && start <= ordinal && ordinal <= end
+            )
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(compare_bridge_order);
+    if matches.len() > 1 {
+        warnings.push("多个桥段覆盖本章，按桥段次序显示最靠前的一项。".into());
+    }
+
+    Ok(ChapterIntent {
+        unit,
+        bridge: matches.into_iter().next(),
+        warnings,
+    })
+}
+
+fn chapter_intent_warnings(unit: &crate::chapter::UnitBrief, bridges: &[Bridge]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let mut ordered = bridges
+        .iter()
+        .filter_map(|bridge| {
+            let (Some(start), Some(end)) = (bridge.start_chapter, bridge.end_chapter) else {
+                return None;
+            };
+            if start > end {
+                warnings.push(format!("桥段「{}」的起章晚于止章，仅作提示。", bridge.name));
+                return None;
+            }
+            if unit
+                .start_chapter
+                .is_some_and(|unit_start| start < unit_start)
+                || unit.end_chapter.is_some_and(|unit_end| end > unit_end)
+            {
+                warnings.push(format!(
+                    "桥段「{}」的区间越出所属单元，仅作提示。",
+                    bridge.name
+                ));
+            }
+            Some(bridge)
+        })
+        .collect::<Vec<_>>();
+    ordered.sort_by(|left, right| compare_bridge_order(left, right));
+    if ordered
+        .windows(2)
+        .any(|pair| pair[0].start_chapter > pair[1].start_chapter)
+    {
+        warnings.push("桥段章节区间与人工次序不一致，仅作提示。".into());
+    }
+    if ordered.iter().enumerate().any(|(index, bridge)| {
+        ordered[index + 1..].iter().any(|other| {
+            bridge.start_chapter <= other.end_chapter && other.start_chapter <= bridge.end_chapter
+        })
+    }) {
+        warnings.push("桥段章节区间有重叠，仅作提示。".into());
+    }
+    warnings
 }
 
 fn read_bridge(path: &Path) -> Bridge {
@@ -556,13 +642,7 @@ pub fn move_bridge(project: &Path, path: &Path, direction: i32) -> Result<Vec<Br
         .into_iter()
         .filter(|item| item.draft.unit.as_deref() == Some(unit))
         .collect::<Vec<_>>();
-    bridges.sort_by(|left, right| {
-        left.draft
-            .order
-            .unwrap_or(u32::MAX)
-            .cmp(&right.draft.order.unwrap_or(u32::MAX))
-            .then_with(|| left.name().cmp(right.name()))
-    });
+    bridges.sort_by(compare_bridge_order);
     let index = bridges
         .iter()
         .position(|item| item.path == path)
@@ -827,5 +907,95 @@ mod tests {
         assert!(fs::read_to_string(first.path)
             .unwrap()
             .contains("手补说明: 保留"));
+    }
+
+    #[test]
+    fn 本章意图_命中所属单元与覆盖桥段() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let mut unit = crate::project::NoteDraft::new(crate::project::NoteKind::Unit, "初入京城");
+        unit.start_chapter = Some(5);
+        unit.end_chapter = Some(8);
+        unit.emotion_goal = Some("沉冤得雪的痛快".into());
+        crate::project::save_note(&project, &unit, None).unwrap();
+
+        let mut bridge = BridgeDraft::new("夜探旧宅");
+        bridge.unit = Some("初入京城".into());
+        bridge.order = Some(1);
+        bridge.start_chapter = Some(5);
+        bridge.end_chapter = Some(8);
+        bridge.emotion_curve = Some("压抑 → 痛快".into());
+        bridge.key_turn = Some("找到洗冤证据".into());
+        bridge.expectation_hook = Some("证据指向幕后人".into());
+        bridge.beat_plan = Some("第5章代入＋信息差".into());
+        save_bridge(&project, &bridge, None).unwrap();
+
+        let intent = find_chapter_intent(&project, 6).unwrap();
+        let unit = intent.unit.unwrap();
+        assert_eq!(unit.name, "初入京城");
+        assert_eq!(unit.emotion_goal.as_deref(), Some("沉冤得雪的痛快"));
+        let bridge = intent.bridge.unwrap();
+        assert_eq!(bridge.name, "夜探旧宅");
+        assert_eq!(bridge.emotion_curve.as_deref(), Some("压抑 → 痛快"));
+        assert!(intent.warnings.is_empty());
+    }
+
+    #[test]
+    fn 本章意图_缺少规划时保持空提示() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+
+        let intent = find_chapter_intent(&project, 1).unwrap();
+        assert!(intent.unit.is_none());
+        assert!(intent.bridge.is_none());
+        assert!(intent.warnings.is_empty());
+    }
+
+    #[test]
+    fn 本章意图_异常区间只返回提示且仍按次序取桥段() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let mut unit = crate::project::NoteDraft::new(crate::project::NoteKind::Unit, "初入京城");
+        unit.start_chapter = Some(5);
+        unit.end_chapter = Some(8);
+        crate::project::save_note(&project, &unit, None).unwrap();
+
+        let mut later = BridgeDraft::new("后到的桥段");
+        later.unit = Some("初入京城".into());
+        later.order = Some(1);
+        later.start_chapter = Some(6);
+        later.end_chapter = Some(9);
+        save_bridge(&project, &later, None).unwrap();
+
+        let mut earlier = BridgeDraft::new("先发生的桥段");
+        earlier.unit = Some("初入京城".into());
+        earlier.order = Some(2);
+        earlier.start_chapter = Some(5);
+        earlier.end_chapter = Some(7);
+        save_bridge(&project, &earlier, None).unwrap();
+
+        let mut reversed = BridgeDraft::new("倒置区间");
+        reversed.unit = Some("初入京城".into());
+        reversed.order = Some(3);
+        reversed.start_chapter = Some(8);
+        reversed.end_chapter = Some(6);
+        save_bridge(&project, &reversed, None).unwrap();
+
+        let intent = find_chapter_intent(&project, 6).unwrap();
+        assert_eq!(
+            intent.bridge.unwrap().name,
+            "后到的桥段",
+            "仍由人工桥段次序决定"
+        );
+        assert!(intent
+            .warnings
+            .iter()
+            .any(|hint| hint.contains("越出所属单元")));
+        assert!(intent.warnings.iter().any(|hint| hint.contains("次序")));
+        assert!(intent.warnings.iter().any(|hint| hint.contains("重叠")));
+        assert!(intent
+            .warnings
+            .iter()
+            .any(|hint| hint.contains("起章晚于止章")));
     }
 }

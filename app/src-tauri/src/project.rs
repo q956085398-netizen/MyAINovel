@@ -406,7 +406,7 @@ impl NoteKind {
 }
 
 /// 笔记保存入参：五类共用一张宽表，落盘时只写本类别的键
-/// （矛盾＝一句话核心/类型/来源/关联/状态；单元＝核心矛盾/类型/单元区间；
+/// （矛盾＝一句话核心/类型/来源/关联/状态；单元＝核心矛盾/类型/情绪目标/单元区间；
 /// 人物＝分组/别名；世界观＝类别；开头＝状态）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -422,6 +422,8 @@ pub struct NoteDraft {
     pub group: Option<String>,
     pub aliases: Vec<String>,
     pub category: Option<String>,
+    /// 单元专用的整体情绪承诺；与桥段的局部情绪曲线并列，不相互推导。
+    pub emotion_goal: Option<String>,
     /// 单元专用的单元区间（起章/止章；工单 #5 联动侧栏按它反查「本章属于哪个单元」）。
     pub start_chapter: Option<u32>,
     pub end_chapter: Option<u32>,
@@ -441,6 +443,7 @@ impl NoteDraft {
             group: None,
             aliases: Vec::new(),
             category: None,
+            emotion_goal: None,
             start_chapter: None,
             end_chapter: None,
             body: String::new(),
@@ -462,6 +465,7 @@ pub struct NoteEntry {
     pub group: Option<String>,
     pub aliases: Vec<String>,
     pub category: Option<String>,
+    pub emotion_goal: Option<String>,
     pub start_chapter: Option<u32>,
     pub end_chapter: Option<u32>,
     pub body: String,
@@ -497,6 +501,7 @@ enum NoteField {
     Group,
     Aliases,
     Category,
+    EmotionGoal,
     /// 单元的章序区间（起章/止章，两个可选整数）。
     ChapterRange,
 }
@@ -505,7 +510,7 @@ fn note_fields(kind: NoteKind) -> &'static [NoteField] {
     use NoteField::*;
     match kind {
         NoteKind::Contradiction => &[Core("一句话核心"), Types, Source, Links, Status],
-        NoteKind::Unit => &[Core("核心矛盾"), Types, ChapterRange],
+        NoteKind::Unit => &[Core("核心矛盾"), Types, EmotionGoal, ChapterRange],
         NoteKind::Character => &[Group, Aliases],
         NoteKind::Worldview => &[Category],
         NoteKind::Opening => &[Status],
@@ -526,6 +531,7 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
         group: None,
         aliases: Vec::new(),
         category: None,
+        emotion_goal: None,
         start_chapter: None,
         end_chapter: None,
         body: String::new(),
@@ -557,6 +563,7 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
             NoteField::Group => entry.group = map_scalar(&map, "分组"),
             NoteField::Aliases => entry.aliases = map_list(&map, "别名"),
             NoteField::Category => entry.category = map_scalar(&map, "类别"),
+            NoteField::EmotionGoal => entry.emotion_goal = map_scalar(&map, "情绪目标"),
             NoteField::ChapterRange => {
                 entry.start_chapter = map_u32(&map, "起章");
                 entry.end_chapter = map_u32(&map, "止章");
@@ -604,6 +611,9 @@ fn apply_draft(map: &mut Mapping, draft: &NoteDraft) {
             NoteField::Group => set_map_scalar(map, "分组", draft.group.as_deref()),
             NoteField::Aliases => set_map_list(map, "别名", &draft.aliases),
             NoteField::Category => set_map_scalar(map, "类别", draft.category.as_deref()),
+            NoteField::EmotionGoal => {
+                set_map_scalar(map, "情绪目标", draft.emotion_goal.as_deref())
+            }
             NoteField::ChapterRange => {
                 set_map_u32(map, "起章", draft.start_chapter);
                 set_map_u32(map, "止章", draft.end_chapter);

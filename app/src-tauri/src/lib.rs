@@ -27,7 +27,7 @@ use export::{ChapterRange, ExportReport, ExportTemplate};
 use foreshadow::{Foreshadow, ForeshadowView};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
-use planning::{Bridge, BridgeDraft, MainlinePlan, Outline};
+use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, Outline};
 use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
     ProjectMeta,
@@ -496,6 +496,11 @@ fn find_unit_for_chapter(project: String, ordinal: u32) -> Result<Option<UnitBri
     chapter::find_unit_for_chapter(Path::new(&project), ordinal)
 }
 
+#[tauri::command]
+fn find_chapter_intent(project: String, ordinal: u32) -> Result<ChapterIntent, String> {
+    planning::find_chapter_intent(Path::new(&project), ordinal)
+}
+
 // --- 伏笔系统（工单 #6，docs/spec/伏笔系统.md）：项目根 伏笔.yaml ---
 
 #[tauri::command]
@@ -841,6 +846,7 @@ pub fn run() {
             read_chapter_snapshot,
             save_chapter_paste_image,
             find_unit_for_chapter,
+            find_chapter_intent,
             read_foreshadows,
             foreshadow_board,
             add_foreshadow,
