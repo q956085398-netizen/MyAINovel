@@ -15,13 +15,14 @@ interface PlanningViewProps {
 /** 大纲纸面与主线图：自由文本和结构化里程碑各自只有一份来源。 */
 export default function PlanningView({ project, unitNames }: PlanningViewProps) {
   const [outline, setOutline] = useState<Outline>({ body: "", fingerprint: null });
-  const [plan, setPlan] = useState<MainlinePlan>({ lines: [] });
+  const [plan, setPlan] = useState<MainlinePlan>({ lines: [], fingerprint: null });
   const [loading, setLoading] = useState(true);
   const [outlineDirty, setOutlineDirty] = useState(false);
   const [planDirty, setPlanDirty] = useState(false);
   const [savingOutline, setSavingOutline] = useState(false);
   const [savingPlan, setSavingPlan] = useState(false);
   const [outlineConflict, setOutlineConflict] = useState(false);
+  const [planConflict, setPlanConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -78,11 +79,17 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
     }
   }
 
-  async function savePlan() {
+  async function savePlan(force = false) {
     if (savingPlan) return;
     setSavingPlan(true);
     try {
-      await invoke("save_mainlines", { project, plan });
+      const result = await invoke<SaveResult>("save_mainlines", { project, plan, force });
+      if (result.status === "conflict") {
+        setPlanConflict(true);
+        return;
+      }
+      setPlan((current) => ({ ...current, fingerprint: result.fingerprint }));
+      setPlanConflict(false);
       setPlanDirty(false);
     } catch (e) {
       window.alert(`保存主线失败：${errMsg(e)}`);
@@ -91,8 +98,19 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
     }
   }
 
+  async function reloadPlan() {
+    try {
+      setPlan(await invoke<MainlinePlan>("read_mainlines", { project }));
+      setPlanDirty(false);
+      setPlanConflict(false);
+    } catch (e) {
+      window.alert(`重新读取主线失败：${errMsg(e)}`);
+    }
+  }
+
   function updateLine(index: number, next: StoryLine) {
     setPlan((current) => ({
+      ...current,
       lines: current.lines.map((line, i) => (i === index ? next : line)),
     }));
     setPlanDirty(true);
@@ -158,7 +176,7 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
           <div className="conflict-box">
             磁盘上的大纲已被外部修改。请重新读取，或确认以当前内容覆盖。
             <div className="conflict-actions">
-              <button className="btn small" onClick={() => void reloadOutline}>重新读取</button>
+              <button className="btn small" onClick={() => void reloadOutline()}>重新读取</button>
               <button className="btn small" onClick={() => void saveOutline(true)}>确认覆盖</button>
             </div>
           </div>
@@ -204,7 +222,7 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
                       className="btn small"
                       disabled={lineIndex === 0}
                       onClick={() => {
-                        setPlan((current) => ({ lines: move(current.lines, lineIndex, -1) }));
+                        setPlan((current) => ({ ...current, lines: move(current.lines, lineIndex, -1) }));
                         setPlanDirty(true);
                       }}
                     >
@@ -214,7 +232,7 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
                       className="btn small"
                       disabled={lineIndex === plan.lines.length - 1}
                       onClick={() => {
-                        setPlan((current) => ({ lines: move(current.lines, lineIndex, 1) }));
+                        setPlan((current) => ({ ...current, lines: move(current.lines, lineIndex, 1) }));
                         setPlanDirty(true);
                       }}
                     >
@@ -224,6 +242,7 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
                       className="btn small"
                       onClick={() => {
                         setPlan((current) => ({
+                          ...current,
                           lines: current.lines.map((currentLine, i) => ({
                             ...currentLine,
                             isMain: i === lineIndex,
@@ -237,7 +256,13 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
                     <button
                       className="text-danger"
                       onClick={() => {
-                        setPlan((current) => ({ lines: current.lines.filter((_, i) => i !== lineIndex) }));
+                        setPlan((current) => {
+                          const lines = current.lines.filter((_, i) => i !== lineIndex);
+                          if (lines.length > 0 && !lines.some((currentLine) => currentLine.isMain)) {
+                            lines[0] = { ...lines[0], isMain: true };
+                          }
+                          return { ...current, lines };
+                        });
                         setPlanDirty(true);
                       }}
                     >
@@ -282,12 +307,27 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
         <button
           className="btn primary add-line"
           onClick={() => {
-            setPlan((current) => ({ lines: [...current.lines, emptyStoryLine()] }));
+            setPlan((current) => ({
+              ...current,
+              lines: [
+                ...current.lines,
+                { ...emptyStoryLine(), isMain: !current.lines.some((line) => line.isMain) },
+              ],
+            }));
             setPlanDirty(true);
           }}
         >
           新增情节线
         </button>
+        {planConflict && (
+          <div className="conflict-box">
+            磁盘上的主线图已被外部修改。请重新读取，或确认以当前内容覆盖。
+            <div className="conflict-actions">
+              <button className="btn small" onClick={() => void reloadPlan()}>重新读取</button>
+              <button className="btn small" onClick={() => void savePlan(true)}>确认覆盖</button>
+            </div>
+          </div>
+        )}
         <p className="hint">文件：构思/主线.yaml。单元若被改名或删除，会保留引用并以提示显示。</p>
       </section>
     </div>

@@ -269,8 +269,8 @@ fn read_mainlines(project: String) -> Result<MainlinePlan, String> {
 }
 
 #[tauri::command]
-fn save_mainlines(project: String, plan: MainlinePlan) -> Result<(), String> {
-    planning::save_mainlines(Path::new(&project), &plan)
+fn save_mainlines(project: String, plan: MainlinePlan, force: bool) -> Result<SaveResult, String> {
+    planning::save_mainlines(Path::new(&project), &plan, force)
 }
 
 #[tauri::command]

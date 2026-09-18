@@ -65,6 +65,8 @@ pub fn save_outline(
 #[serde(rename_all = "camelCase")]
 pub struct MainlinePlan {
     pub lines: Vec<StoryLine>,
+    /// 主线图也是长活规划状态；外部变更先交人裁决，避免丢掉新增整条情节线。
+    pub fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,7 +105,8 @@ pub fn read_mainlines(project: &Path) -> Result<MainlinePlan, String> {
     if !path.exists() {
         return Ok(MainlinePlan::default());
     }
-    let text = crate::book_file::read_text(&path)?;
+    let bytes = fs::read(&path).map_err(|e| format!("无法读取文件 {}：{e}", path.display()))?;
+    let text = String::from_utf8_lossy(&bytes);
     let value: Value =
         serde_yaml::from_str(&text).map_err(|e| format!("无法解析 {}：{e}", path.display()))?;
     let Value::Sequence(lines) = value else {
@@ -114,7 +117,10 @@ pub fn read_mainlines(project: &Path) -> Result<MainlinePlan, String> {
         .enumerate()
         .map(|(index, value)| line_from_value(value, &path, index + 1))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(MainlinePlan { lines })
+    Ok(MainlinePlan {
+        lines,
+        fingerprint: Some(crate::book_file::content_fingerprint(&bytes).to_string()),
+    })
 }
 
 fn line_from_value(value: Value, path: &Path, index: usize) -> Result<StoryLine, String> {
@@ -216,16 +222,26 @@ fn push_unique(values: &mut Vec<String>, raw: &str) {
     }
 }
 
-pub fn save_mainlines(project: &Path, plan: &MainlinePlan) -> Result<(), String> {
+pub fn save_mainlines(
+    project: &Path,
+    plan: &MainlinePlan,
+    force: bool,
+) -> Result<crate::book_file::SaveResult, String> {
     let dir = project.join(crate::project::CONCEPT_DIR);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("无法创建构思目录 {}：{e}", dir.display()))?;
-    // 保存瞬间重读盘上表：界面不认识的手补键仍以盘上版本为准（ADR 0004）。
-    // 名称/标题是可读的软身份；人手改名时回退同一位置，避免丢掉旧字段。
-    let mut merged = plan.clone();
-    if mainlines_path(project).is_file() {
-        merge_disk_unknown_fields(&mut merged, &read_mainlines(project)?);
+    let path = dir.join(MAINLINES_FILE);
+    if !force {
+        let disk_fingerprint = match fs::read(&path) {
+            Ok(bytes) => Some(crate::book_file::content_fingerprint(&bytes).to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("无法读取文件 {}：{error}", path.display())),
+        };
+        if disk_fingerprint != plan.fingerprint {
+            return Ok(crate::book_file::SaveResult::Conflict);
+        }
     }
+    fs::create_dir_all(&dir).map_err(|e| format!("无法创建构思目录 {}：{e}", dir.display()))?;
+    let mut merged = plan.clone();
+    ensure_one_mainline(&mut merged.lines);
     let values = merged
         .lines
         .iter()
@@ -233,34 +249,22 @@ pub fn save_mainlines(project: &Path, plan: &MainlinePlan) -> Result<(), String>
         .collect::<Result<Vec<_>, _>>()?;
     let text = serde_yaml::to_string(&Value::Sequence(values))
         .map_err(|e| format!("无法生成主线.yaml：{e}"))?;
-    crate::book_file::write_text_atomic(&dir.join(MAINLINES_FILE), &text)
+    crate::book_file::write_text_atomic(&path, &text)?;
+    Ok(crate::book_file::SaveResult::Saved {
+        fingerprint: crate::book_file::content_fingerprint(text.as_bytes()).to_string(),
+    })
 }
 
-fn merge_disk_unknown_fields(current: &mut MainlinePlan, disk: &MainlinePlan) {
-    for (line_index, line) in current.lines.iter_mut().enumerate() {
-        let disk_line = disk
-            .lines
-            .iter()
-            .find(|candidate| candidate.name == line.name)
-            .or_else(|| disk.lines.get(line_index));
-        let Some(disk_line) = disk_line else { continue };
-        merge_mapping(&mut line.extra, &disk_line.extra);
-        for (milestone_index, milestone) in line.milestones.iter_mut().enumerate() {
-            let disk_milestone = disk_line
-                .milestones
-                .iter()
-                .find(|candidate| candidate.title == milestone.title)
-                .or_else(|| disk_line.milestones.get(milestone_index));
-            if let Some(disk_milestone) = disk_milestone {
-                merge_mapping(&mut milestone.extra, &disk_milestone.extra);
-            }
-        }
-    }
-}
-
-fn merge_mapping(current: &mut Mapping, disk: &Mapping) {
-    for (key, value) in disk {
-        current.insert(key.clone(), value.clone());
+fn ensure_one_mainline(lines: &mut [StoryLine]) {
+    let Some(first_main) = lines
+        .iter()
+        .position(|line| line.is_main)
+        .or((!lines.is_empty()).then_some(0))
+    else {
+        return;
+    };
+    for (index, line) in lines.iter_mut().enumerate() {
+        line.is_main = index == first_main;
     }
 }
 
@@ -425,16 +429,17 @@ mod tests {
                     serde_yaml::Value::String("#a8432f".into()),
                 )]),
             }],
+            fingerprint: None,
         };
 
-        save_mainlines(&project, &plan).unwrap();
+        save_mainlines(&project, &plan, false).unwrap();
         let loaded = read_mainlines(&project).unwrap();
-        assert_eq!(loaded, plan);
+        assert_eq!(loaded.lines, plan.lines);
         assert_eq!(loaded.lines[0].milestones[0].title, "得知冤案");
     }
 
     #[test]
-    fn 保存主线合并外部新增的未知字段() {
+    fn 外部新增主线时拒绝静默覆盖() {
         let root = tempdir().unwrap();
         let project = root.path().join("项目/《空书》");
         let plan = MainlinePlan {
@@ -451,17 +456,35 @@ mod tests {
                 }],
                 extra: Mapping::new(),
             }],
+            fingerprint: None,
         };
-        save_mainlines(&project, &plan).unwrap();
+        save_mainlines(&project, &plan, false).unwrap();
         fs::write(
             project.join("构思").join(MAINLINES_FILE),
             "- 名称: 为父正名\n  外部线字段: 保留\n  里程碑:\n    - 标题: 得知冤案\n      外部碑字段: 保留\n",
         )
         .unwrap();
 
-        save_mainlines(&project, &plan).unwrap();
-        let saved = fs::read_to_string(project.join("构思").join(MAINLINES_FILE)).unwrap();
-        assert!(saved.contains("外部线字段: 保留"), "{saved}");
-        assert!(saved.contains("外部碑字段: 保留"), "{saved}");
+        assert!(matches!(
+            save_mainlines(&project, &plan, false).unwrap(),
+            crate::book_file::SaveResult::Conflict
+        ));
+    }
+
+    #[test]
+    fn 保存非空主线图时总会确定一条主线() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let plan = MainlinePlan {
+            lines: vec![StoryLine {
+                name: "为父正名".into(),
+                is_main: false,
+                milestones: vec![],
+                extra: Mapping::new(),
+            }],
+            fingerprint: None,
+        };
+        save_mainlines(&project, &plan, false).unwrap();
+        assert!(read_mainlines(&project).unwrap().lines[0].is_main);
     }
 }

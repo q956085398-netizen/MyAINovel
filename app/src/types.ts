@@ -123,6 +123,7 @@ export interface Outline {
 /** 构思/主线.yaml：主线图唯一结构化来源，数组顺序就是叙事次序。 */
 export interface MainlinePlan {
   lines: StoryLine[];
+  fingerprint: string | null;
 }
 
 export interface StoryLine {
