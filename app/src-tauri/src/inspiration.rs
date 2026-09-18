@@ -306,6 +306,40 @@ pub fn save_card(
     Ok(read_card(&path))
 }
 
+/// 保存灵感速记：先收下原文，不要求作者在灵感到来时补标题或归类。
+/// 临时标题只取首句；正文保持传入的完整多行内容，后续仍可在卡片编辑里整理。
+pub fn save_quick_capture(root: &Path, body: &str) -> Result<InspirationCard, String> {
+    let title = quick_capture_title(body)?;
+    let draft = CardDraft {
+        category: CardCategory::Uncategorized,
+        title,
+        tags: Vec::new(),
+        source: None,
+        links: Vec::new(),
+        core: None,
+        body: body.to_string(),
+    };
+    save_card(root, &draft, None)
+}
+
+fn quick_capture_title(body: &str) -> Result<String, String> {
+    let content = body.trim();
+    if content.is_empty() {
+        return Err("灵感速记不能为空".to_string());
+    }
+    let title = content
+        .split_inclusive(|c| matches!(c, '。' | '！' | '？' | '!' | '?'))
+        .next()
+        .unwrap_or(content)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if title.is_empty() {
+        return Err("灵感速记不能为空".to_string());
+    }
+    Ok(title)
+}
+
 pub fn delete_card(path: &Path) -> Result<(), String> {
     fs::remove_file(path).map_err(|e| format!("无法删除卡片 {}：{e}", path.display()))
 }
@@ -623,6 +657,42 @@ mod tests {
             Some("外卖员得签到系统，末世囤物资被当扫地僧")
         );
         assert_eq!(cards[0].body, "一句话展开的正文，可以是多行。");
+    }
+
+    #[test]
+    fn 灵感速记_未分类_首句为临时标题并完整保留多行() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let body = "主角在雨夜捡到一封密信。\n第二天，满城都在找它。\n\n他决定先不交出去。";
+
+        let card = save_quick_capture(&root, body).unwrap();
+
+        assert_eq!(card.category, CardCategory::Uncategorized);
+        assert_eq!(card.title, "主角在雨夜捡到一封密信。");
+        assert_eq!(card.body, body);
+        assert!(card.tags.is_empty());
+        assert_eq!(card.source, None);
+        assert!(card.links.is_empty());
+        assert!(card.path.ends_with("灵感库/未分类/主角在雨夜捡到一封密信。.md"));
+    }
+
+    #[test]
+    fn 灵感速记_首句跨换行仍取完整一句() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let body = "主角在雨夜捡到一封\n密信。第二天，满城都在找它。";
+
+        let card = save_quick_capture(&root, body).unwrap();
+
+        assert_eq!(card.title, "主角在雨夜捡到一封 密信。");
+        assert_eq!(card.body, body);
+    }
+
+    #[test]
+    fn 灵感速记_空白内容不落盘() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().to_path_buf();
+
+        assert!(save_quick_capture(&root, " \n\t ").is_err());
+        assert!(scan_inspirations(&root).unwrap().is_empty());
     }
 
     #[test]

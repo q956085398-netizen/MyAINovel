@@ -565,6 +565,50 @@ body {
 
 /* ---------- 灵感库 ---------- */
 
+.quick-capture,
+.pending-inspirations {
+  margin-bottom: var(--sp-6);
+}
+
+.quick-capture {
+  padding: var(--sp-5);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-card);
+  background: var(--panel);
+}
+
+.quick-capture-heading,
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-3);
+}
+
+.quick-capture h2,
+.section-heading h2 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.quick-capture p,
+.section-heading p {
+  margin: var(--sp-1) 0 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-ui);
+}
+
+.quick-capture textarea {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  resize: vertical;
+  min-height: 96px;
+}
+
 .cat-chips {
   display: flex;
   flex-wrap: wrap;

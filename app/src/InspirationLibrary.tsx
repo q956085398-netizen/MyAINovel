@@ -29,6 +29,10 @@ function formatDate(unixSec: number): string {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
+function newestFirst(a: InspirationCard, b: InspirationCard): number {
+  return b.mtime - a.mtime || a.title.localeCompare(b.title, "zh-Hans-CN");
+}
+
 /** 卡片类别 → 转生落点（只开两条通道：故事卡→单元 #9、角色卡→人物 #8）。 */
 const TRANSMUTE_ACTIONS: Partial<
   Record<CardCategory, { target: TransmuteTarget; label: string; hint: string }>
@@ -64,6 +68,65 @@ function TransmuteButton({
   );
 }
 
+function InspirationCardItem({
+  card,
+  onEdit,
+  onOpenLink,
+  onTransmute,
+}: {
+  card: InspirationCard;
+  onEdit: (draft: CardDraft, prevPath: string) => void;
+  onOpenLink: (text: string) => Promise<void>;
+  onTransmute: (card: InspirationCard, target: TransmuteTarget) => void;
+}) {
+  return (
+    <div className="card-item">
+      <div className="card-title-row">
+        <button className="card-title" title="编辑这张卡片" onClick={() => onEdit(card, card.path)}>
+          {card.title}
+        </button>
+        <span className="card-cat">{card.category}</span>
+        {card.tags.map((tag) => (
+          <span key={tag} className="tag">
+            {tag}
+          </span>
+        ))}
+        <span className="card-date">{formatDate(card.mtime)}</span>
+      </div>
+      {card.core && (
+        <p className="card-core" title="一句话核心（人物＋困境＋爽点预期）">
+          一句话核心：{card.core}
+        </p>
+      )}
+      {(card.source || card.links.length > 0) && (
+        <p className="card-meta">
+          {card.source && (
+            <span className="card-source" title="来源">
+              来源：{card.source}
+            </span>
+          )}
+          {card.links.map((link) => (
+            <button
+              key={link}
+              className="link-like card-link"
+              title="打开关联的卡片或拆书稿"
+              onClick={() => void onOpenLink(link)}
+            >
+              {link}
+            </button>
+          ))}
+        </p>
+      )}
+      {card.body && (
+        <p className="card-preview" title={card.body}>
+          {oneLinePreview(card.body, 120)}
+        </p>
+      )}
+      <TransmuteButton card={card} onPick={onTransmute} />
+    </div>
+  );
+}
+
 interface InspirationLibraryProps {
   libraryPath: string | null;
   onChooseFolder: () => void;
@@ -92,6 +155,8 @@ export default function InspirationLibrary({
 
   const [activeCategory, setActiveCategory] = useState<CardCategory | null>(null);
   const [query, setQuery] = useState("");
+  const [quickCapture, setQuickCapture] = useState("");
+  const [capturing, setCapturing] = useState(false);
 
   const [editing, setEditing] = useState<{ draft: CardDraft; prevPath: string | null } | null>(
     null,
@@ -192,6 +257,23 @@ export default function InspirationLibrary({
     }
   }
 
+  async function saveQuickCapture() {
+    if (!libraryPath || !quickCapture.trim() || capturing) return;
+    setCapturing(true);
+    try {
+      await invoke<InspirationCard>("capture_inspiration", {
+        root: libraryPath,
+        body: quickCapture,
+      });
+      setQuickCapture("");
+      await scan(libraryPath);
+    } catch (e) {
+      window.alert(`灵感速记保存失败：${errMsg(e)}`);
+    } finally {
+      setCapturing(false);
+    }
+  }
+
   const categoryCounts = useMemo(() => {
     const counts = new Map<CardCategory, number>();
     for (const c of cards) counts.set(c.category, (counts.get(c.category) ?? 0) + 1);
@@ -209,8 +291,20 @@ export default function InspirationLibrary({
           .toLowerCase();
         return haystack.includes(q);
       })
-      .sort((a, b) => b.mtime - a.mtime || a.title.localeCompare(b.title, "zh-Hans-CN"));
+      .sort(newestFirst);
   }, [cards, activeCategory, query]);
+
+  // 待整理灵感始终常驻顶部，不随搜索或类别筛选隐藏；只有手动改为其他类别才离开。
+  const pending = useMemo(
+    () =>
+      cards
+        .filter((card) => card.category === "未分类")
+        .sort(newestFirst),
+    [cards],
+  );
+
+  // 待整理灵感已经在顶部展示，普通列表不再重复；选择「未分类」筛选时也只看顶部。
+  const listed = activeCategory === "未分类" ? [] : visible.filter((card) => card.category !== "未分类");
 
   return (
     <div className="page">
@@ -233,7 +327,7 @@ export default function InspirationLibrary({
                 导入旧灵感.md
               </button>
               <button
-                className="btn primary"
+                className="btn"
                 onClick={() => setEditing({ draft: emptyCardDraft(), prevPath: null })}
               >
                 新建卡片
@@ -270,6 +364,58 @@ export default function InspirationLibrary({
 
       {libraryPath && scanning && <div className="empty-state">正在扫描……</div>}
 
+      {libraryPath && !scanning && (
+        <section className="quick-capture" aria-label="灵感速记">
+          <div className="quick-capture-heading">
+            <div>
+              <h2>灵感速记</h2>
+              <p>先写下来，标题和归类以后再补。</p>
+            </div>
+            <button
+              className="btn primary"
+              disabled={capturing || !quickCapture.trim()}
+              onClick={() => void saveQuickCapture()}
+            >
+              {capturing ? "保存中……" : "收下灵感"}
+            </button>
+          </div>
+          <textarea
+            value={quickCapture}
+            onChange={(e) => setQuickCapture(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.ctrlKey && e.key === "Enter") {
+                e.preventDefault();
+                void saveQuickCapture();
+              }
+            }}
+            placeholder="把刚冒出来的念头写在这里；Ctrl + Enter 保存，Enter 换行。"
+            rows={4}
+          />
+        </section>
+      )}
+
+      {libraryPath && !scanning && pending.length > 0 && (
+        <section className="pending-inspirations" aria-labelledby="pending-inspirations-title">
+          <div className="section-heading">
+            <div>
+              <h2 id="pending-inspirations-title">待整理灵感（{formatCount(pending.length)}）</h2>
+              <p>归类后会从这里离开。</p>
+            </div>
+          </div>
+          <div className="card-list">
+            {pending.map((card) => (
+              <InspirationCardItem
+                key={card.path}
+                card={card}
+                onEdit={(draft, prevPath) => setEditing({ draft, prevPath })}
+                onOpenLink={openLink}
+                onTransmute={(picked, target) => setTransmuting({ card: picked, target })}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {libraryPath && !scanning && !error && cards.length === 0 && (
         <div className="empty-state">
           <p>还没有灵感卡片。</p>
@@ -278,7 +424,7 @@ export default function InspirationLibrary({
           </p>
           <div className="empty-state-actions">
             <button
-              className="btn primary"
+              className="btn"
               onClick={() => setEditing({ draft: emptyCardDraft(), prevPath: null })}
             >
               新建卡片
@@ -322,62 +468,18 @@ export default function InspirationLibrary({
             共 {formatCount(cards.length)} 张卡片{activeCategory && ` · 当前 ${activeCategory} ${formatCount(visible.length)} 张`}
           </p>
 
-          {visible.length === 0 ? (
+          {listed.length === 0 ? (
             <p className="hint">这个筛选下没有卡片。</p>
           ) : (
             <div className="card-list">
-              {visible.map((card) => (
-                <div key={card.path} className="card-item">
-                  <div className="card-title-row">
-                    <button
-                      className="card-title"
-                      title="编辑这张卡片"
-                      onClick={() => setEditing({ draft: card, prevPath: card.path })}
-                    >
-                      {card.title}
-                    </button>
-                    <span className="card-cat">{card.category}</span>
-                    {card.tags.map((t) => (
-                      <span key={t} className="tag">
-                        {t}
-                      </span>
-                    ))}
-                    <span className="card-date">{formatDate(card.mtime)}</span>
-                  </div>
-                  {card.core && (
-                    <p className="card-core" title="一句话核心（人物＋困境＋爽点预期）">
-                      一句话核心：{card.core}
-                    </p>
-                  )}
-                  {(card.source || card.links.length > 0) && (
-                    <p className="card-meta">
-                      {card.source && (
-                        <span className="card-source" title="来源">
-                          来源：{card.source}
-                        </span>
-                      )}
-                      {card.links.map((l) => (
-                        <button
-                          key={l}
-                          className="link-like card-link"
-                          title="打开关联的卡片或拆书稿"
-                          onClick={() => void openLink(l)}
-                        >
-                          {l}
-                        </button>
-                      ))}
-                    </p>
-                  )}
-                  {card.body && (
-                    <p className="card-preview" title={card.body}>
-                      {oneLinePreview(card.body, 120)}
-                    </p>
-                  )}
-                  <TransmuteButton
-                    card={card}
-                    onPick={(c, target) => setTransmuting({ card: c, target })}
-                  />
-                </div>
+              {listed.map((card) => (
+                <InspirationCardItem
+                  key={card.path}
+                  card={card}
+                  onEdit={(draft, prevPath) => setEditing({ draft, prevPath })}
+                  onOpenLink={openLink}
+                  onTransmute={(picked, target) => setTransmuting({ card: picked, target })}
+                />
               ))}
             </div>
           )}

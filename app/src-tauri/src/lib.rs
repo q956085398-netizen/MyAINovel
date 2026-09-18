@@ -187,6 +187,12 @@ fn save_inspiration_card(
     )
 }
 
+/// 灵感速记不要求标题或元数据：后端以首句生成临时标题并落为未分类卡片。
+#[tauri::command]
+fn capture_inspiration(root: String, body: String) -> Result<InspirationCard, String> {
+    inspiration::save_quick_capture(Path::new(&root), &body)
+}
+
 #[tauri::command]
 fn delete_inspiration_card(path: String) -> Result<(), String> {
     inspiration::delete_card(Path::new(&path))
@@ -735,6 +741,7 @@ pub fn run() {
             search_library,
             scan_inspirations,
             save_inspiration_card,
+            capture_inspiration,
             delete_inspiration_card,
             import_inspiration_preview,
             confirm_import_inspirations,
