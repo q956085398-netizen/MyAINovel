@@ -786,6 +786,8 @@ export type ChatStreamEvent =
  *  书写两条＝AI 陪看本章（正文＋本章意图由后端组装）/润色（材料＝选区）。
  *  「本章体检」只为旧会话元数据兼容保留，不再提供入口。
  *  「人物对话」（docs/spec/人物对话.md）不是命令：材料进系统提示建人格会话，不自动发送。 */
+export const AI_CHAPTER_COMPANION = "AI 陪看本章" as const;
+
 export type AiCommandKind =
   | "梳理"
   | "标注"
@@ -794,7 +796,7 @@ export type AiCommandKind =
   | "矛盾梳理"
   | "人物关系梳理"
   | "本章体检"
-  | "AI 陪看本章"
+  | typeof AI_CHAPTER_COMPANION
   | "润色"
   | "人物对话";
 

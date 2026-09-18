@@ -21,7 +21,7 @@ const KIND_ARRANGEMENT: &str = "排布体检";
 const KIND_CONTRADICTIONS: &str = "矛盾梳理";
 const KIND_RELATIONSHIPS: &str = "人物关系梳理";
 const KIND_CHAPTER: &str = "本章体检";
-const KIND_CHAPTER_COMPANION: &str = "AI 陪看本章";
+pub const KIND_CHAPTER_COMPANION: &str = "AI 陪看本章";
 /// 人物对话的人格材料（工单 #16）：不进用户消息，进系统提示。
 const KIND_CHARACTER_DIALOGUE: &str = "人物对话";
 
@@ -58,7 +58,7 @@ pub fn build_context(
         }
         KIND_CHAPTER_COMPANION => {
             let ordinal = chapter.ok_or_else(|| "「AI 陪看本章」需要指定章序".to_string())?;
-            chapter_companion_context(project, ordinal)
+            chapter_companion_context(project, ordinal, None)
         }
         KIND_CHARACTER_DIALOGUE => character_context(project, subjects),
         other => Err(format!("未知的 AI 命令「{other}」")),
@@ -582,7 +582,13 @@ fn open_lines(views: &[ExpectationView]) -> Vec<String> {
         .collect()
 }
 
-fn chapter_context(project: &Path, ordinal: u32) -> Result<String, String> {
+struct ChapterMaterial {
+    title: String,
+    chapter_line: String,
+    body: String,
+}
+
+fn load_chapter_material(project: &Path, ordinal: u32) -> Result<ChapterMaterial, String> {
     let title = project_title(project)?;
     let chapters = chapter::scan_chapters(project)?;
     let Some(entry) = chapters.iter().find(|c| c.ordinal == Some(ordinal)) else {
@@ -590,21 +596,53 @@ fn chapter_context(project: &Path, ordinal: u32) -> Result<String, String> {
             "没有第 {ordinal} 章（章序按文件名前缀认，未编号文件不参与）"
         ));
     };
-    let unit = chapter::find_unit_for_chapter(project, ordinal)?;
-    let foreshadows = foreshadow::foreshadow_board(project)?;
-    let expectations = expectation::expectation_board(project)?;
-    let content = read_book_md(&entry.path)?.content;
-    let body = body_after_frontmatter(&content).trim().to_string();
-
-    let mut out = String::new();
-    out.push_str("【体检对象】正文单章\n");
-    out.push_str(&format!("【书名】《{title}》\n"));
     let chapter_line = if entry.title.trim().is_empty() {
         format!("第 {ordinal} 章")
     } else {
         format!("第 {ordinal} 章 {}", entry.title.trim())
     };
-    out.push_str(&format!("【本章】{chapter_line}\n"));
+    let content = read_book_md(&entry.path)?.content;
+    let body = body_after_frontmatter(&content).trim().to_string();
+    Ok(ChapterMaterial {
+        title,
+        chapter_line,
+        body,
+    })
+}
+
+fn append_chapter_body(out: &mut String, body: &str, limit: Option<usize>) {
+    let (text, truncated, applied_limit) = match limit {
+        Some(limit) => {
+            let (text, truncated) = truncate_chars(body, limit);
+            (text, truncated, Some(limit))
+        }
+        None => (body.to_string(), false, None),
+    };
+    if let (true, Some(limit)) = (truncated, applied_limit) {
+        out.push_str(&format!(
+            "【正文】（正文已截断：只带前 {limit} 字）--- 正文开始 ---\n"
+        ));
+    } else {
+        out.push_str("【正文】--- 正文开始 ---\n");
+    }
+    out.push_str(if body.is_empty() {
+        "（本章还是空的）"
+    } else {
+        &text
+    });
+    out.push_str("\n--- 正文结束 ---\n");
+}
+
+fn chapter_context(project: &Path, ordinal: u32) -> Result<String, String> {
+    let chapter = load_chapter_material(project, ordinal)?;
+    let unit = chapter::find_unit_for_chapter(project, ordinal)?;
+    let foreshadows = foreshadow::foreshadow_board(project)?;
+    let expectations = expectation::expectation_board(project)?;
+
+    let mut out = String::new();
+    out.push_str("【体检对象】正文单章\n");
+    out.push_str(&format!("【书名】《{}》\n", chapter.title));
+    out.push_str(&format!("【本章】{}\n", chapter.chapter_line));
     out.push_str(&format!(
         "【所属单元】{}\n",
         match &unit {
@@ -652,43 +690,28 @@ fn chapter_context(project: &Path, ordinal: u32) -> Result<String, String> {
         }
     }
 
-    let (text, truncated) = truncate_chars(&body, CHAPTER_TEXT_LIMIT);
-    // 空章也把成对标记给全：材料的小节结构不因缺内容而破相。
-    if truncated {
-        out.push_str(&format!(
-            "【正文】（正文已截断：只带前 {CHAPTER_TEXT_LIMIT} 字）--- 正文开始 ---\n"
-        ));
-    } else {
-        out.push_str("【正文】--- 正文开始 ---\n");
-    }
-    out.push_str(if body.is_empty() { "（本章还是空的）" } else { &text });
-    out.push_str("\n--- 正文结束 ---\n");
+    // 旧体检保留既有上限；AI 陪看另走完整正文。
+    append_chapter_body(&mut out, &chapter.body, Some(CHAPTER_TEXT_LIMIT));
     Ok(out)
 }
 
 /// AI 陪看只读取作者已经写下的正文与可用的本章意图。
 /// 伏笔、期待线和全书欠账不在这个入口里，避免把陪看变成自动审稿。
-fn chapter_companion_context(project: &Path, ordinal: u32) -> Result<String, String> {
-    let title = project_title(project)?;
-    let chapters = chapter::scan_chapters(project)?;
-    let Some(entry) = chapters.iter().find(|c| c.ordinal == Some(ordinal)) else {
-        return Err(format!(
-            "没有第 {ordinal} 章（章序按文件名前缀认，未编号文件不参与）"
-        ));
-    };
+pub fn chapter_companion_context(
+    project: &Path,
+    ordinal: u32,
+    chapter_content: Option<&str>,
+) -> Result<String, String> {
+    let mut chapter = load_chapter_material(project, ordinal)?;
+    if let Some(content) = chapter_content {
+        chapter.body = body_after_frontmatter(content).trim().to_string();
+    }
     let intent = planning::find_chapter_intent(project, ordinal)?;
-    let content = read_book_md(&entry.path)?.content;
-    let body = body_after_frontmatter(&content).trim().to_string();
 
     let mut out = String::new();
     out.push_str("【陪看对象】正文单章\n");
-    out.push_str(&format!("【书名】《{title}》\n"));
-    let chapter_line = if entry.title.trim().is_empty() {
-        format!("第 {ordinal} 章")
-    } else {
-        format!("第 {ordinal} 章 {}", entry.title.trim())
-    };
-    out.push_str(&format!("【本章】{chapter_line}\n"));
+    out.push_str(&format!("【书名】《{}》\n", chapter.title));
+    out.push_str(&format!("【本章】{}\n", chapter.chapter_line));
 
     match (&intent.unit, &intent.bridge) {
         (Some(unit), Some(bridge)) => {
@@ -705,25 +728,19 @@ fn chapter_companion_context(project: &Path, ordinal: u32) -> Result<String, Str
                 }
             }
         }
-        _ => out.push_str(
+        (Some(unit), None) => {
+            out.push_str(&format!("【本章意图】{}（未匹配桥段）\n", unit.name));
+            if let Some(value) = opt_text(unit.emotion_goal.as_deref()) {
+                out.push_str(&format!("- 单元情绪目标：{value}\n"));
+            }
+            out.push_str("- （桥段意图尚未匹配；只能对照现有单元信息陪看）\n");
+        }
+        (None, _) => out.push_str(
             "【本章意图】（本章还没有匹配的单元与桥段规划；只能陪看正文，不评价规划兑现情况）\n",
         ),
     }
 
-    let (text, truncated) = truncate_chars(&body, CHAPTER_TEXT_LIMIT);
-    if truncated {
-        out.push_str(&format!(
-            "【正文】（正文已截断：只带前 {CHAPTER_TEXT_LIMIT} 字）--- 正文开始 ---\n"
-        ));
-    } else {
-        out.push_str("【正文】--- 正文开始 ---\n");
-    }
-    out.push_str(if body.is_empty() {
-        "（本章还是空的）"
-    } else {
-        &text
-    });
-    out.push_str("\n--- 正文结束 ---\n");
+    append_chapter_body(&mut out, &chapter.body, None);
     Ok(out)
 }
 
@@ -1061,6 +1078,7 @@ mod tests {
     fn ai陪看本章_没有匹配桥段时仍可用并说明上下文缺失() {
         let tmp = TempDir::new().unwrap();
         let p = sample_project(tmp.path());
+        fs::remove_file(p.join("构思/单元/初入京城.md")).unwrap();
 
         let text = build_context(KIND_CHAPTER_COMPANION, &p, Some(3), &[]).unwrap();
 
@@ -1069,6 +1087,49 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("第三章的正文。"), "{text}");
+    }
+
+    #[test]
+    fn ai陪看本章_只有单元时仍携带可用的单元情绪目标() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_project(tmp.path());
+        write(
+            &p.join("构思/单元/初入京城.md"),
+            "---\n核心矛盾: 主角要进城\n情绪目标: 先压后扬的痛快\n起章: 1\n止章: 4\n---\n",
+        );
+
+        let text = build_context(KIND_CHAPTER_COMPANION, &p, Some(3), &[]).unwrap();
+
+        assert!(text.contains("【本章意图】初入京城（未匹配桥段）"), "{text}");
+        assert!(text.contains("单元情绪目标：先压后扬的痛快"), "{text}");
+        assert!(text.contains("桥段意图尚未匹配"), "{text}");
+    }
+
+    #[test]
+    fn ai陪看本章_携带完整长正文() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_project(tmp.path());
+        let body = format!("开头{}结尾标记", "字".repeat(CHAPTER_TEXT_LIMIT + 50));
+        write(&p.join("正文/0003 第三章.md"), &body);
+
+        let text = build_context(KIND_CHAPTER_COMPANION, &p, Some(3), &[]).unwrap();
+
+        assert!(text.contains("结尾标记"), "{text}");
+        assert!(!text.contains("正文已截断"), "{text}");
+    }
+
+    #[test]
+    fn ai陪看本章_显式正文快照优先于随后变化的盘面() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_project(tmp.path());
+        let clicked = "---\n状态: 草稿\n---\n点击按钮时的正文。";
+        write(&p.join("正文/0003 第三章.md"), "保存往返后的盘面。");
+
+        let text = chapter_companion_context(&p, 3, Some(clicked)).unwrap();
+
+        assert!(text.contains("点击按钮时的正文。"), "{text}");
+        assert!(!text.contains("保存往返后的盘面。"), "{text}");
+        assert!(!text.contains("状态: 草稿"), "frontmatter 不进入材料：{text}");
     }
 
     #[test]

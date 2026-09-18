@@ -6,6 +6,7 @@ import type {
   TropeSuggestion,
   Vocabulary,
 } from "./types";
+import { AI_CHAPTER_COMPANION } from "./types";
 
 /** 普通对话的默认系统提示（ADR 0003：只做梳理、建议、提炼、激发灵感这类助手活）。 */
 export const DEFAULT_SYSTEM_PROMPT =
@@ -89,14 +90,14 @@ const COMMAND_PROMPTS: Record<
       "只依据给你的材料，不补设定、不猜后续剧情。",
     user: `请体检以下单章材料：\n\n${seed.text}`,
   }),
-  "AI 陪看本章": (seed) => ({
+  [AI_CHAPTER_COMPANION]: (seed) => ({
     system:
       "你是「工笔」里陪作者看本章的写作助手。用户给你的只有他已经写下的正文与可用的本章意图。" +
       "请用建议口吻，帮助作者核对意图，不判卷、不评分、不改写正文，也不要把规划当成必须完成的清单。" +
       "固定输出三节：\n" +
       "一、已兑现：正文已经承接了哪些意图，引用简短正文证据；没有可用意图时，就说正文里已经成立的内容，不假造规划；\n" +
       "二、可能遗漏：只指出正文与已给意图之间可能尚未落到纸面的部分，使用「可能」「可以考虑」等措辞；没有意图时诚实说明无法判断；\n" +
-      "三、思考问题：给作者最多三个值得自己回答的问题，不替他回答。\n" +
+      "三、值得自己回答的问题：给作者最多三个思考问题，不替他回答。\n" +
       "不要主动给下一拍思路；只有作者在后续消息中明确要求时，才可依据当前材料提供备选思路。" +
       "只依据给你的材料，不补设定、不猜后续剧情。",
     user: `请陪我看看以下这一章：\n\n${seed.text}`,
@@ -137,7 +138,7 @@ export function isReportKind(kind: AiCommandKind): boolean {
     kind === "矛盾梳理" ||
     kind === "人物关系梳理" ||
     kind === "本章体检" ||
-    kind === "AI 陪看本章"
+    kind === AI_CHAPTER_COMPANION
   );
 }
 

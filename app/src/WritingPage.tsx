@@ -27,6 +27,7 @@ import type {
   WritingLocate,
   WritingStats,
 } from "./types";
+import { AI_CHAPTER_COMPANION } from "./types";
 import {
   CHAPTER_STATUS_VALUES,
   EXPECTATION_HORIZON_MID,
@@ -947,22 +948,26 @@ export default function WritingPage({
    *  读的是盘上正文——先把未保存的改动落盘，冲突没裁决就不跑。 */
   async function runChapterCompanion() {
     const entry = currentRef.current;
-    if (!entry || entry.ordinal === null) {
+    const view = viewRef.current;
+    if (!entry || entry.ordinal === null || !view) {
       window.alert("先打开一章再请 AI 陪看（章序按文件名前缀认，未编号章不参与）。");
       return;
     }
+    // 固定作者点击这一刻的正文；保存往返期间即使继续输入，本次陪看也不会悄悄读旧盘面。
+    const chapterContent = view.state.doc.toString();
     if (dirtyRef.current && !(await saveNow(false))) {
       window.alert("本章还有未落盘的修改（或保存冲突未裁决），先处理再请 AI 陪看。");
       return;
     }
     try {
       const text = await invoke<string>("build_ai_context", {
-        kind: "AI 陪看本章",
+        kind: AI_CHAPTER_COMPANION,
         project: project.dir,
         chapter: entry.ordinal,
         subjects: null,
+        chapterContent,
       });
-      onAiCommand({ kind: "AI 陪看本章", bookName: project.title, text });
+      onAiCommand({ kind: AI_CHAPTER_COMPANION, bookName: project.title, text });
     } catch (e) {
       window.alert(`AI 陪看材料读取失败：${errMsg(e)}`);
     }
