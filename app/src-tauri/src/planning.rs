@@ -112,11 +112,14 @@ pub fn read_mainlines(project: &Path) -> Result<MainlinePlan, String> {
     let Value::Sequence(lines) = value else {
         return Err(format!("{} 应为主线列表", path.display()));
     };
-    let lines = lines
+    let mut lines = lines
         .into_iter()
         .enumerate()
         .map(|(index, value)| line_from_value(value, &path, index + 1))
         .collect::<Result<Vec<_>, _>>()?;
+    // 外部手写文件也遵循同一展示纪律：有内容时总高亮第一条主线，
+    // 不在读取时回写，仍由作者下一次保存时落盘确认。
+    ensure_one_mainline(&mut lines);
     Ok(MainlinePlan {
         lines,
         fingerprint: Some(crate::book_file::content_fingerprint(&bytes).to_string()),
@@ -486,5 +489,22 @@ mod tests {
         };
         save_mainlines(&project, &plan, false).unwrap();
         assert!(read_mainlines(&project).unwrap().lines[0].is_main);
+    }
+
+    #[test]
+    fn 读入外部主线图时总会高亮唯一主线() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let dir = project.join("构思");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(MAINLINES_FILE),
+            "- 名称: 为父正名\n  主线: true\n- 名称: 查清旧案\n  主线: true\n",
+        )
+        .unwrap();
+
+        let loaded = read_mainlines(&project).unwrap();
+        assert_eq!(loaded.lines.iter().filter(|line| line.is_main).count(), 1);
+        assert!(loaded.lines[0].is_main);
     }
 }
