@@ -19,11 +19,13 @@ import ForeshadowBoard from "./ForeshadowBoard";
 import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
 import RelationshipCanvas from "./RelationshipCanvas";
+import PlanningView from "./PlanningView";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 // 「三线」拆为「期待感」「目标」两页签（工单 #36）：名字自解释，
 // 数据模型不动（三线.yaml 的类别枚举仍是 期待｜目标），只按类别过滤复用看板。
 const TABS = [
+  "大纲",
   "类型圈",
   "矛盾",
   "单元",
@@ -34,6 +36,11 @@ const TABS = [
   "人物",
   "世界观",
   "开头",
+] as const;
+const NAV_GROUPS = [
+  { label: "定书", tabs: ["大纲", "类型圈", "人物", "世界观", "开头"] },
+  { label: "生情节", tabs: ["矛盾", "单元", "排布"] },
+  { label: "织张力", tabs: ["伏笔", "期待感", "目标"] },
 ] as const;
 /** 项目页签；跨板块跳转（灵感库关联 → 项目）也用它指路。 */
 export type ProjectTab = (typeof TABS)[number];
@@ -77,7 +84,7 @@ export default function ProjectPage({
   onOpenChapter,
   onAiCommand,
 }: ProjectPageProps) {
-  const [tab, setTab] = useState<Tab>(initialTab ?? "类型圈");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "大纲");
   const [meta, setMeta] = useState<ProjectMeta>(emptyProjectMeta());
   const [metaWarning, setMetaWarning] = useState<string | undefined>();
   const [metaOpen, setMetaOpen] = useState(false);
@@ -237,38 +244,43 @@ export default function ProjectPage({
 
       <div className="project-body">
         <nav className="project-nav">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              className={`nav-item ${tab === t ? "active" : ""}`}
-              onClick={() => setTab(t)}
-            >
-              {t}
-              {t === "矛盾" && project.contradictionCount > 0 && (
-                <span className="nav-badge">{project.contradictionCount}</span>
-              )}
-              {t === "单元" && project.unitCount > 0 && (
-                <span className="nav-badge">{project.unitCount}</span>
-              )}
-              {t === "伏笔" && project.foreshadowCount > 0 && (
-                <span className="nav-badge">{project.foreshadowCount}</span>
-              )}
-              {t === "期待感" && project.expectationExpectCount > 0 && (
-                <span className="nav-badge">{project.expectationExpectCount}</span>
-              )}
-              {t === "目标" && project.expectationGoalCount > 0 && (
-                <span className="nav-badge">{project.expectationGoalCount}</span>
-              )}
-              {t === "人物" && project.characterCount > 0 && (
-                <span className="nav-badge">{project.characterCount}</span>
-              )}
-              {t === "世界观" && project.worldviewCount > 0 && (
-                <span className="nav-badge">{project.worldviewCount}</span>
-              )}
-              {t === "开头" && project.openingCount > 0 && (
-                <span className="nav-badge">{project.openingCount}</span>
-              )}
-            </button>
+          {NAV_GROUPS.map((group) => (
+            <div className="project-nav-group" key={group.label}>
+              <p className="project-nav-label">{group.label}</p>
+              {group.tabs.map((t) => (
+                <button
+                  key={t}
+                  className={`nav-item ${tab === t ? "active" : ""}`}
+                  onClick={() => setTab(t)}
+                >
+                  {t}
+                  {t === "矛盾" && project.contradictionCount > 0 && (
+                    <span className="nav-badge">{project.contradictionCount}</span>
+                  )}
+                  {t === "单元" && project.unitCount > 0 && (
+                    <span className="nav-badge">{project.unitCount}</span>
+                  )}
+                  {t === "伏笔" && project.foreshadowCount > 0 && (
+                    <span className="nav-badge">{project.foreshadowCount}</span>
+                  )}
+                  {t === "期待感" && project.expectationExpectCount > 0 && (
+                    <span className="nav-badge">{project.expectationExpectCount}</span>
+                  )}
+                  {t === "目标" && project.expectationGoalCount > 0 && (
+                    <span className="nav-badge">{project.expectationGoalCount}</span>
+                  )}
+                  {t === "人物" && project.characterCount > 0 && (
+                    <span className="nav-badge">{project.characterCount}</span>
+                  )}
+                  {t === "世界观" && project.worldviewCount > 0 && (
+                    <span className="nav-badge">{project.worldviewCount}</span>
+                  )}
+                  {t === "开头" && project.openingCount > 0 && (
+                    <span className="nav-badge">{project.openingCount}</span>
+                  )}
+                </button>
+              ))}
+            </div>
           ))}
           <div className="project-nav-foot">
             正文 {formatCount(project.chapterCount)} 章 · {formatCount(project.wordCount)} 字
@@ -278,6 +290,7 @@ export default function ProjectPage({
         </nav>
 
         <div className="project-content" key={`${tab}-${reloadKey}`}>
+          {tab === "大纲" && <PlanningView project={project.dir} unitNames={units.map((unit) => unit.name)} />}
           {tab === "类型圈" && <CircleView project={project.dir} vocab={vocab} />}
           {isNoteTab(tab) && tab !== "人物" && (
             <NoteList

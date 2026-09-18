@@ -113,6 +113,38 @@ export function emptyProjectMeta(): ProjectMeta {
   return { title: null, chapterPrefix: null, plotLines: [], maps: [] };
 }
 
+/** 构思/大纲.md：自由纸面，首次保存可采用轻模板。 */
+export interface Outline {
+  body: string;
+}
+
+/** 构思/主线.yaml：主线图唯一结构化来源，数组顺序就是叙事次序。 */
+export interface MainlinePlan {
+  lines: StoryLine[];
+}
+
+export interface StoryLine {
+  name: string;
+  isMain: boolean;
+  milestones: Milestone[];
+}
+
+export interface Milestone {
+  title: string;
+  change: string | null;
+  readerFeeling: string | null;
+  units: string[];
+  note: string | null;
+}
+
+export function emptyMilestone(): Milestone {
+  return { title: "", change: null, readerFeeling: null, units: [], note: null };
+}
+
+export function emptyStoryLine(): StoryLine {
+  return { name: "", isMain: false, milestones: [] };
+}
+
 /** 与 Rust 侧 project::NoteKind 对应（serde 值即中文类别名，也是构思下的目录名）。 */
 export type NoteKind = "矛盾" | "单元" | "人物" | "世界观" | "开头";
 

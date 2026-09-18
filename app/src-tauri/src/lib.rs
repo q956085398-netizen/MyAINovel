@@ -8,6 +8,7 @@ mod export;
 mod foreshadow;
 mod inspiration;
 mod library;
+mod planning;
 mod project;
 mod proofread;
 mod relationship;
@@ -26,6 +27,7 @@ use export::{ChapterRange, ExportReport, ExportTemplate};
 use foreshadow::{Foreshadow, ForeshadowView};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
+use planning::{MainlinePlan, Outline};
 use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
     ProjectMeta,
@@ -247,6 +249,28 @@ fn read_project_meta(project: String) -> Result<ProjectMeta, String> {
 #[tauri::command]
 fn save_project_meta(project: String, meta: ProjectMeta) -> Result<(), String> {
     project::write_project_meta(Path::new(&project), &meta)
+}
+
+/// 大纲纸面（工单 #41）：自由 Markdown，缺失文件即空状态。
+#[tauri::command]
+fn read_outline(project: String) -> Result<Outline, String> {
+    planning::read_outline(Path::new(&project))
+}
+
+#[tauri::command]
+fn save_outline(project: String, outline: Outline) -> Result<(), String> {
+    planning::save_outline(Path::new(&project), &outline)
+}
+
+/// 主线图唯一结构化来源（工单 #41）：里程碑顺序由数组顺序保持。
+#[tauri::command]
+fn read_mainlines(project: String) -> Result<MainlinePlan, String> {
+    planning::read_mainlines(Path::new(&project))
+}
+
+#[tauri::command]
+fn save_mainlines(project: String, plan: MainlinePlan) -> Result<(), String> {
+    planning::save_mainlines(Path::new(&project), &plan)
 }
 
 #[tauri::command]
@@ -749,6 +773,10 @@ pub fn run() {
             create_project,
             read_project_meta,
             save_project_meta,
+            read_outline,
+            save_outline,
+            read_mainlines,
+            save_mainlines,
             scan_notes,
             save_note,
             delete_note,
