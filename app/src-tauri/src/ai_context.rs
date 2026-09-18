@@ -11,15 +11,17 @@ use crate::book_file::{body_after_frontmatter, read_book_md};
 use crate::chapter::{self, UnitBrief};
 use crate::expectation::{self, ExpectationView};
 use crate::foreshadow::{self, ForeshadowView};
+use crate::planning;
 use crate::project::{self, ArrangementItem, NoteEntry, NoteKind};
 use crate::relationship::{self, LegendItem, Relationship};
 use crate::thread::{AnchorView, PayoffView};
 
-/// 命令：构思侧三条、书写侧一条（`润色` 的材料是选区本身，不走后端）。
+/// 命令：构思侧三条、书写侧报告命令（`润色` 的材料是选区本身，不走后端）。
 const KIND_ARRANGEMENT: &str = "排布体检";
 const KIND_CONTRADICTIONS: &str = "矛盾梳理";
 const KIND_RELATIONSHIPS: &str = "人物关系梳理";
 const KIND_CHAPTER: &str = "本章体检";
+const KIND_CHAPTER_COMPANION: &str = "AI 陪看本章";
 /// 人物对话的人格材料（工单 #16）：不进用户消息，进系统提示。
 const KIND_CHARACTER_DIALOGUE: &str = "人物对话";
 
@@ -53,6 +55,10 @@ pub fn build_context(
         KIND_CHAPTER => {
             let ordinal = chapter.ok_or_else(|| "「本章体检」需要指定章序".to_string())?;
             chapter_context(project, ordinal)
+        }
+        KIND_CHAPTER_COMPANION => {
+            let ordinal = chapter.ok_or_else(|| "「AI 陪看本章」需要指定章序".to_string())?;
+            chapter_companion_context(project, ordinal)
         }
         KIND_CHARACTER_DIALOGUE => character_context(project, subjects),
         other => Err(format!("未知的 AI 命令「{other}」")),
@@ -660,6 +666,67 @@ fn chapter_context(project: &Path, ordinal: u32) -> Result<String, String> {
     Ok(out)
 }
 
+/// AI 陪看只读取作者已经写下的正文与可用的本章意图。
+/// 伏笔、期待线和全书欠账不在这个入口里，避免把陪看变成自动审稿。
+fn chapter_companion_context(project: &Path, ordinal: u32) -> Result<String, String> {
+    let title = project_title(project)?;
+    let chapters = chapter::scan_chapters(project)?;
+    let Some(entry) = chapters.iter().find(|c| c.ordinal == Some(ordinal)) else {
+        return Err(format!(
+            "没有第 {ordinal} 章（章序按文件名前缀认，未编号文件不参与）"
+        ));
+    };
+    let intent = planning::find_chapter_intent(project, ordinal)?;
+    let content = read_book_md(&entry.path)?.content;
+    let body = body_after_frontmatter(&content).trim().to_string();
+
+    let mut out = String::new();
+    out.push_str("【陪看对象】正文单章\n");
+    out.push_str(&format!("【书名】《{title}》\n"));
+    let chapter_line = if entry.title.trim().is_empty() {
+        format!("第 {ordinal} 章")
+    } else {
+        format!("第 {ordinal} 章 {}", entry.title.trim())
+    };
+    out.push_str(&format!("【本章】{chapter_line}\n"));
+
+    match (&intent.unit, &intent.bridge) {
+        (Some(unit), Some(bridge)) => {
+            out.push_str(&format!("【本章意图】{} → {}\n", unit.name, bridge.name));
+            for (label, value) in [
+                ("单元情绪目标", unit.emotion_goal.as_deref()),
+                ("情绪曲线", bridge.emotion_curve.as_deref()),
+                ("关键转折", bridge.key_turn.as_deref()),
+                ("期待钩子", bridge.expectation_hook.as_deref()),
+                ("章节拍安排", bridge.beat_plan.as_deref()),
+            ] {
+                if let Some(value) = opt_text(value) {
+                    out.push_str(&format!("- {label}：{value}\n"));
+                }
+            }
+        }
+        _ => out.push_str(
+            "【本章意图】（本章还没有匹配的单元与桥段规划；只能陪看正文，不评价规划兑现情况）\n",
+        ),
+    }
+
+    let (text, truncated) = truncate_chars(&body, CHAPTER_TEXT_LIMIT);
+    if truncated {
+        out.push_str(&format!(
+            "【正文】（正文已截断：只带前 {CHAPTER_TEXT_LIMIT} 字）--- 正文开始 ---\n"
+        ));
+    } else {
+        out.push_str("【正文】--- 正文开始 ---\n");
+    }
+    out.push_str(if body.is_empty() {
+        "（本章还是空的）"
+    } else {
+        &text
+    });
+    out.push_str("\n--- 正文结束 ---\n");
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -960,6 +1027,48 @@ mod tests {
             "- 名: 谁杀了师父\n  类别: 期待\n  档位: 中\n  状态: 已埋\n  埋设:\n    - 章: 3\n      引文: 血衣\n- 名: 进京赶考\n  类别: 目标\n  档位: 短\n  状态: 部分兑现\n  埋设:\n    - 章: 1\n      引文: 行囊\n  兑现:\n    - 章: 3\n      引文: 城门口\n",
         );
         p
+    }
+
+    #[test]
+    fn ai陪看本章_只携带正文与可用的本章意图() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_chapter_project(tmp.path());
+        write(
+            &p.join("构思/单元/初入京城.md"),
+            "---\n核心矛盾: 主角要进城\n情绪目标: 先压后扬的痛快\n起章: 1\n止章: 4\n---\n\n单元正文\n",
+        );
+        write(
+            &p.join("构思/桥段/雨夜入城.md"),
+            "---\n所属单元: 初入京城\n顺序: 1\n起章: 3\n止章: 3\n情绪曲线: 压抑到释然\n关键转折: 守门人认出旧印\n期待钩子: 旧印主人仍在城中\n章节拍安排: 代入、拉扯、兑现\n---\n\n桥段备注\n",
+        );
+
+        let text = build_context("AI 陪看本章", &p, Some(3), &[]).unwrap();
+
+        assert!(text.contains("【陪看对象】正文单章"), "{text}");
+        assert!(text.contains("【本章意图】初入京城 → 雨夜入城"), "{text}");
+        assert!(text.contains("单元情绪目标：先压后扬的痛快"), "{text}");
+        assert!(text.contains("情绪曲线：压抑到释然"), "{text}");
+        assert!(text.contains("关键转折：守门人认出旧印"), "{text}");
+        assert!(text.contains("期待钩子：旧印主人仍在城中"), "{text}");
+        assert!(text.contains("章节拍安排：代入、拉扯、兑现"), "{text}");
+        assert!(text.contains("第三章的正文。那枚铜钱还在"), "{text}");
+        assert!(!text.contains("【本章伏笔】"), "陪看不读取额外线索：{text}");
+        assert!(!text.contains("【本章期待线】"), "陪看不读取额外线索：{text}");
+        assert!(!text.contains("【全书未收的线】"), "陪看不读取额外线索：{text}");
+    }
+
+    #[test]
+    fn ai陪看本章_没有匹配桥段时仍可用并说明上下文缺失() {
+        let tmp = TempDir::new().unwrap();
+        let p = sample_project(tmp.path());
+
+        let text = build_context(KIND_CHAPTER_COMPANION, &p, Some(3), &[]).unwrap();
+
+        assert!(
+            text.contains("本章还没有匹配的单元与桥段规划；只能陪看正文，不评价规划兑现情况"),
+            "{text}"
+        );
+        assert!(text.contains("第三章的正文。"), "{text}");
     }
 
     #[test]

@@ -401,7 +401,7 @@ export default function AiSidebar({
 
   function handleAdopt(kind: AiCommandKind, idx: number, content: string, meta: MessageMeta) {
     if (isReportKind(kind)) {
-      // 体检类命令只出报告（spec §二、§五：建议不是闸，报告不落盘）。
+      // 报告类命令只给建议（spec §二、§五：建议不是闸，报告不落盘）。
       return;
     }
     if (kind === "标注") {
@@ -503,7 +503,7 @@ export default function AiSidebar({
             <p>和 AI 聊拆书、找灵感、构思剧情。各板块的「AI 命令」：</p>
             <p className="hint">拆书：梳理选中内容 · 建议类型/解法标注 · 提炼小结</p>
             <p className="hint">构思：排布体检 · 矛盾梳理（只出报告，不改文件）</p>
-            <p className="hint">书写：本章体检 · 润色选中（润色点采纳才替换正文）</p>
+            <p className="hint">书写：AI 陪看本章 · 润色选中（润色点采纳才替换正文）</p>
             <p className="hint">AI 只给初稿与建议，采纳后才会写入文档。</p>
           </div>
         ) : (
@@ -663,7 +663,7 @@ function AdoptActions({
   adopted: boolean;
   onAdopt: () => void;
 }) {
-  // 体检类命令只出报告，没有采纳动作（spec §二、§五）。
+  // 报告类命令只出建议，没有采纳动作（spec §二、§五）。
   if (isReportKind(kind)) return null;
   if (kind === "标注") {
     const parsed = parseTropeSuggestion(content);

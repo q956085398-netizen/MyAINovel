@@ -182,7 +182,7 @@ interface WritingPageProps {
   onBack: () => void;
   /** 正文有变化：让上层刷新项目列表的计数。 */
   onChanged: () => void;
-  /** 板块 AI 命令（本章体检/润色）：种子交给 AI 面板（工单 #15）。 */
+  /** 板块 AI 命令（AI 陪看本章/润色）：种子交给 AI 面板。 */
   onAiCommand: (seed: AiSeed) => void;
   /** 向 AI 面板注册回写桥：采纳润色＝替换当前选区。 */
   registerBridge: (bridge: WritingBridge | null) => void;
@@ -941,30 +941,30 @@ export default function WritingPage({
     onBack();
   }
 
-  // ---------- AI 命令（工单 #15） ----------
+  // ---------- AI 命令（工单 #15、#45） ----------
 
-  /** 本章体检：材料（正文＋本章伏笔/三线＋所属单元）由后端现读组装，只出报告。
+  /** AI 陪看本章：材料只含正文与可用的本章意图，由作者显式发起，只出建议。
    *  读的是盘上正文——先把未保存的改动落盘，冲突没裁决就不跑。 */
-  async function runChapterCheck() {
+  async function runChapterCompanion() {
     const entry = currentRef.current;
     if (!entry || entry.ordinal === null) {
-      window.alert("先打开一章再跑体检（章序按文件名前缀认，未编号章不参与）。");
+      window.alert("先打开一章再请 AI 陪看（章序按文件名前缀认，未编号章不参与）。");
       return;
     }
     if (dirtyRef.current && !(await saveNow(false))) {
-      window.alert("本章还有未落盘的修改（或保存冲突未裁决），先处理再跑体检。");
+      window.alert("本章还有未落盘的修改（或保存冲突未裁决），先处理再请 AI 陪看。");
       return;
     }
     try {
       const text = await invoke<string>("build_ai_context", {
-        kind: "本章体检",
+        kind: "AI 陪看本章",
         project: project.dir,
         chapter: entry.ordinal,
         subjects: null,
       });
-      onAiCommand({ kind: "本章体检", bookName: project.title, text });
+      onAiCommand({ kind: "AI 陪看本章", bookName: project.title, text });
     } catch (e) {
-      window.alert(`AI 命令材料读取失败：${errMsg(e)}`);
+      window.alert(`AI 陪看材料读取失败：${errMsg(e)}`);
     }
   }
 
@@ -1220,10 +1220,10 @@ export default function WritingPage({
               <button
                 className="btn"
                 disabled={!ready || !current}
-                title="AI 体检：对照章节拍与本章伏笔/期待线现状（只出报告，不改正文）"
-                onClick={() => void runChapterCheck()}
+                title="由你主动发起；AI 只对照正文与本章意图给建议，不评分、不改正文"
+                onClick={() => void runChapterCompanion()}
               >
-                AI 体检
+                AI 陪看本章
               </button>
               <button
                 className="btn"

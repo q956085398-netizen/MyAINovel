@@ -30,7 +30,7 @@ interface WritingProps {
   /** 从伏笔看板跳来：打开该项目的这一章并选中引文；消费后清空。 */
   jump: { projectDir: string; ordinal: number; quote: string } | null;
   onJumpConsumed: () => void;
-  /** 板块 AI 命令（本章体检/润色）：种子交给 AI 面板。 */
+  /** 板块 AI 命令（AI 陪看本章/润色）：种子交给 AI 面板。 */
   onAiCommand: (seed: AiSeed) => void;
   /** 写作页向 AI 面板注册回写桥（采纳润色＝替换选中）。 */
   registerBridge: (bridge: WritingBridge | null) => void;
