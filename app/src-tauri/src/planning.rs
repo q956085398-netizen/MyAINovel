@@ -2,6 +2,7 @@
 //!
 //! 缺失的规划文件代表尚未开始，不是错误；所有写入遵循 ADR 0004 的原子写。
 
+use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,8 @@ pub const MAINLINES_FILE: &str = "主线.yaml";
 #[serde(rename_all = "camelCase")]
 pub struct Outline {
     pub body: String,
+    /// 长活大纲纸面的版本指纹（ADR 0004）；缺文件为 None。
+    pub fingerprint: Option<String>,
 }
 
 pub fn read_outline(_project: &Path) -> Result<Outline, String> {
@@ -23,15 +26,38 @@ pub fn read_outline(_project: &Path) -> Result<Outline, String> {
     if !path.exists() {
         return Ok(Outline::default());
     }
-    crate::book_file::read_text(&path).map(|body| Outline { body })
+    fs::read(&path)
+        .map(|bytes| Outline {
+            fingerprint: Some(crate::book_file::content_fingerprint(&bytes).to_string()),
+            body: String::from_utf8_lossy(&bytes).into_owned(),
+        })
+        .map_err(|e| format!("无法读取文件 {}：{e}", path.display()))
 }
 
-/// 大纲是自由纸面而非长活编辑器；保存以同目录临时文件＋rename 原子替换。
-pub fn save_outline(project: &Path, outline: &Outline) -> Result<(), String> {
+/// 大纲纸面是长活缓冲：落盘前以载入时内容指纹对账，拒绝静默覆盖外部修改。
+pub fn save_outline(
+    project: &Path,
+    outline: &Outline,
+    force: bool,
+) -> Result<crate::book_file::SaveResult, String> {
     let dir = project.join(crate::project::CONCEPT_DIR);
+    let path = dir.join(OUTLINE_FILE);
+    if !force {
+        let disk_fingerprint = match fs::read(&path) {
+            Ok(bytes) => Some(crate::book_file::content_fingerprint(&bytes).to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("无法读取文件 {}：{error}", path.display())),
+        };
+        if disk_fingerprint != outline.fingerprint {
+            return Ok(crate::book_file::SaveResult::Conflict);
+        }
+    }
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("无法创建构思目录 {}：{e}", dir.display()))?;
-    crate::book_file::write_text_atomic(&dir.join(OUTLINE_FILE), &outline.body)
+    crate::book_file::write_text_atomic(&path, &outline.body)?;
+    Ok(crate::book_file::SaveResult::Saved {
+        fingerprint: crate::book_file::content_fingerprint(outline.body.as_bytes()).to_string(),
+    })
 }
 
 /// 主线图唯一的数据来源。数组顺序即作者确定的叙事次序。
@@ -194,7 +220,13 @@ pub fn save_mainlines(project: &Path, plan: &MainlinePlan) -> Result<(), String>
     let dir = project.join(crate::project::CONCEPT_DIR);
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("无法创建构思目录 {}：{e}", dir.display()))?;
-    let values = plan
+    // 保存瞬间重读盘上表：界面不认识的手补键仍以盘上版本为准（ADR 0004）。
+    // 名称/标题是可读的软身份；人手改名时回退同一位置，避免丢掉旧字段。
+    let mut merged = plan.clone();
+    if mainlines_path(project).is_file() {
+        merge_disk_unknown_fields(&mut merged, &read_mainlines(project)?);
+    }
+    let values = merged
         .lines
         .iter()
         .map(line_to_value)
@@ -202,6 +234,34 @@ pub fn save_mainlines(project: &Path, plan: &MainlinePlan) -> Result<(), String>
     let text = serde_yaml::to_string(&Value::Sequence(values))
         .map_err(|e| format!("无法生成主线.yaml：{e}"))?;
     crate::book_file::write_text_atomic(&dir.join(MAINLINES_FILE), &text)
+}
+
+fn merge_disk_unknown_fields(current: &mut MainlinePlan, disk: &MainlinePlan) {
+    for (line_index, line) in current.lines.iter_mut().enumerate() {
+        let disk_line = disk
+            .lines
+            .iter()
+            .find(|candidate| candidate.name == line.name)
+            .or_else(|| disk.lines.get(line_index));
+        let Some(disk_line) = disk_line else { continue };
+        merge_mapping(&mut line.extra, &disk_line.extra);
+        for (milestone_index, milestone) in line.milestones.iter_mut().enumerate() {
+            let disk_milestone = disk_line
+                .milestones
+                .iter()
+                .find(|candidate| candidate.title == milestone.title)
+                .or_else(|| disk_line.milestones.get(milestone_index));
+            if let Some(disk_milestone) = disk_milestone {
+                merge_mapping(&mut milestone.extra, &disk_milestone.extra);
+            }
+        }
+    }
+}
+
+fn merge_mapping(current: &mut Mapping, disk: &Mapping) {
+    for (key, value) in disk {
+        current.insert(key.clone(), value.clone());
+    }
 }
 
 fn line_to_value(line: &StoryLine) -> Result<Value, String> {
@@ -291,16 +351,44 @@ mod tests {
         let project = root.path().join("项目/《空书》");
         let initial = Outline {
             body: "## 立意\n\n## 主线总览\n\n## 阶段构想\n\n## 尚未解决\n".into(),
+            fingerprint: None,
         };
 
-        save_outline(&project, &initial).unwrap();
-        assert_eq!(read_outline(&project).unwrap(), initial);
+        save_outline(&project, &initial, false).unwrap();
+        assert_eq!(read_outline(&project).unwrap().body, initial.body);
 
         let rewritten = Outline {
             body: "随手记下的全书去向".into(),
+            fingerprint: read_outline(&project).unwrap().fingerprint,
         };
-        save_outline(&project, &rewritten).unwrap();
-        assert_eq!(read_outline(&project).unwrap(), rewritten);
+        save_outline(&project, &rewritten, false).unwrap();
+        assert_eq!(read_outline(&project).unwrap().body, rewritten.body);
+    }
+
+    #[test]
+    fn 大纲纸面外部改动时拒绝静默覆盖() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let loaded = read_outline(&project).unwrap();
+        let draft = Outline {
+            body: "应用内的大纲".into(),
+            fingerprint: loaded.fingerprint,
+        };
+        assert!(matches!(
+            save_outline(&project, &draft, false).unwrap(),
+            crate::book_file::SaveResult::Saved { .. }
+        ));
+
+        let loaded = read_outline(&project).unwrap();
+        std::fs::write(project.join("构思").join(OUTLINE_FILE), "Obsidian 的新内容").unwrap();
+        let changed = Outline {
+            body: "应用内的后续修改".into(),
+            fingerprint: loaded.fingerprint,
+        };
+        assert!(matches!(
+            save_outline(&project, &changed, false).unwrap(),
+            crate::book_file::SaveResult::Conflict
+        ));
     }
 
     #[test]
@@ -343,5 +431,37 @@ mod tests {
         let loaded = read_mainlines(&project).unwrap();
         assert_eq!(loaded, plan);
         assert_eq!(loaded.lines[0].milestones[0].title, "得知冤案");
+    }
+
+    #[test]
+    fn 保存主线合并外部新增的未知字段() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let plan = MainlinePlan {
+            lines: vec![StoryLine {
+                name: "为父正名".into(),
+                is_main: true,
+                milestones: vec![Milestone {
+                    title: "得知冤案".into(),
+                    change: None,
+                    reader_feeling: None,
+                    units: vec![],
+                    note: None,
+                    extra: Mapping::new(),
+                }],
+                extra: Mapping::new(),
+            }],
+        };
+        save_mainlines(&project, &plan).unwrap();
+        fs::write(
+            project.join("构思").join(MAINLINES_FILE),
+            "- 名称: 为父正名\n  外部线字段: 保留\n  里程碑:\n    - 标题: 得知冤案\n      外部碑字段: 保留\n",
+        )
+        .unwrap();
+
+        save_mainlines(&project, &plan).unwrap();
+        let saved = fs::read_to_string(project.join("构思").join(MAINLINES_FILE)).unwrap();
+        assert!(saved.contains("外部线字段: 保留"), "{saved}");
+        assert!(saved.contains("外部碑字段: 保留"), "{saved}");
     }
 }

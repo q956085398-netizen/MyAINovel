@@ -116,6 +116,8 @@ export function emptyProjectMeta(): ProjectMeta {
 /** 构思/大纲.md：自由纸面，首次保存可采用轻模板。 */
 export interface Outline {
   body: string;
+  /** 大纲纸面是长活缓冲；保存时带回以检测外部修改。 */
+  fingerprint: string | null;
 }
 
 /** 构思/主线.yaml：主线图唯一结构化来源，数组顺序就是叙事次序。 */

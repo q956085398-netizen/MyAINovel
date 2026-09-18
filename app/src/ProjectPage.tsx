@@ -28,6 +28,7 @@ const TABS = [
   "大纲",
   "类型圈",
   "矛盾",
+  "桥段库",
   "单元",
   "伏笔",
   "期待感",
@@ -39,7 +40,7 @@ const TABS = [
 ] as const;
 const NAV_GROUPS = [
   { label: "定书", tabs: ["大纲", "类型圈", "人物", "世界观", "开头"] },
-  { label: "生情节", tabs: ["矛盾", "单元", "排布"] },
+  { label: "生情节", tabs: ["矛盾", "桥段库", "单元", "排布"] },
   { label: "织张力", tabs: ["伏笔", "期待感", "目标"] },
 ] as const;
 /** 项目页签；跨板块跳转（灵感库关联 → 项目）也用它指路。 */
@@ -292,6 +293,20 @@ export default function ProjectPage({
         <div className="project-content" key={`${tab}-${reloadKey}`}>
           {tab === "大纲" && <PlanningView project={project.dir} unitNames={units.map((unit) => unit.name)} />}
           {tab === "类型圈" && <CircleView project={project.dir} vocab={vocab} />}
+          {tab === "桥段库" && (
+            <div className="note-pane">
+              <div className="pane-head">
+                <div>
+                  <h2>桥段库</h2>
+                  <p className="hint">这里承接尚未归属单元的桥段草案，并在安排后保留同一张卡。</p>
+                </div>
+              </div>
+              <div className="empty-state">
+                <p>桥段草案与安排功能会在下一张工单中接入。</p>
+                <p className="hint">当前可先用矛盾保存尚模糊的剧情种子，或在单元里保留自由桥段备注。</p>
+              </div>
+            </div>
+          )}
           {isNoteTab(tab) && tab !== "人物" && (
             <NoteList
               project={project.dir}

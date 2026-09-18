@@ -258,8 +258,8 @@ fn read_outline(project: String) -> Result<Outline, String> {
 }
 
 #[tauri::command]
-fn save_outline(project: String, outline: Outline) -> Result<(), String> {
-    planning::save_outline(Path::new(&project), &outline)
+fn save_outline(project: String, outline: Outline, force: bool) -> Result<SaveResult, String> {
+    planning::save_outline(Path::new(&project), &outline, force)
 }
 
 /// 主线图唯一结构化来源（工单 #41）：里程碑顺序由数组顺序保持。

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { MainlinePlan, Milestone, Outline, StoryLine } from "./types";
+import type { MainlinePlan, Milestone, Outline, SaveResult, StoryLine } from "./types";
 import { emptyMilestone, emptyStoryLine } from "./types";
 import { errMsg, splitList } from "./util";
 import MarkdownEditor from "./MarkdownEditor";
@@ -14,13 +14,14 @@ interface PlanningViewProps {
 
 /** 大纲纸面与主线图：自由文本和结构化里程碑各自只有一份来源。 */
 export default function PlanningView({ project, unitNames }: PlanningViewProps) {
-  const [outline, setOutline] = useState<Outline>({ body: "" });
+  const [outline, setOutline] = useState<Outline>({ body: "", fingerprint: null });
   const [plan, setPlan] = useState<MainlinePlan>({ lines: [] });
   const [loading, setLoading] = useState(true);
   const [outlineDirty, setOutlineDirty] = useState(false);
   const [planDirty, setPlanDirty] = useState(false);
   const [savingOutline, setSavingOutline] = useState(false);
   const [savingPlan, setSavingPlan] = useState(false);
+  const [outlineConflict, setOutlineConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -48,16 +49,32 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
     };
   }, [project]);
 
-  async function saveOutline() {
+  async function saveOutline(force = false) {
     if (savingOutline) return;
     setSavingOutline(true);
     try {
-      await invoke("save_outline", { project, outline });
+      const result = await invoke<SaveResult>("save_outline", { project, outline, force });
+      if (result.status === "conflict") {
+        setOutlineConflict(true);
+        return;
+      }
+      setOutline((current) => ({ ...current, fingerprint: result.fingerprint }));
+      setOutlineConflict(false);
       setOutlineDirty(false);
     } catch (e) {
       window.alert(`保存大纲失败：${errMsg(e)}`);
     } finally {
       setSavingOutline(false);
+    }
+  }
+
+  async function reloadOutline() {
+    try {
+      setOutline(await invoke<Outline>("read_outline", { project }));
+      setOutlineDirty(false);
+      setOutlineConflict(false);
+    } catch (e) {
+      window.alert(`重新读取大纲失败：${errMsg(e)}`);
     }
   }
 
@@ -107,7 +124,7 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
         <div className="pane-head">
           <div>
             <h2>大纲</h2>
-            <p className="hint">自由写下这本书为何向前、将走到哪里。它不重复主线里的程碑卡。</p>
+            <p className="hint">自由写下这本书为何向前、将走到哪里。它不重复主线里的里程碑卡。</p>
           </div>
           <button
             className="btn primary"
@@ -121,7 +138,7 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
           <button
             className="btn small"
             onClick={() => {
-              setOutline({ body: OUTLINE_TEMPLATE });
+              setOutline({ body: OUTLINE_TEMPLATE, fingerprint: outline.fingerprint });
               setOutlineDirty(true);
             }}
           >
@@ -131,11 +148,21 @@ export default function PlanningView({ project, unitNames }: PlanningViewProps) 
         <MarkdownEditor
           value={outline.body}
           onChange={(body) => {
-            setOutline({ body });
+            setOutline((current) => ({ ...current, body }));
             setOutlineDirty(true);
+            setOutlineConflict(false);
           }}
           height="360px"
         />
+        {outlineConflict && (
+          <div className="conflict-box">
+            磁盘上的大纲已被外部修改。请重新读取，或确认以当前内容覆盖。
+            <div className="conflict-actions">
+              <button className="btn small" onClick={() => void reloadOutline}>重新读取</button>
+              <button className="btn small" onClick={() => void saveOutline(true)}>确认覆盖</button>
+            </div>
+          </div>
+        )}
         <p className="hint">文件：构思/大纲.md；提示标题可删、可改，也可以从空白开始。</p>
       </section>
 
