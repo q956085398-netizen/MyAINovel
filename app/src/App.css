@@ -1725,6 +1725,122 @@ body {
   gap: 10px;
 }
 
+/* ---------- 桥段库（工单 #43）：克制便笺，只突出内容与下一步安排 ---------- */
+
+.bridge-library {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.bridge-filter {
+  display: flex;
+  gap: var(--sp-2);
+  border-bottom: var(--line-w) solid var(--line);
+}
+
+.bridge-filter .subtab {
+  margin-bottom: calc(-1 * var(--line-w));
+}
+
+.bridge-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--sp-4);
+}
+
+.bridge-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+  border: var(--line-w) solid var(--line);
+  border-left: var(--rail-subtle) solid var(--accent-line);
+  border-radius: var(--r-card);
+  background: var(--panel);
+  box-shadow: var(--sh-1);
+}
+
+.bridge-card-head,
+.bridge-actions,
+.bridge-arrange,
+.bridge-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.bridge-card-head {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.memo-mark {
+  display: inline-block;
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+}
+
+.bridge-card h3 {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.bridge-summary {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink);
+  line-height: 1.65;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.bridge-meta {
+  color: var(--ink-soft);
+  font-size: var(--fs-sub);
+}
+
+.bridge-card .hint,
+.bridge-card .soft-warning {
+  margin: 0;
+}
+
+.bridge-arrange select {
+  max-width: 170px;
+  padding: var(--sp-2) var(--sp-3);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+.bridge-dialog label {
+  display: block;
+  margin-bottom: var(--sp-4);
+  color: var(--ink-soft);
+  font-size: var(--fs-ui);
+}
+
+.bridge-dialog input,
+.bridge-dialog textarea {
+  width: 100%;
+  margin-top: var(--sp-1);
+  padding: 7px 10px;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
 /* ---------- 大纲与主线图（工单 #41）：自由纸面 + 纵向故事脊梁 ---------- */
 
 .planning-pane {

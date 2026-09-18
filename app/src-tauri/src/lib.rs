@@ -27,7 +27,7 @@ use export::{ChapterRange, ExportReport, ExportTemplate};
 use foreshadow::{Foreshadow, ForeshadowView};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
-use planning::{MainlinePlan, Outline};
+use planning::{Bridge, BridgeDraft, MainlinePlan, Outline};
 use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
     ProjectMeta,
@@ -271,6 +271,40 @@ fn read_mainlines(project: String) -> Result<MainlinePlan, String> {
 #[tauri::command]
 fn save_mainlines(project: String, plan: MainlinePlan, force: bool) -> Result<SaveResult, String> {
     planning::save_mainlines(Path::new(&project), &plan, force)
+}
+
+/// 项目内桥段库（工单 #43）：每张桥段卡只在 构思/桥段/ 保存一份。
+#[tauri::command]
+fn scan_bridges(project: String) -> Result<Vec<Bridge>, String> {
+    planning::scan_bridges(Path::new(&project))
+}
+
+#[tauri::command]
+fn save_bridge(
+    project: String,
+    draft: BridgeDraft,
+    prev_path: Option<String>,
+) -> Result<Bridge, String> {
+    planning::save_bridge(
+        Path::new(&project),
+        &draft,
+        prev_path.as_deref().map(Path::new),
+    )
+}
+
+#[tauri::command]
+fn arrange_bridge(project: String, path: String, unit: String) -> Result<Bridge, String> {
+    planning::arrange_bridge(Path::new(&project), Path::new(&path), &unit)
+}
+
+#[tauri::command]
+fn unarrange_bridge(project: String, path: String) -> Result<Bridge, String> {
+    planning::unarrange_bridge(Path::new(&project), Path::new(&path))
+}
+
+#[tauri::command]
+fn move_bridge(project: String, path: String, direction: i32) -> Result<Vec<Bridge>, String> {
+    planning::move_bridge(Path::new(&project), Path::new(&path), direction)
 }
 
 #[tauri::command]
@@ -777,6 +811,11 @@ pub fn run() {
             save_outline,
             read_mainlines,
             save_mainlines,
+            scan_bridges,
+            save_bridge,
+            arrange_bridge,
+            unarrange_bridge,
+            move_bridge,
             scan_notes,
             save_note,
             delete_note,

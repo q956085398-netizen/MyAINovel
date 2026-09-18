@@ -10,6 +10,7 @@ use serde_yaml::{Mapping, Value};
 
 pub const OUTLINE_FILE: &str = "大纲.md";
 pub const MAINLINES_FILE: &str = "主线.yaml";
+pub const BRIDGES_DIR: &str = "桥段";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -336,6 +337,250 @@ fn put_optional(map: &mut Mapping, key: &str, value: Option<&str>) {
     }
 }
 
+// --- 桥段库：一张桥段卡就是一份 `构思/桥段/<名>.md` 文件。 ---
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeDraft {
+    pub name: String,
+    pub unit: Option<String>,
+    pub order: Option<u32>,
+    pub start_chapter: Option<u32>,
+    pub end_chapter: Option<u32>,
+    pub emotion_curve: Option<String>,
+    pub key_turn: Option<String>,
+    pub expectation_hook: Option<String>,
+    pub beat_plan: Option<String>,
+    pub body: String,
+}
+
+impl BridgeDraft {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bridge {
+    pub path: std::path::PathBuf,
+    #[serde(flatten)]
+    pub draft: BridgeDraft,
+}
+
+impl Bridge {
+    pub fn name(&self) -> &str {
+        &self.draft.name
+    }
+}
+
+impl std::ops::Deref for Bridge {
+    type Target = BridgeDraft;
+
+    fn deref(&self) -> &Self::Target {
+        &self.draft
+    }
+}
+
+fn bridges_dir(project: &Path) -> std::path::PathBuf {
+    project.join(crate::project::CONCEPT_DIR).join(BRIDGES_DIR)
+}
+
+/// 缺失桥段目录就是空桥段库。已安排项按人工「顺序」排，待安排项按文件名排，
+/// 既不从章节区间推导次序，也不触碰旧单元的自由桥段备注。
+pub fn scan_bridges(project: &Path) -> Result<Vec<Bridge>, String> {
+    let dir = bridges_dir(project);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut bridges = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && !crate::book_file::is_hidden(path)
+                && crate::book_file::has_md_extension(path)
+        })
+        .map(|path| read_bridge(&path))
+        .collect::<Vec<_>>();
+    bridges.sort_by(|left, right| {
+        left.draft
+            .unit
+            .cmp(&right.draft.unit)
+            .then_with(|| {
+                left.draft
+                    .order
+                    .unwrap_or(u32::MAX)
+                    .cmp(&right.draft.order.unwrap_or(u32::MAX))
+            })
+            .then_with(|| left.name().cmp(right.name()))
+    });
+    Ok(bridges)
+}
+
+fn read_bridge(path: &Path) -> Bridge {
+    let mut draft = BridgeDraft::new(
+        path.file_stem()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
+    let Ok(raw) = crate::book_file::read_text(path) else {
+        return Bridge {
+            path: path.to_path_buf(),
+            draft,
+        };
+    };
+    let raw = crate::book_file::strip_bom(&raw);
+    let Some((yaml, body)) = crate::book_file::split_frontmatter(raw) else {
+        draft.body = raw.to_string();
+        return Bridge {
+            path: path.to_path_buf(),
+            draft,
+        };
+    };
+    let Ok(Value::Mapping(map)) = serde_yaml::from_str::<Value>(&yaml) else {
+        draft.body = raw.to_string();
+        return Bridge {
+            path: path.to_path_buf(),
+            draft,
+        };
+    };
+    draft.unit = crate::book_file::map_scalar(&map, "所属单元");
+    draft.order = crate::book_file::map_u32(&map, "顺序");
+    draft.start_chapter = crate::book_file::map_u32(&map, "起章");
+    draft.end_chapter = crate::book_file::map_u32(&map, "止章");
+    draft.emotion_curve = crate::book_file::map_scalar(&map, "情绪曲线");
+    draft.key_turn = crate::book_file::map_scalar(&map, "关键转折");
+    draft.expectation_hook = crate::book_file::map_scalar(&map, "期待钩子");
+    draft.beat_plan = crate::book_file::map_scalar(&map, "章节拍安排");
+    draft.body = body;
+    Bridge {
+        path: path.to_path_buf(),
+        draft,
+    }
+}
+
+/// 读-合-写当前桥段的 frontmatter，保留作者在 Obsidian 补的未知字段。
+pub fn save_bridge(
+    project: &Path,
+    draft: &BridgeDraft,
+    prev_path: Option<&Path>,
+) -> Result<Bridge, String> {
+    let name = crate::book_file::sanitize_file_name(&draft.name)?;
+    let dir = bridges_dir(project);
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("无法创建桥段目录 {}：{error}", dir.display()))?;
+    let path = crate::book_file::unique_file_path(&dir, &format!("{name}.md"), prev_path);
+    let base = prev_path
+        .filter(|previous| *previous != path)
+        .unwrap_or(&path);
+    let mut map = crate::book_file::frontmatter_mapping(base).unwrap_or_default();
+    apply_bridge_draft(&mut map, draft);
+    if let Some(previous) = prev_path {
+        if previous != path {
+            fs::rename(previous, &path)
+                .map_err(|error| format!("无法移动桥段到 {}：{error}", path.display()))?;
+        }
+    }
+    crate::book_file::write_frontmatter(&path, map, &draft.body)?;
+    Ok(read_bridge(&path))
+}
+
+fn apply_bridge_draft(map: &mut Mapping, draft: &BridgeDraft) {
+    crate::book_file::set_map_scalar(map, "所属单元", draft.unit.as_deref());
+    crate::book_file::set_map_u32(map, "顺序", draft.order);
+    crate::book_file::set_map_u32(map, "起章", draft.start_chapter);
+    crate::book_file::set_map_u32(map, "止章", draft.end_chapter);
+    crate::book_file::set_map_scalar(map, "情绪曲线", draft.emotion_curve.as_deref());
+    crate::book_file::set_map_scalar(map, "关键转折", draft.key_turn.as_deref());
+    crate::book_file::set_map_scalar(map, "期待钩子", draft.expectation_hook.as_deref());
+    crate::book_file::set_map_scalar(map, "章节拍安排", draft.beat_plan.as_deref());
+}
+
+fn draft_from_bridge(bridge: &Bridge) -> BridgeDraft {
+    bridge.draft.clone()
+}
+
+fn bridge_in_project(project: &Path, path: &Path) -> Result<(), String> {
+    if path.parent() != Some(bridges_dir(project).as_path()) {
+        return Err(format!("{} 不在 构思/桥段/ 下", path.display()));
+    }
+    Ok(())
+}
+
+/// 安排只补所属单元与末尾顺序；桥段正文仍只留在自己的文件里。
+pub fn arrange_bridge(project: &Path, path: &Path, unit: &str) -> Result<Bridge, String> {
+    bridge_in_project(project, path)?;
+    let unit = required(unit, "所属单元")?;
+    let unit_exists = crate::project::scan_notes(project, crate::project::NoteKind::Unit)?
+        .iter()
+        .any(|note| note.name == unit);
+    if !unit_exists {
+        return Err(format!("单元「{unit}」不存在，不能安排桥段"));
+    }
+    let bridge = read_bridge(path);
+    let next_order = scan_bridges(project)?
+        .iter()
+        .filter(|item| item.path != path && item.draft.unit.as_deref() == Some(unit.as_str()))
+        .filter_map(|item| item.draft.order)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let mut draft = draft_from_bridge(&bridge);
+    draft.unit = Some(unit);
+    draft.order = Some(next_order);
+    save_bridge(project, &draft, Some(path))
+}
+
+/// 取消安排只摘掉关系与次序，其他桥段内容和提示字段完全保留。
+pub fn unarrange_bridge(project: &Path, path: &Path) -> Result<Bridge, String> {
+    bridge_in_project(project, path)?;
+    let bridge = read_bridge(path);
+    let mut draft = draft_from_bridge(&bridge);
+    draft.unit = None;
+    draft.order = None;
+    save_bridge(project, &draft, Some(path))
+}
+
+/// 在同一单元内交换相邻桥段，落盘后的连续顺序即作者确定的叙事次序。
+pub fn move_bridge(project: &Path, path: &Path, direction: i32) -> Result<Vec<Bridge>, String> {
+    bridge_in_project(project, path)?;
+    let current = read_bridge(path);
+    let Some(unit) = current.draft.unit.as_deref() else {
+        return Err("待安排桥段不需要调整单元内次序".to_string());
+    };
+    let mut bridges = scan_bridges(project)?
+        .into_iter()
+        .filter(|item| item.draft.unit.as_deref() == Some(unit))
+        .collect::<Vec<_>>();
+    bridges.sort_by(|left, right| {
+        left.draft
+            .order
+            .unwrap_or(u32::MAX)
+            .cmp(&right.draft.order.unwrap_or(u32::MAX))
+            .then_with(|| left.name().cmp(right.name()))
+    });
+    let index = bridges
+        .iter()
+        .position(|item| item.path == path)
+        .ok_or_else(|| "桥段未找到".to_string())?;
+    let target = index as i32 + direction.signum();
+    if !(0..bridges.len() as i32).contains(&target) {
+        return Ok(bridges);
+    }
+    bridges.swap(index, target as usize);
+    let mut saved = Vec::with_capacity(bridges.len());
+    for (index, bridge) in bridges.iter().enumerate() {
+        let mut draft = draft_from_bridge(bridge);
+        draft.order = Some(index as u32 + 1);
+        saved.push(save_bridge(project, &draft, Some(&bridge.path))?);
+    }
+    Ok(saved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,5 +751,81 @@ mod tests {
         let loaded = read_mainlines(&project).unwrap();
         assert_eq!(loaded.lines.iter().filter(|line| line.is_main).count(), 1);
         assert!(loaded.lines[0].is_main);
+    }
+
+    #[test]
+    fn 新桥段草案待安排_安排追加末尾_取消后回归待安排() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        crate::project::save_note(
+            &project,
+            &crate::project::NoteDraft::new(crate::project::NoteKind::Unit, "初入京城"),
+            None,
+        )
+        .unwrap();
+        let mut first = BridgeDraft::new("夜探旧宅");
+        first.body = "沈砚夜探旧宅，发现父亲留下的密信。".into();
+        let first = save_bridge(&project, &first, None).unwrap();
+        assert!(first.unit.is_none());
+        assert_eq!(scan_bridges(&project).unwrap(), vec![first.clone()]);
+
+        let second = save_bridge(&project, &BridgeDraft::new("朝堂对质"), None).unwrap();
+        let first = arrange_bridge(&project, &first.path, "初入京城").unwrap();
+        let second = arrange_bridge(&project, &second.path, "初入京城").unwrap();
+        assert_eq!(
+            (first.unit.as_deref(), first.order),
+            (Some("初入京城"), Some(1))
+        );
+        assert_eq!(
+            (second.unit.as_deref(), second.order),
+            (Some("初入京城"), Some(2))
+        );
+
+        let restored = unarrange_bridge(&project, &first.path).unwrap();
+        assert_eq!((restored.unit.clone(), restored.order), (None, None));
+    }
+
+    #[test]
+    fn 安排桥段只接受既有单元() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let bridge = save_bridge(&project, &BridgeDraft::new("夜探旧宅"), None).unwrap();
+
+        assert!(arrange_bridge(&project, &bridge.path, "不存在的单元").is_err());
+    }
+
+    #[test]
+    fn 单元内桥段可手动换序且保留未知字段() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        crate::project::save_note(
+            &project,
+            &crate::project::NoteDraft::new(crate::project::NoteKind::Unit, "初入京城"),
+            None,
+        )
+        .unwrap();
+        let first = save_bridge(&project, &BridgeDraft::new("夜探旧宅"), None).unwrap();
+        let second = save_bridge(&project, &BridgeDraft::new("朝堂对质"), None).unwrap();
+        let first = arrange_bridge(&project, &first.path, "初入京城").unwrap();
+        let second = arrange_bridge(&project, &second.path, "初入京城").unwrap();
+        fs::write(
+            &first.path,
+            "---\n所属单元: 初入京城\n顺序: 1\n手补说明: 保留\n---\n夜探旧宅的正文\n",
+        )
+        .unwrap();
+
+        move_bridge(&project, &second.path, -1).unwrap();
+        let arranged = scan_bridges(&project)
+            .unwrap()
+            .into_iter()
+            .filter(|bridge| bridge.unit.as_deref() == Some("初入京城"))
+            .collect::<Vec<_>>();
+        assert_eq!(arranged[0].name, "朝堂对质");
+        assert_eq!(arranged[1].name, "夜探旧宅");
+        assert_eq!(arranged[0].order, Some(1));
+        assert_eq!(arranged[1].order, Some(2));
+        assert!(fs::read_to_string(first.path)
+            .unwrap()
+            .contains("手补说明: 保留"));
     }
 }

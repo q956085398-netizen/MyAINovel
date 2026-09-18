@@ -148,6 +148,39 @@ export function emptyStoryLine(): StoryLine {
   return { name: "", isMain: false, milestones: [] };
 }
 
+/** 构思/桥段/<桥段名>.md：桥段草案与已安排桥段共用同一实体。 */
+export interface BridgeDraft {
+  name: string;
+  unit: string | null;
+  order: number | null;
+  startChapter: number | null;
+  endChapter: number | null;
+  emotionCurve: string | null;
+  keyTurn: string | null;
+  expectationHook: string | null;
+  beatPlan: string | null;
+  body: string;
+}
+
+export interface Bridge extends BridgeDraft {
+  path: string;
+}
+
+export function emptyBridgeDraft(name = ""): BridgeDraft {
+  return {
+    name,
+    unit: null,
+    order: null,
+    startChapter: null,
+    endChapter: null,
+    emotionCurve: null,
+    keyTurn: null,
+    expectationHook: null,
+    beatPlan: null,
+    body: "",
+  };
+}
+
 /** 与 Rust 侧 project::NoteKind 对应（serde 值即中文类别名，也是构思下的目录名）。 */
 export type NoteKind = "矛盾" | "单元" | "人物" | "世界观" | "开头";
 

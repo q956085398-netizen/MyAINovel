@@ -20,6 +20,7 @@ import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
 import RelationshipCanvas from "./RelationshipCanvas";
 import PlanningView from "./PlanningView";
+import BridgeLibrary from "./BridgeLibrary";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 // 「三线」拆为「期待感」「目标」两页签（工单 #36）：名字自解释，
@@ -294,18 +295,11 @@ export default function ProjectPage({
           {tab === "大纲" && <PlanningView project={project.dir} unitNames={units.map((unit) => unit.name)} />}
           {tab === "类型圈" && <CircleView project={project.dir} vocab={vocab} />}
           {tab === "桥段库" && (
-            <div className="note-pane">
-              <div className="pane-head">
-                <div>
-                  <h2>桥段库</h2>
-                  <p className="hint">这里承接尚未归属单元的桥段草案，并在安排后保留同一张卡。</p>
-                </div>
-              </div>
-              <div className="empty-state">
-                <p>桥段草案与安排功能会在下一张工单中接入。</p>
-                <p className="hint">当前可先用矛盾保存尚模糊的剧情种子，或在单元里保留自由桥段备注。</p>
-              </div>
-            </div>
+            <BridgeLibrary
+              project={project.dir}
+              units={units}
+              onChanged={refreshAll}
+            />
           )}
           {isNoteTab(tab) && tab !== "人物" && (
             <NoteList
