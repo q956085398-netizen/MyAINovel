@@ -82,7 +82,7 @@
 Rust：
 
 - 新模块 `ai_context.rs`：`build_context_with_chapter_content(kind, project, chapter?, subjects?, chapter_content?) -> String` 统一分派材料组装；只读盘，陪看正文可使用点击时快照，其余材料仍从文件读取。
-- `lib.rs`：新增 IPC `build_ai_context(kind, project, chapter?)`。
+- `lib.rs`：新增 IPC `build_ai_context(kind, project, chapter?, subjects?, chapter_content?)`。
 
 前端：
 
