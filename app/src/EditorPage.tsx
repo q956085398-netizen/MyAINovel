@@ -25,8 +25,11 @@ import { dirName, editorRender, parseBookHeaderValues, applyBookHeaderValues } f
 import type { BookHeaderValues } from "./editorRender";
 import { useImageViewer } from "./ImageViewer";
 import BookHeaderDialog from "./BookHeaderDialog";
-import TypographyToolbar from "./TypographyToolbar";
+import { TypoPopout } from "./TypographyToolbar";
 import TropeDialog from "./TropeDialog";
+import HeaderMenu, { type HeaderMenuItem } from "./HeaderMenu";
+import SaveStateChip from "./SaveStateChip";
+import { saveStatusAfterEdit, type SaveStatus } from "./editorHeaderState";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 /** 六插入块（设计共识 §四＋工单 #30 书档入家族）：Obsidian 风格 callout，
@@ -112,7 +115,11 @@ export default function EditorPage({
   const autosaveRef = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  /** 头部保存五态（工单 #66 / T04）：干净/未保存/保存中/失败/冲突。 */
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  /** 选区上下文（工单 #66）：桥段标注与两选区 AI 命令只在选区成立时出现。 */
+  const [hasSelection, setHasSelection] = useState(false);
+  const [typoOpen, setTypoOpen] = useState(false);
   const imageViewer = useImageViewer();
   const [headerForm, setHeaderForm] = useState<BookHeaderValues | null>(null);
   const [tropeDialog, setTropeDialog] = useState<{
@@ -172,13 +179,17 @@ export default function EditorPage({
   async function save(force = false, quiet = false): Promise<boolean> {
     if (quiet && (!dirtyRef.current || conflictRef.current)) return true;
     if (savingRef.current) return false;
+    // 本无改动不写盘也不进「保存中」：干净时 Ctrl+S 不能把状态卡在半途。
+    if (!force && !dirtyRef.current) return true;
     savingRef.current = true;
+    if (!quiet) setSaveStatus("saving");
     try {
       return await persist(force, quiet);
     } catch (e) {
       if (quiet) {
         console.error("拆书兜底保存失败：", e);
       } else {
+        setSaveStatus("error");
         window.alert(`保存失败：${errMsg(e)}`);
       }
       return false;
@@ -206,7 +217,7 @@ export default function EditorPage({
       // 保存往返窗口里又打过字的不算干净：留着脏标让下一轮自动保存接走。
       if (viewRef.current?.state.doc.toString() === content) {
         dirtyRef.current = false;
-        setDirty(false);
+        setSaveStatus("saved");
       }
       return true;
     }
@@ -228,7 +239,7 @@ export default function EditorPage({
         fingerprintRef.current = doc.fingerprint;
         conflictRef.current = false;
         dirtyRef.current = false;
-        setDirty(false);
+        setSaveStatus("saved");
         return true;
       } catch (e) {
         window.alert(`重新加载失败：${errMsg(e)}`);
@@ -238,6 +249,8 @@ export default function EditorPage({
       // 直接走 persist(true)（force 不可能再冲突），不经 save 以免撞门闩。
       return await persist(true);
     }
+    // 两次裁决都取消：冲突挂着，自动保存暂停，状态胶囊亮「保存冲突」。
+    setSaveStatus("conflict");
     return false;
   }
 
@@ -446,8 +459,11 @@ export default function EditorPage({
             EditorView.updateListener.of((u) => {
               if (u.docChanged) {
                 dirtyRef.current = true;
-                setDirty(true);
+                setSaveStatus((s) => saveStatusAfterEdit(s));
                 scheduleAutosave();
+              }
+              if (u.selectionSet) {
+                setHasSelection(!u.state.selection.main.empty);
               }
             }),
             Prec.highest(
@@ -551,46 +567,87 @@ export default function EditorPage({
           <Icon as={ArrowLeft} size={ICON_SIZE_DENSE} />
           返回
         </button>
-        <h1 className="editor-title">
-          {book.name}
-          {dirty && <span className="dirty-dot" title="未保存" />}
-        </h1>
+        <h1 className="editor-title">{book.name}</h1>
+        <SaveStateChip
+          status={saveStatus}
+          onSave={() => void save()}
+          title="停笔自动保存；Ctrl+S 立即保存。冲突时点击重新裁决。"
+        />
         <div className="page-actions">
-          <button className="btn" disabled={!ready} onClick={() => void openTropePanel()}>
-            桥段标注
+          {/* 选区上下文：桥段标注只在选区成立时出现（spec §五）。 */}
+          {hasSelection && (
+            <button className="btn" disabled={!ready} onClick={() => void openTropePanel()}>
+              桥段标注
+            </button>
+          )}
+          <HeaderMenu
+            label="插入"
+            title="在光标行尾插入 callout 块"
+            onReturnFocus={() => viewRef.current?.focus()}
+            items={INSERT_BLOCKS.map<HeaderMenuItem>((b) => ({
+              id: `insert-${b}`,
+              label: b,
+              hint: b === "原文截图" ? "粘贴图片自动存入附件" : undefined,
+              disabled: !ready,
+              run: () => insertBlock(b),
+            }))}
+          />
+          <HeaderMenu
+            label="AI"
+            title="发给 AI 侧边栏出初稿，确认后才落盘"
+            onReturnFocus={() => viewRef.current?.focus()}
+            items={[
+              ...(hasSelection
+                ? [
+                    {
+                      id: "ai-梳理",
+                      label: "梳理选中内容",
+                      disabled: !ready,
+                      run: () => void runAiCommand("梳理"),
+                    },
+                    {
+                      id: "ai-标注",
+                      label: "建议类型/解法标注",
+                      disabled: !ready,
+                      run: () => void runAiCommand("标注"),
+                    },
+                  ]
+                : []),
+              {
+                id: "ai-小结",
+                label: "提炼小结",
+                hint: hasSelection ? undefined : "无选区时取当前章或全文",
+                disabled: !ready,
+                run: () => void runAiCommand("小结"),
+              },
+            ]}
+          />
+          <button
+            className="btn"
+            aria-expanded={typoOpen}
+            title="排版（字体/字号/行距/对齐/缩进，与设置同源）"
+            onClick={() => setTypoOpen((v) => !v)}
+          >
+            排版
           </button>
-          <button className="btn primary" disabled={!ready} onClick={() => void openNextChapter()}>
+          <button
+            className="btn primary"
+            disabled={!ready}
+            title="Ctrl+Enter 开下一章"
+            onClick={() => void openNextChapter()}
+          >
             开下一章
-          </button>
-          <button className="btn" disabled={!ready || !dirty} onClick={() => void save()}>
-            保存
           </button>
         </div>
       </header>
-      <div className="editor-toolbar">
-        <span className="toolbar-label">插入块</span>
-        {INSERT_BLOCKS.map((b) => (
-          <button key={b} className="btn small" disabled={!ready} onClick={() => insertBlock(b)}>
-            {b}
-          </button>
-        ))}
-        <span className="toolbar-label">AI 命令</span>
-        {AI_COMMANDS.map((c) => (
-          <button
-            key={c.kind}
-            className="btn small ai-cmd"
-            disabled={!ready}
-            title="发给 AI 侧边栏出初稿，确认后才落盘"
-            onClick={() => void runAiCommand(c.kind)}
-          >
-            {c.label}
-          </button>
-        ))}
-        <span className="toolbar-hint">
-          停笔自动保存 · Ctrl+Enter 开下一章 · Ctrl+S 立即保存 · 粘贴图片自动存入附件
-        </span>
-      </div>
-      <TypographyToolbar />
+      {typoOpen && (
+        <TypoPopout
+          onClose={() => {
+            setTypoOpen(false);
+            viewRef.current?.focus();
+          }}
+        />
+      )}
       <div className="editor-container" ref={containerRef} />
       {imageViewer.node}
       {headerForm && (

@@ -36,6 +36,7 @@ export {
   BookMarked,
   BookOpen,
   Check,
+  ChevronDown,
   Layers,
   MessageCircle,
   PenLine,
