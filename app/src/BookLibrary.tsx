@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { BookEntry, SearchHit } from "./types";
 import { errMsg, tropeSpanLabel } from "./util";
@@ -37,6 +37,8 @@ interface BookLibraryProps {
   /** 新建空库：选空文件夹即设为当前库（工单 #21）。 */
   onCreateLibrary: () => void;
   onOpen: (book: BookEntry) => void;
+  /** 重启恢复（工单 #56 / T01）：上次打开的拆书稿主文件路径；首次扫描找到即自动打开。 */
+  restoreMd?: string | null;
 }
 
 export default function BookLibrary({
@@ -44,10 +46,13 @@ export default function BookLibrary({
   onChooseFolder,
   onCreateLibrary,
   onOpen,
+  restoreMd,
 }: BookLibraryProps) {
   const [books, setBooks] = useState<BookEntry[]>([]);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 恢复只做一次：找得到就回那本书，找不到（被移走/改名）安静留在书库列表。 */
+  const restoreRef = useRef(restoreMd ?? null);
 
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
@@ -69,14 +74,21 @@ export default function BookLibrary({
     setScanning(true);
     setError(null);
     try {
-      setBooks(await invoke<BookEntry[]>("scan_library", { root: path }));
+      const list = await invoke<BookEntry[]>("scan_library", { root: path });
+      setBooks(list);
+      const wanted = restoreRef.current;
+      if (wanted) {
+        restoreRef.current = null;
+        const hit = list.find((b) => b.primaryMd === wanted);
+        if (hit) onOpen(hit);
+      }
     } catch (e) {
       setBooks([]);
       setError(`扫描失败：${errMsg(e)}`);
     } finally {
       setScanning(false);
     }
-  }, []);
+  }, [onOpen]);
 
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);

@@ -188,8 +188,10 @@ interface WritingPageProps {
   onChanged: () => void;
   /** 板块 AI 命令（AI 陪看本章/润色）：种子交给 AI 面板。 */
   onAiCommand: (seed: AiSeed) => void;
-  /** 向 AI 面板注册回写桥：采纳润色＝替换当前选区。 */
+  /** 向 AI 面板注册回写桥（采纳润色＝替换当前选区）。 */
   registerBridge: (bridge: WritingBridge | null) => void;
+  /** 是否停在正文上（工单 #56 / T01）：开章才 true，空项目不退窄轨。 */
+  onChapterActive?: (v: boolean) => void;
 }
 
 /** 写作页（工单 #5，docs/spec/书写编辑器.md）：章节列表＋单章编辑器＋
@@ -203,6 +205,7 @@ export default function WritingPage({
   onChanged,
   onAiCommand,
   registerBridge,
+  onChapterActive,
 }: WritingPageProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -222,6 +225,12 @@ export default function WritingPage({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chapters, setChapters] = useState<ChapterEntry[]>([]);
   const [current, setCurrent] = useState<ChapterEntry | null>(null);
+
+  // 正文在不在场（工单 #56 / T01）：外壳据此退场/召回窄轨；
+  // 空项目（还没开章）不算进入正文。
+  useEffect(() => {
+    onChapterActive?.(!!current);
+  }, [current, onChapterActive]);
   const [prefix, setPrefix] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [conflict, setConflict] = useState(false);

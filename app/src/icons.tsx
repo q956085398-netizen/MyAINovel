@@ -33,6 +33,7 @@ export function Icon({ as: Glyph, size = ICON_SIZE, strokeWidth = ICON_STROKE, .
 
 export {
   ArrowLeft,
+  BookMarked,
   BookOpen,
   Check,
   Layers,

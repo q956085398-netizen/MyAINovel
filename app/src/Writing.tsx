@@ -7,6 +7,7 @@ import DisplayToggle from "./DisplayToggle";
 import CoverArt, { pickAndSetCover } from "./CoverArt";
 import WritingPage from "./WritingPage";
 import { ExportDialog } from "./ExportDialog";
+import { setCurrentProjectDir } from "./currentProject";
 
 /** 记住上次打开的项目：码字工具应「打开即回到那本书」。 */
 const LAST_PROJECT_KEY = "gongbi.writing.project";
@@ -27,13 +28,16 @@ interface WritingProps {
   onChooseFolder: () => void;
   /** 新建空库：选空文件夹即设为当前库（工单 #21）。 */
   onCreateLibrary: () => void;
-  /** 从伏笔看板跳来：打开该项目的这一章并选中引文；消费后清空。 */
-  jump: { projectDir: string; ordinal: number; quote: string } | null;
+  /** 跳转请求：locate 带章序与引文（伏笔看板）；locate 空＝「继续工作」，
+   *  写作页自己回到上次章节。消费后清空。 */
+  jump: { projectDir: string; locate: WritingLocate | null } | null;
   onJumpConsumed: () => void;
   /** 板块 AI 命令（AI 陪看本章/润色）：种子交给 AI 面板。 */
   onAiCommand: (seed: AiSeed) => void;
   /** 写作页向 AI 面板注册回写桥（采纳润色＝替换选中）。 */
   registerBridge: (bridge: WritingBridge | null) => void;
+  /** 是否停在正文上（工单 #56 / T01）：进入正文后外壳窄轨退场。 */
+  onManuscriptChange?: (active: boolean) => void;
 }
 
 /** 书写板块（工单 #5，docs/spec/书写编辑器.md）：日常码字工具。
@@ -47,6 +51,7 @@ export default function Writing({
   onJumpConsumed,
   onAiCommand,
   registerBridge,
+  onManuscriptChange,
 }: WritingProps) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -64,6 +69,12 @@ export default function Writing({
   // 展示模式（工单 #22）：与构思板块共用项目列表档位偏好。
   const [display, setDisplay] = useDisplayMode("projects");
 
+  /** 记住打开的项目：板块内恢复键＋外壳「当前项目」面板共用。 */
+  const remember = useCallback((project: ProjectEntry) => {
+    localStorage.setItem(LAST_PROJECT_KEY, project.dir);
+    setCurrentProjectDir(project.dir);
+  }, []);
+
   const scan = useCallback(async (root: string) => {
     setScanning(true);
     setError(null);
@@ -74,7 +85,10 @@ export default function Writing({
         autoOpenRef.current = false;
         const last = localStorage.getItem(LAST_PROJECT_KEY);
         const pick = list.find((p) => p.dir === last);
-        if (pick) setOpen({ project: pick, seq: 0, locate: null });
+        if (pick) {
+          remember(pick);
+          setOpen({ project: pick, seq: 0, locate: null });
+        }
       }
     } catch (e) {
       setProjects([]);
@@ -82,13 +96,19 @@ export default function Writing({
     } finally {
       setScanning(false);
     }
-  }, []);
+  }, [remember]);
 
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);
   }, [libraryPath, scan]);
 
-  // 伏笔看板跳来：现扫一次拿到最新项目快照，按序打开目标章。
+  // 正文在不在场（工单 #56 / T01）：写作页按「当前章」上报；
+  // 回到项目列表（open 清空）时由这里补一声 false（写作页已卸载）。
+  useEffect(() => {
+    if (!open) onManuscriptChange?.(false);
+  }, [open, onManuscriptChange]);
+
+  // 跳转请求：现扫一次拿到最新项目快照，按序打开（locate 空＝回上次章节）。
   useEffect(() => {
     if (!jump || !libraryPath) return;
     let cancelled = false;
@@ -99,11 +119,11 @@ export default function Writing({
         setProjects(list);
         const project = list.find((p) => p.dir === jump.projectDir);
         if (project) {
-          localStorage.setItem(LAST_PROJECT_KEY, project.dir);
+          remember(project);
           setOpen((cur) => ({
             project,
             seq: (cur?.seq ?? 0) + 1,
-            locate: { ordinal: jump.ordinal, quote: jump.quote },
+            locate: jump.locate,
           }));
         } else {
           window.alert("没找到这个项目（可能已被移动或删除）。");
@@ -122,7 +142,7 @@ export default function Writing({
 
   /** 打开项目（locate 非空时顺带定位到某章某处）。 */
   function openAt(project: ProjectEntry, locate: WritingLocate | null) {
-    localStorage.setItem(LAST_PROJECT_KEY, project.dir);
+    remember(project);
     setOpen((cur) => ({ project, seq: (cur?.seq ?? 0) + 1, locate }));
   }
 
@@ -149,6 +169,7 @@ export default function Writing({
         locate={open.locate}
         onAiCommand={onAiCommand}
         registerBridge={registerBridge}
+        onChapterActive={onManuscriptChange}
         onBack={() => {
           setOpen(null);
           if (libraryPath) void scan(libraryPath);

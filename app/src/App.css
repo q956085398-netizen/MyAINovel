@@ -62,7 +62,7 @@
   /* 动效：一处呼吸节奏，全站引用 */
   --dur: 180ms;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  /* 字号：界面五档（.brand 26px 与封面占位 42px 是展示尺寸，例外） */
+  /* 字号：界面五档（封面占位 42px 是展示尺寸，例外） */
   --fs-micro: 11px;
   --fs-sub: 12px;
   --fs-ui: 13px;
@@ -141,34 +141,222 @@ body {
 }
 
 .sidebar {
-  width: 184px;
+  width: 56px;
   flex-shrink: 0;
 }
 
-/* ---------- 侧栏 ---------- */
+/* ---------- 窄轨（工单 #56 / T01：B「编辑部案头」，图标轨＋可展开项目面） ---------- */
 
 .sidebar {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
   background: var(--sidebar-bg);
   color: var(--sidebar-ink);
-  padding: 20px var(--sp-4);
+  padding: var(--sp-3) var(--sp-2);
+  position: relative;
+  z-index: 30; /* 飞出面板要盖在主区上 */
+  transition: width var(--dur) var(--ease), padding var(--dur) var(--ease);
 }
 
-.brand {
-  font-size: 26px;
+/* 进入正文后退场（C 低干扰结构）：返回在写作页头部，窄轨整条让位给正文。 */
+.app.rail-collapsed .sidebar {
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: none;
+}
+
+.rail-brand {
+  font-size: var(--fs-page);
   font-weight: 600;
-  letter-spacing: 6px;
   color: #f0ece2;
-  padding: var(--sp-1) 10px 18px;
+  text-align: center;
+  line-height: 1;
+  padding: var(--sp-2) 0 var(--sp-4);
 }
 
-.nav {
+.rail-nav {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
+.rail-item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.rail-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.rail-item.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.rail-project {
+  margin-top: var(--sp-3);
+}
+
+.rail-bottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 点外关层的「透明幕」：只接点击，不遮视觉。 */
+.rail-flyout-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+}
+
+/* 当前项目飞出面板：A 书页信息面挂在窄轨旁，不常驻加宽轨身。 */
+.rail-flyout {
+  position: absolute;
+  top: 0;
+  left: calc(100% + var(--sp-3));
+  width: 288px;
+  max-height: calc(100vh - 2 * var(--sp-3));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-dialog);
+  box-shadow: var(--sh-3);
+  padding: var(--sp-5);
+}
+
+.rail-flyout-title {
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+
+.rail-flyout-hint {
+  font-size: var(--fs-sub);
+  color: var(--ink-soft);
+}
+
+.rail-flyout-hint.sub {
+  margin-top: calc(-1 * var(--sp-2));
+}
+
+.rail-flyout-foot {
+  margin-top: auto;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--accent-line);
+  font-size: var(--fs-micro);
+  color: var(--ink-soft);
+}
+
+.rail-project-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rail-project-name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-project-meta {
+  font-size: var(--fs-sub);
+  color: var(--ink-soft);
+}
+
+.rail-resume {
+  justify-content: center;
+}
+
+.rail-pending {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.rail-pending-head {
+  font-size: var(--fs-ui);
+  font-weight: 600;
+}
+
+.rail-pending-item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+
+.rail-pending-item:hover {
+  background: var(--surface-hover);
+}
+
+.rail-pending-badge {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+}
+
+.rail-pending-badge.foreshadow {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* 期待/目标同属三线，徽标同色。 */
+.rail-pending-badge.thread {
+  background: var(--surface-hover);
+  color: var(--ink-soft);
+}
+
+.rail-pending-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-pending-lag {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 页内次级导航条目底款（工单 #35）：外壳已换窄轨，这档留给
+ *  构思项目页 .project-nav 等页内导航在用。 */
 .nav-item {
   appearance: none;
   border: none;
@@ -183,23 +371,6 @@ body {
   align-items: center;
   gap: var(--sp-3);
   transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-
-.nav-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.nav-item.active {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.sidebar-foot {
-  margin-top: auto;
-  font-size: var(--fs-sub);
-  color: #948d80;
-  padding: var(--sp-3) 10px;
 }
 
 /* ---------- 主区 ---------- */
@@ -1285,15 +1456,6 @@ body {
   margin: var(--sp-1) 0 var(--sp-3);
 }
 
-.settings-toggle {
-  color: var(--sidebar-ink);
-  padding: 7px var(--sp-4);
-}
-
-.settings-toggle:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
 /* ---------- 弹窗 ---------- */
 
 .dialog-overlay {
@@ -1451,10 +1613,6 @@ body {
 }
 
 /* ---------- AI 侧边栏（设计共识 §七） ---------- */
-
-.nav-item.ai-toggle {
-  margin-top: 10px;
-}
 
 .ai-panel {
   width: 380px;

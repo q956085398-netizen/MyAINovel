@@ -95,6 +95,16 @@ export interface ProjectEntry {
   coverDir: string;
 }
 
+/** 与 Rust 侧 pending::PendingLine 对应（工单 #56 / T01）：
+ *  窄轨「当前项目」面板的真实待办——超期的伏笔与期待/目标线，现扫派生。 */
+export interface PendingLine {
+  /** 看板归属（跳转落点即构思对应页签）。 */
+  board: "伏笔" | "期待" | "目标";
+  name: string;
+  /** 距当前最大章序已过多少章未推进。 */
+  lag: number;
+}
+
 /** 与 Rust 侧 project::PlotLine 对应（yaml 落盘键为「名/色」）。 */
 export interface PlotLine {
   name: string;

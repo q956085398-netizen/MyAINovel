@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AiSeed, ProjectEntry } from "./types";
 import { errMsg, formatCount } from "./util";
@@ -6,6 +6,10 @@ import { useDisplayMode } from "./displayMode";
 import DisplayToggle from "./DisplayToggle";
 import CoverArt, { pickAndSetCover } from "./CoverArt";
 import ProjectPage, { type ProjectTab } from "./ProjectPage";
+import { setCurrentProjectDir } from "./currentProject";
+
+/** 记住上次打开的项目（工单 #56 / T01）：重启回到构思时即回到那本书。 */
+const LAST_PROJECT_KEY = "gongbi.ideation.project";
 
 function summary(p: ProjectEntry): string {
   const parts = [
@@ -60,6 +64,20 @@ export default function Ideation({
   const [busy, setBusy] = useState(false);
   // 展示模式（工单 #22）：项目列表档位与书写板块共用一个偏好。
   const [display, setDisplay] = useDisplayMode("projects");
+  /** 只在本板块首次扫盘时自动回到上次的项目（与书写板块同款）。 */
+  const autoOpenRef = useRef(true);
+
+  /** 打开项目＝记住它（板块内恢复键＋外壳「当前项目」面板共用）。 */
+  function openProject(project: ProjectEntry, tab?: ProjectTab, focus?: string) {
+    localStorage.setItem(LAST_PROJECT_KEY, project.dir);
+    setCurrentProjectDir(project.dir);
+    setOpen((cur) => ({
+      project,
+      tab,
+      focus,
+      seq: (cur?.seq ?? 0) + 1,
+    }));
+  }
 
   const scan = useCallback(async (root: string) => {
     setScanning(true);
@@ -67,6 +85,12 @@ export default function Ideation({
     try {
       const list = await invoke<ProjectEntry[]>("scan_projects", { root });
       setProjects(list);
+      if (autoOpenRef.current) {
+        autoOpenRef.current = false;
+        const last = localStorage.getItem(LAST_PROJECT_KEY);
+        const pick = list.find((p) => p.dir === last);
+        if (pick) setOpen({ project: pick, seq: 0 });
+      }
       // 打开着的项目也换成最新快照，页内计数（导航徽标）跟着刷新。
       setOpen((cur) => {
         if (!cur) return cur;
@@ -89,13 +113,9 @@ export default function Ideation({
   // seq 递增让「再次跳到同一个项目」也重挂载——页签只在新挂载时生效。
   useEffect(() => {
     if (!jump) return;
-    setOpen((cur) => ({
-      project: jump.project,
-      tab: jump.tab,
-      focus: jump.focus,
-      seq: (cur?.seq ?? 0) + 1,
-    }));
+    openProject(jump.project, jump.tab, jump.focus);
     onJumpConsumed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump, onJumpConsumed]);
 
   async function create() {
@@ -111,7 +131,7 @@ export default function Ideation({
       setCreating(false);
       setNewTitle("");
       await scan(libraryPath);
-      setOpen({ project, seq: 0 });
+      openProject(project);
     } catch (e) {
       window.alert(`新建项目失败：${errMsg(e)}`);
     } finally {
@@ -221,7 +241,7 @@ export default function Ideation({
                   key={p.dir}
                   className="cover-card"
                   title="打开项目"
-                  onClick={() => setOpen({ project: p, seq: 0 })}
+                  onClick={() => openProject(p)}
                 >
                   <CoverArt
                     name={p.title}
@@ -250,7 +270,7 @@ export default function Ideation({
                     <button
                       className="card-title"
                       title="打开项目"
-                      onClick={() => setOpen({ project: p, seq: 0 })}
+                      onClick={() => openProject(p)}
                     >
                       {p.title}
                     </button>

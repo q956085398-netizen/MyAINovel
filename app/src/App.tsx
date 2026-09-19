@@ -8,11 +8,21 @@ import BookLibrary from "./BookLibrary";
 import EditorPage from "./EditorPage";
 import Ideation from "./Ideation";
 import InspirationLibrary from "./InspirationLibrary";
+import RailProjectPanel from "./RailProjectPanel";
 import Writing from "./Writing";
 import SettingsDialog from "./SettingsDialog";
 import { getSettings, initSettings } from "./settings";
 import type { Glyph } from "./icons";
-import { BookOpen, Icon, Layers, MessageCircle, PenLine, Settings, Sparkles } from "./icons";
+import {
+  BookMarked,
+  BookOpen,
+  Icon,
+  Layers,
+  MessageCircle,
+  PenLine,
+  Settings,
+  Sparkles,
+} from "./icons";
 import { flushAllSavers } from "./saveFlush";
 import type { ProjectTab } from "./ProjectPage";
 import type {
@@ -23,6 +33,7 @@ import type {
   ProjectEntry,
   TropeSuggestion,
   WritingBridge,
+  WritingLocate,
 } from "./types";
 
 // 灵感库独立侧栏导航（工单 #37）：拆书板块的书库/灵感库子页签取消，
@@ -39,12 +50,22 @@ const SECTION_ICONS: Record<Section, Glyph> = {
 };
 
 const PATH_KEY = "gongbi.libraryPath";
+// 上次工作入口（工单 #56 / T01）：重启后恢复——板块、拆书稿。
+const SECTION_KEY = "gongbi.section";
+const LAST_BOOK_KEY = "gongbi.lastBook";
+
+function isSection(v: string | null): v is Section {
+  return !!v && (SECTIONS as readonly string[]).includes(v);
+}
 
 // 主题初始化（工单 #24）：根元素挂 data-theme＋系统深浅监听，一次即可。
 initSettings();
 
 function App() {
-  const [section, setSection] = useState<Section>("拆书");
+  const [section, setSection] = useState<Section>(() => {
+    const saved = localStorage.getItem(SECTION_KEY);
+    return isSection(saved) ? saved : "拆书";
+  });
   const [openBook, setOpenBook] = useState<BookEntry | null>(null);
   // 库根路径为书库与灵感库共用，上提到这里统一选择与持久化。
   const [libraryPath, setLibraryPath] = useState<string | null>(() =>
@@ -55,6 +76,10 @@ function App() {
   // AI 侧边栏：面板常驻挂载仅隐藏切换，编辑器经 bridge 提供文档上下文与采纳回写。
   const [aiOpen, setAiOpen] = useState(false);
   const [aiSeed, setAiSeed] = useState<AiSeed | null>(null);
+  // 窄轨「当前项目」飞出面板（工单 #56 / T01）：点开现扫，点外关。
+  const [projectPanelOpen, setProjectPanelOpen] = useState(false);
+  // 书写页是否停在正文上：进入正文后窄轨退场（低干扰），返回项目列表即回。
+  const [manuscript, setManuscript] = useState(false);
   // 灵感库 → 构思项目的跳转请求（故事卡转生的去向、「关联」里的项目引用）；
   // 携带刚扫到的项目快照，不依赖构思板块自己的列表是否新鲜。
   const [ideationJump, setIdeationJump] = useState<{
@@ -63,11 +88,11 @@ function App() {
     /** 落到某个人物（「《书名》/人名」关联）：人物页签切到画布并选中该节点。 */
     focus?: string;
   } | null>(null);
-  // 构思（伏笔看板）→ 书写的跳转请求：打开该项目的这一章并选中引文。
+  // 构思（伏笔看板）→ 书写的跳转请求：打开该项目的这一章并选中引文；
+  // locate 为空时＝「继续工作」（写作页自己回到上次章节）。消费后清空。
   const [writingJump, setWritingJump] = useState<{
     projectDir: string;
-    ordinal: number;
-    quote: string;
+    locate: WritingLocate | null;
   } | null>(null);
   const bridgeRef = useRef<EditorBridge | null>(null);
   // 写作页的桥（工单 #15）：拆书编辑器与写作页都可能挂着，按当前板块取用。
@@ -153,19 +178,40 @@ function App() {
     setLibraryPath(picked);
   }, [pickLibraryFolder]);
 
-  /** 从灵感库跳书：切到拆书板块并打开拆书稿。 */
-  const openBookFromInspiration = useCallback((book: BookEntry) => {
+  /** 打开拆书稿（用户点击或重启恢复）：顺手记住，下次重启回到这里。 */
+  const openBookAndRemember = useCallback((book: BookEntry) => {
+    localStorage.setItem(LAST_BOOK_KEY, book.primaryMd);
     setOpenBook(book);
-    setSection("拆书");
   }, []);
+
+  const closeBook = useCallback(() => {
+    localStorage.removeItem(LAST_BOOK_KEY);
+    setOpenBook(null);
+  }, []);
+
+  /** 切板块（工单 #56 / T01）：记住上次板块，重启恢复；顺手收起飞出面板。 */
+  const switchSection = useCallback((s: Section) => {
+    localStorage.setItem(SECTION_KEY, s);
+    setSection(s);
+    setProjectPanelOpen(false);
+  }, []);
+
+  /** 从灵感库跳书：切到拆书板块并打开拆书稿。 */
+  const openBookFromInspiration = useCallback(
+    (book: BookEntry) => {
+      openBookAndRemember(book);
+      switchSection("拆书");
+    },
+    [openBookAndRemember, switchSection],
+  );
 
   /** 从灵感库跳构思项目（卡片转生的去向）：切到构思板块并打开该项目。 */
   const openProjectFromInspiration = useCallback(
     (project: ProjectEntry, tab?: ProjectTab, focus?: string) => {
-      setSection("构思");
+      switchSection("构思");
       setIdeationJump({ project, tab, focus });
     },
-    [],
+    [switchSection],
   );
 
   const consumeIdeationJump = useCallback(() => setIdeationJump(null), []);
@@ -173,13 +219,45 @@ function App() {
   /** 伏笔看板点章：切到书写板块，打开该章并选中引文。 */
   const openChapterFromIdeation = useCallback(
     (projectDir: string, ordinal: number, quote: string) => {
-      setSection("书写");
-      setWritingJump({ projectDir, ordinal, quote });
+      switchSection("书写");
+      setWritingJump({ projectDir, locate: { ordinal, quote } });
     },
-    [],
+    [switchSection],
   );
 
   const consumeWritingJump = useCallback(() => setWritingJump(null), []);
+
+  /** 窄轨「继续工作」（工单 #56 / T01）：交给书写板块的跳转机制处理——
+   *  locate 空＝写作页回到上次的章节与进度；已在那本书时也只是重开一次，
+   *  内容已落盘，重开无损失。 */
+  const resumeWriting = useCallback(
+    (project: ProjectEntry) => {
+      setProjectPanelOpen(false);
+      setWritingJump({ projectDir: project.dir, locate: null });
+      switchSection("书写");
+    },
+    [switchSection],
+  );
+
+  /** 飞出面板待办点开：跳到构思对应看板。 */
+  const openBoardFromPanel = useCallback(
+    (project: ProjectEntry, tab: ProjectTab) => {
+      setProjectPanelOpen(false);
+      switchSection("构思");
+      setIdeationJump({ project, tab });
+    },
+    [switchSection],
+  );
+
+  /** 飞出面板 Esc 关闭。 */
+  useEffect(() => {
+    if (!projectPanelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setProjectPanelOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [projectPanelOpen]);
 
   /** 编辑器板块命令（拆书三条、构思两条、书写两条）：种子进 AI 面板并展开。 */
   const handleAiCommand = useCallback((seed: AiSeed) => {
@@ -216,39 +294,70 @@ function App() {
   );
 
   // 三个板块常驻挂载、仅隐藏切换，编辑器里的未保存内容不因切板块而丢。
+  // 进入正文（书写页开着章节）时窄轨退场（工单 #56 / T01 的 C 低干扰结构）：
+  // 返回在写作页头部、切换章节在章节列表、保存状态在状态条，都仍可及。
+  const railCollapsed = section === "书写" && manuscript;
+
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <div className="brand">工笔</div>
-        <nav className="nav">
+    <div className={`app ${railCollapsed ? "rail-collapsed" : ""}`}>
+      <aside className="sidebar" aria-label="主导航">
+        <div className="rail-brand" title="工笔">
+          工
+        </div>
+        <nav className="rail-nav">
           {SECTIONS.map((s) => (
             <button
               key={s}
-              className={`nav-item ${section === s ? "active" : ""}`}
-              onClick={() => setSection(s)}
+              className={`rail-item ${section === s ? "active" : ""}`}
+              title={s}
+              aria-label={s}
+              aria-current={section === s ? "page" : undefined}
+              onClick={() => switchSection(s)}
             >
               <Icon as={SECTION_ICONS[s]} />
-              {s}
             </button>
           ))}
         </nav>
         <button
-          className={`nav-item ai-toggle ${aiOpen ? "active" : ""}`}
-          title="AI 助手侧边栏"
-          onClick={() => setAiOpen((v) => !v)}
+          className={`rail-item rail-project ${projectPanelOpen ? "active" : ""}`}
+          title="当前项目"
+          aria-label="当前项目"
+          aria-expanded={projectPanelOpen}
+          onClick={() => setProjectPanelOpen((v) => !v)}
         >
-          <Icon as={MessageCircle} />
-          AI 助手
+          <Icon as={BookMarked} />
         </button>
-        <button
-          className="nav-item settings-toggle"
-          title="设置"
-          onClick={() => setSettingsOpen(true)}
-        >
-          <Icon as={Settings} />
-          设置
-        </button>
-        <div className="sidebar-foot">拆书积累 · 灵感沉淀 · 构思写作</div>
+        <div className="rail-bottom">
+          <button
+            className={`rail-item ${aiOpen ? "active" : ""}`}
+            title="AI 助手"
+            aria-label="AI 助手"
+            aria-pressed={aiOpen}
+            onClick={() => setAiOpen((v) => !v)}
+          >
+            <Icon as={MessageCircle} />
+          </button>
+          <button
+            className="rail-item"
+            title="设置"
+            aria-label="设置"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <Icon as={Settings} />
+          </button>
+        </div>
+        {projectPanelOpen && !railCollapsed && (
+          <>
+            <div className="rail-flyout-backdrop" onClick={() => setProjectPanelOpen(false)} />
+            <RailProjectPanel
+              libraryPath={libraryPath}
+              onChooseFolder={chooseLibraryFolder}
+              onResume={resumeWriting}
+              onOpenBoard={openBoardFromPanel}
+              onGoIdeation={() => switchSection("构思")}
+            />
+          </>
+        )}
       </aside>
       <main className="main">
         <div className={`section-wrap ${section === "拆书" ? "" : "hidden"}`}>
@@ -258,7 +367,7 @@ function App() {
               book={openBook}
               libraryPath={libraryPath}
               active={section === "拆书"}
-              onBack={() => setOpenBook(null)}
+              onBack={closeBook}
               onAiCommand={handleAiCommand}
               registerBridge={registerBridge}
             />
@@ -267,7 +376,8 @@ function App() {
               libraryPath={libraryPath}
               onChooseFolder={chooseLibraryFolder}
               onCreateLibrary={createLibraryFolder}
-              onOpen={setOpenBook}
+              onOpen={openBookAndRemember}
+              restoreMd={localStorage.getItem(LAST_BOOK_KEY)}
             />
           )}
         </div>
@@ -278,7 +388,7 @@ function App() {
             onCreateLibrary={createLibraryFolder}
             onOpenBook={openBookFromInspiration}
             onOpenProject={openProjectFromInspiration}
-            onGoIdeation={() => setSection("构思")}
+            onGoIdeation={() => switchSection("构思")}
           />
         </div>
         <div className={`section-wrap ${section === "构思" ? "" : "hidden"}`}>
@@ -302,6 +412,7 @@ function App() {
             onJumpConsumed={consumeWritingJump}
             onAiCommand={handleAiCommand}
             registerBridge={registerWritingBridge}
+            onManuscriptChange={setManuscript}
           />
         </div>
       </main>

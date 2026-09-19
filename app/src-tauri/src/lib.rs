@@ -9,6 +9,7 @@ mod foreshadow;
 mod inspiration;
 mod library;
 mod map;
+mod pending;
 mod planning;
 mod project;
 mod proofread;
@@ -33,6 +34,7 @@ use map::{
     RegionDraft, RegionEntry,
 };
 use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, Outline};
+use pending::PendingLine;
 use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
     ProjectMeta,
@@ -626,6 +628,12 @@ fn expectation_board(project: String) -> Result<ExpectationBoard, String> {
     expectation::expectation_board(Path::new(&project))
 }
 
+/// 工作台待办摘要（工单 #56 / T01）：窄轨「当前项目」面板现扫超期伏笔/期待线。
+#[tauri::command]
+fn project_pending(project: String) -> Result<Vec<PendingLine>, String> {
+    pending::project_pending(Path::new(&project))
+}
+
 #[tauri::command]
 fn add_expectation(
     project: String,
@@ -928,6 +936,7 @@ pub fn run() {
             delete_foreshadow,
             read_expectations,
             expectation_board,
+            project_pending,
             add_expectation,
             annotate_expectation,
             fulfill_expectation,
