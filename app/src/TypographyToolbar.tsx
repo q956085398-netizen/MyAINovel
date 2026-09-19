@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   FONT_OPTIONS,
   FONT_SIZE_MAX,
@@ -102,6 +103,28 @@ export default function TypographyToolbar() {
           ))}
         </select>
       </label>
+    </div>
+  );
+}
+
+/** 排版弹层（工单 #66 / T04）：排版默认折叠，展开后与设置同源。
+ *  Esc 收起并回调 onClose（页面决定焦点去向，通常回正文）——焦点在
+ *  「排版」按钮或弹层控件上时也生效；唯独正文里的 Esc 不动排版层
+ *  （那是选区/光标的事）。 */
+export function TypoPopout({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if ((e.target as HTMLElement | null)?.closest(".cm-editor")) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div className="typo-popout">
+      <TypographyToolbar />
     </div>
   );
 }

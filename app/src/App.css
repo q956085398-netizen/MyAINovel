@@ -1094,22 +1094,127 @@ body {
   margin-left: auto;
 }
 
-.dirty-dot {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--accent);
-  margin-left: 9px;
-  vertical-align: baseline;
+/* --- 编辑器头部（工单 #66 / T04）：保存状态胶囊＋下拉菜单＋排版弹层 --- */
+
+.save-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: var(--fs-sub);
+  color: var(--ink-soft);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.editor-toolbar {
+.save-chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-soft);
+  opacity: 0.5;
+}
+
+.save-chip-dirty::before,
+.save-chip-saving::before {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.save-chip-saving {
+  color: var(--ink-soft);
+  opacity: 0.8;
+}
+
+.save-chip-error {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.save-chip-error::before {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.save-chip-conflict {
+  border-color: var(--warn-line);
+  color: var(--warn-ink);
+  background: var(--warn-soft);
+}
+
+.save-chip-conflict::before {
+  background: var(--warn-line);
+  opacity: 1;
+}
+
+.save-chip.clickable {
+  cursor: pointer;
+}
+
+.save-chip.clickable:hover {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+
+button.save-chip {
+  background: transparent;
+}
+
+.header-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.header-menu-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  z-index: 60;
+}
+
+.header-menu-item {
+  display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  padding: 0 var(--sp-6) var(--sp-4);
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border: none;
+  border-radius: var(--r-ctl);
+  background: transparent;
+  font-size: var(--fs-ui);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.header-menu-item:hover:not(:disabled),
+.header-menu-item:focus-visible {
+  background: var(--surface-hover);
+}
+
+.header-menu-item:disabled {
+  color: var(--ink-soft);
+  cursor: default;
+}
+
+.header-menu-hint {
+  color: var(--ink-soft);
+  font-size: var(--fs-sub);
+  white-space: nowrap;
+}
+
+.typo-popout .typo-toolbar {
   border-bottom: 1px solid var(--line);
 }
 
@@ -1136,13 +1241,6 @@ body {
   gap: 5px;
   font-size: var(--fs-sub);
   color: var(--ink-soft);
-}
-
-
-.toolbar-hint {
-  color: var(--ink-soft);
-  font-size: var(--fs-sub);
-  margin-left: auto;
 }
 
 .btn.small {
@@ -1891,12 +1989,6 @@ body {
 
 .dialog-actions .grow {
   flex: 1;
-}
-
-/* 编辑器工具栏的 AI 命令按钮，点出来的是「初稿待确认」而非直接落盘 */
-.btn.ai-cmd {
-  border-color: var(--accent-line);
-  color: var(--accent);
 }
 
 /* ---------- 构思板块（工单 #4：一书一项目） ---------- */
@@ -2795,10 +2887,6 @@ body {
   align-items: center;
   gap: var(--sp-1);
   cursor: pointer;
-}
-
-.status-right {
-  margin-left: auto;
 }
 
 .conflict-bar {

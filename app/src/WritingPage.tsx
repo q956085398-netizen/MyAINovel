@@ -56,7 +56,10 @@ import { ExpectationFormDialog, ExpectationFulfillDialog } from "./ExpectationDi
 import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
 import { dirName, editorRender } from "./editorRender";
 import { useImageViewer } from "./ImageViewer";
-import TypographyToolbar from "./TypographyToolbar";
+import { TypoPopout } from "./TypographyToolbar";
+import HeaderMenu from "./HeaderMenu";
+import SaveStateChip from "./SaveStateChip";
+import { saveStatusAfterEdit, type SaveStatus } from "./editorHeaderState";
 import { ExportDialog } from "./ExportDialog";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
@@ -232,7 +235,8 @@ export default function WritingPage({
     onChapterActive?.(!!current);
   }, [current, onChapterActive]);
   const [prefix, setPrefix] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  /** 头部保存五态（工单 #66 / T04）：干净/未保存/保存中/失败/冲突。 */
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [conflict, setConflict] = useState(false);
   const [counts, setCounts] = useState({ billed: 0, han: 0, sel: 0 });
   const [stats, setStats] = useState<WritingStats>(emptyWritingStats());
@@ -241,6 +245,7 @@ export default function WritingPage({
   const [listOpen, setListOpen] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [immersive, setImmersive] = useState(false);
+  const [typoOpen, setTypoOpen] = useState(false);
   const [prefs, setPrefs] = useState(loadPrefs);
   const [dialog, setDialog] = useState<ChapterDialog | null>(null);
   const [proofOpen, setProofOpen] = useState(false);
@@ -348,7 +353,7 @@ export default function WritingPage({
       EditorView.updateListener.of((u) => {
         if (u.docChanged) {
           dirtyRef.current = true;
-          setDirty(true);
+          setSaveStatus((s) => saveStatusAfterEdit(s));
           if (countsTimerRef.current !== null) window.clearTimeout(countsTimerRef.current);
           countsTimerRef.current = window.setTimeout(() => {
             countsTimerRef.current = null;
@@ -408,7 +413,7 @@ export default function WritingPage({
     setStatus(readChapterStatus(content));
     setDocText(content);
     dirtyRef.current = false;
-    setDirty(false);
+    setSaveStatus("saved");
     applyForeshadowMarks();
   }
 
@@ -692,6 +697,7 @@ export default function WritingPage({
     if (!force && !dirtyRef.current) return true;
     if (conflictRef.current && !force) return false;
     savingRef.current = true;
+    if (!quiet) setSaveStatus("saving");
     try {
       const content = view.state.doc.toString();
       const result = await invoke<SaveResult>("save_chapter_md", {
@@ -704,6 +710,7 @@ export default function WritingPage({
       if (result.status === "conflict") {
         conflictRef.current = true;
         setConflict(true);
+        setSaveStatus("conflict");
         return false;
       }
       fingerprintRef.current = result.fingerprint;
@@ -712,7 +719,7 @@ export default function WritingPage({
       // 保存往返窗口里又打过字的不算干净：留着脏标让下一轮自动保存接走。
       if (view.state.doc.toString() === content) {
         dirtyRef.current = false;
-        setDirty(false);
+        setSaveStatus("saved");
       }
       const s = chapterStats(content);
       const delta = s.wordCount - baselineRef.current;
@@ -731,6 +738,7 @@ export default function WritingPage({
       if (quiet) {
         console.error("关窗兜底保存失败：", e);
       } else {
+        setSaveStatus("error");
         window.alert(`保存失败：${errMsg(e)}`);
       }
       return false;
@@ -926,7 +934,7 @@ export default function WritingPage({
       const content = await invoke<string>("read_chapter_snapshot", { path: history.selected });
       loadContent(content);
       dirtyRef.current = true;
-      setDirty(true);
+      setSaveStatus("dirty");
       scheduleAutosave();
       setHistory(null);
       viewRef.current?.focus();
@@ -1217,10 +1225,14 @@ export default function WritingPage({
           <Icon as={ArrowLeft} size={ICON_SIZE_DENSE} />
           项目列表
         </button>
-        <h1 className="editor-title">
-          {current ? chapterLabel(current, prefix) : project.title}
-          {dirty && <span className="dirty-dot" title="未保存" />}
-        </h1>
+        <h1 className="editor-title">{current ? chapterLabel(current, prefix) : project.title}</h1>
+        <SaveStateChip
+          status={saveStatus}
+          onSave={
+            saveStatus === "dirty" || saveStatus === "error" ? () => void saveNow(false) : undefined
+          }
+          title="停笔自动保存；Ctrl+S 立即保存。冲突时用下方横幅裁决。"
+        />
         <div className="page-actions">
           {immersive ? (
             <button className="btn" onClick={() => setImmersive(false)}>
@@ -1228,32 +1240,54 @@ export default function WritingPage({
             </button>
           ) : (
             <>
-              <button className="btn" disabled={!ready} onClick={() => setImmersive(true)}>
-                沉浸
-              </button>
-              <button className="btn" disabled={!current} onClick={() => void openHistory()}>
-                历史版本
-              </button>
-              <button
-                className="btn"
-                disabled={!current}
-                onClick={() => void saveNow(false).then((saved) => saved && setProofOpen(true))}
-              >
-                校对本章
-              </button>
+              {/* 选区上下文：AI 润色只在有效选区时出现（spec §五）。 */}
+              {counts.sel > 0 && (
+                <button
+                  className="btn"
+                  disabled={!ready || !current}
+                  title="AI 润色选中段落：回复后点「替换选中正文」才落盘（可 Ctrl+Z 撤销）"
+                  onClick={runPolish}
+                >
+                  AI 润色
+                </button>
+              )}
               <button className="btn" onClick={() => setListOpen((v) => !v)}>
                 {listOpen ? "收起列表" : "章节列表"}
               </button>
               <button className="btn" onClick={() => setSidebarOpen((v) => !v)}>
                 {sidebarOpen ? "收起侧栏" : "侧栏"}
               </button>
+              <HeaderMenu
+                label="页面"
+                onReturnFocus={() => viewRef.current?.focus()}
+                items={[
+                  {
+                    id: "page-history",
+                    label: "历史版本",
+                    disabled: !current,
+                    run: () => void openHistory(),
+                  },
+                  {
+                    id: "page-proof",
+                    label: "校对本章",
+                    hint: "先落盘再校对",
+                    disabled: !current,
+                    run: () => {
+                      void saveNow(false).then((saved) => saved && setProofOpen(true));
+                    },
+                  },
+                ]}
+              />
               <button
                 className="btn"
-                disabled={!ready || !current || counts.sel === 0}
-                title="AI 润色选中段落：回复后点「替换选中正文」才落盘（可 Ctrl+Z 撤销）"
-                onClick={runPolish}
+                aria-expanded={typoOpen}
+                title="排版（字体/字号/行距/对齐/缩进，与设置同源）"
+                onClick={() => setTypoOpen((v) => !v)}
               >
-                AI 润色
+                排版
+              </button>
+              <button className="btn primary" disabled={!ready} onClick={() => setImmersive(true)}>
+                沉浸
               </button>
             </>
           )}
@@ -1272,7 +1306,14 @@ export default function WritingPage({
         </div>
       )}
 
-      {!immersive && <TypographyToolbar />}
+      {!immersive && typoOpen && (
+        <TypoPopout
+          onClose={() => {
+            setTypoOpen(false);
+            viewRef.current?.focus();
+          }}
+        />
+      )}
 
       <div className="writing-body">
         {listOpen && (
@@ -1557,7 +1598,6 @@ export default function WritingPage({
           />
           行淡化
         </label>
-        <span className="status-right">{dirty ? "未保存" : "已保存"}</span>
       </footer>
 
       {chapters.length === 0 && ready && (
