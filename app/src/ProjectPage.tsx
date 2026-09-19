@@ -40,9 +40,9 @@ const TABS = [
   "开头",
 ] as const;
 const NAV_GROUPS = [
-  { label: "定书", tabs: ["大纲", "类型圈", "人物", "世界观", "开头"] },
-  { label: "生情节", tabs: ["矛盾", "桥段库", "单元", "排布"] },
-  { label: "织张力", tabs: ["伏笔", "期待感", "目标"] },
+  { step: "第一步", label: "定书", tabs: ["大纲", "类型圈", "人物", "世界观", "开头"] },
+  { step: "第二步", label: "生情节", tabs: ["矛盾", "桥段库", "单元", "排布"] },
+  { step: "第三步", label: "织张力", tabs: ["伏笔", "期待感", "目标"] },
 ] as const;
 /** 项目页签；跨板块跳转（灵感库关联 → 项目）也用它指路。 */
 export type ProjectTab = (typeof TABS)[number];
@@ -248,7 +248,10 @@ export default function ProjectPage({
         <nav className="project-nav">
           {NAV_GROUPS.map((group) => (
             <div className="project-nav-group" key={group.label}>
-              <p className="project-nav-label">{group.label}</p>
+              <p className="project-nav-label">
+                <span>{group.step}</span>
+                {group.label}
+              </p>
               {group.tabs.map((t) => (
                 <button
                   key={t}

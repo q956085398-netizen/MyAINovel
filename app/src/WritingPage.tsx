@@ -1224,14 +1224,6 @@ export default function WritingPage({
               </button>
               <button
                 className="btn"
-                disabled={!ready || !current}
-                title="由你主动发起；AI 只对照正文与本章意图给建议，不评分、不改正文"
-                onClick={() => void runChapterCompanion()}
-              >
-                AI 陪看本章
-              </button>
-              <button
-                className="btn"
                 disabled={!ready || !current || counts.sel === 0}
                 title="AI 润色选中段落：回复后点「替换选中正文」才落盘（可 Ctrl+Z 撤销）"
                 onClick={runPolish}
@@ -1316,7 +1308,17 @@ export default function WritingPage({
 
         {sidebarOpen && (
           <aside className="writing-sidebar">
-            <h2 className="sidebar-title">本章意图</h2>
+            <div className="sidebar-section-head">
+              <h2 className="sidebar-title">本章意图</h2>
+              <button
+                className="btn primary small"
+                disabled={!ready || !current}
+                title="由你主动发起；AI 只对照正文与本章意图给建议，不评分、不改正文"
+                onClick={() => void runChapterCompanion()}
+              >
+                AI 陪看本章
+              </button>
+            </div>
             {unit && intent?.bridge ? (
               <details className="chapter-intent-card" open>
                 <summary>

@@ -70,17 +70,19 @@ function TransmuteButton({
 
 function InspirationCardItem({
   card,
+  pending = false,
   onEdit,
   onOpenLink,
   onTransmute,
 }: {
   card: InspirationCard;
+  pending?: boolean;
   onEdit: (draft: CardDraft, prevPath: string) => void;
   onOpenLink: (text: string) => Promise<void>;
   onTransmute: (card: InspirationCard, target: TransmuteTarget) => void;
 }) {
   return (
-    <div className="card-item">
+    <article className={`card-item ${pending ? "is-pending" : ""}`}>
       <div className="card-title-row">
         <button className="card-title" title="编辑这张卡片" onClick={() => onEdit(card, card.path)}>
           {card.title}
@@ -122,8 +124,15 @@ function InspirationCardItem({
           {oneLinePreview(card.body, 120)}
         </p>
       )}
+      {pending && (
+        <div className="card-actions">
+          <button className="btn primary small" onClick={() => onEdit(card, card.path)}>
+            整理这条灵感
+          </button>
+        </div>
+      )}
       <TransmuteButton card={card} onPick={onTransmute} />
-    </div>
+    </article>
   );
 }
 
@@ -407,6 +416,7 @@ export default function InspirationLibrary({
               <InspirationCardItem
                 key={card.path}
                 card={card}
+                pending
                 onEdit={(draft, prevPath) => setEditing({ draft, prevPath })}
                 onOpenLink={openLink}
                 onTransmute={(picked, target) => setTransmuting({ card: picked, target })}
