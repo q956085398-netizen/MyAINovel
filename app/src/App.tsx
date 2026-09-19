@@ -89,7 +89,9 @@ function App() {
       try {
         await flushAllSavers();
       } finally {
-        void getCurrentWindow().destroy();
+        // destroy 要 capabilities 里的 core:window:allow-destroy；被拒时症状只是「点 X 没反应」，
+        // 所以失败必须喊出来（不 catch 的话 rejection 会被无声吞掉）。
+        getCurrentWindow().destroy().catch((e) => console.error("关窗失败：", e));
       }
     });
     return () => {
