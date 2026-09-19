@@ -497,6 +497,7 @@ export interface WritingLocate {
   /** 1 起行号（原始文件行）。 */
   line?: number;
   occurrence?: number;
+  fingerprint?: string;
 }
 
 /** 校对命中：line 为原始文件行号（与编辑器缓冲同口径），
@@ -509,23 +510,31 @@ export interface ProofIssue {
   occurrence: number;
   word: string;
   suggestion: string | null;
-  /** 敏感词｜的地得｜错词。 */
+  /** 成对标点｜重复字词｜错词｜专有名词。 */
   kind: string;
   snippet: string;
+  fingerprint: string;
+  reason: string;
+}
+
+export interface ProofreadOptions {
+  punctuation: boolean;
+  repetition: boolean;
+  wrongWords: boolean;
+  properNouns: boolean;
 }
 
 export interface ProofReport {
   issues: ProofIssue[];
   scannedChapters: number;
-  sensitiveWords: number;
   wrongWords: number;
-  /** 库根「校对/敏感词.txt」是否存在（不存在时提示怎么建）。 */
-  sensitiveFileExists: boolean;
+  properNouns: number;
 }
 
-export const PROOFREAD_KIND_SENSITIVE = "敏感词";
-export const PROOFREAD_KIND_DE = "的地得";
+export const PROOFREAD_KIND_PUNCTUATION = "成对标点";
+export const PROOFREAD_KIND_REPETITION = "重复字词";
 export const PROOFREAD_KIND_WRONG = "错词";
+export const PROOFREAD_KIND_PROPER_NOUN = "专有名词";
 
 // --- 伏笔系统（工单 #6，docs/spec/伏笔系统.md）；与 Rust 侧 foreshadow.rs 对应 ---
 

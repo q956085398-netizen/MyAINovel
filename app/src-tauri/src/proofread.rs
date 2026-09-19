@@ -1,27 +1,53 @@
-//! 发布前校对（工单 #14，docs/spec/导出与发布.md §四）。
+//! 主动本地校对（工单 #60，docs/spec/书写增强.md §五）。
 //!
-//! 只在点「发布前校对」时跑一次：只读正文、不写任何创作数据（正文零
-//! 污染）。三类规则都走确定性匹配——敏感词 DFA、内置的地得小集、错词
-//! 表——**宁可漏报不可误报**：命中的都是表内模式，不做统计模型。
+//! 用户显式发起，只读正文、零写回、不联网。四类规则均可独立关闭：
+//! 中文成对标点、重复字词、用户自定义错词与专有名词一致性。
 
+#[cfg(test)]
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::book_file::read_text;
+use crate::book_file::{content_fingerprint, read_text};
 use crate::chapter::scan_chapters;
 use crate::export::ChapterRange;
 
 pub const PROOFREAD_DIR: &str = "校对";
-pub const SENSITIVE_FILE: &str = "敏感词.txt";
 pub const WRONG_WORD_FILE: &str = "错词.txt";
-pub const KIND_SENSITIVE: &str = "敏感词";
-pub const KIND_DE: &str = "的地得";
 pub const KIND_WRONG: &str = "错词";
+pub const KIND_PUNCTUATION: &str = "成对标点";
+pub const KIND_REPETITION: &str = "重复字词";
+pub const KIND_PROPER_NOUN: &str = "专有名词";
+pub const PROPER_NOUN_FILE: &str = "专有名词.txt";
+#[cfg(test)]
+const KIND_SENSITIVE: &str = "敏感词";
+#[cfg(test)]
+const KIND_DE: &str = "的地得";
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProofreadOptions {
+    pub punctuation: bool,
+    pub repetition: bool,
+    pub wrong_words: bool,
+    pub proper_nouns: bool,
+}
+
+impl Default for ProofreadOptions {
+    fn default() -> Self {
+        Self {
+            punctuation: true,
+            repetition: true,
+            wrong_words: true,
+            proper_nouns: true,
+        }
+    }
+}
 
 /// 内置高置信错词种子（用户「校对/错词.txt」叠加在其上）。
+#[cfg(test)]
 const BUILTIN_WRONG_WORDS: &[(&str, &str)] = &[
     ("因该", "应该"),
     ("既使", "即使"),
@@ -103,6 +129,7 @@ const BUILTIN_WRONG_WORDS: &[(&str, &str)] = &[
 ];
 
 /// 动词表（的→得 的左侧、的→地 的右侧共用）。
+#[cfg(test)]
 const DE_VERBS: &[&str] = &[
     "跑", "走", "说", "看", "写", "做", "睡", "吃", "想", "笑", "哭", "唱", "打", "飞", "跳", "涨",
     "变", "长", "干", "活", "来", "去", "站", "坐", "躺", "听", "读", "问", "答", "喊", "叫", "喝",
@@ -111,11 +138,13 @@ const DE_VERBS: &[&str] = &[
 ];
 
 /// 程度副词补语：的→得 必报（「跑的很慢」）。
+#[cfg(test)]
 const DE_DEGREE_WORDS: &[&str] = &[
     "很", "太", "不", "真", "非常", "十分", "特别", "如此", "那么", "这么", "极其", "相当",
 ];
 
 /// 结果/状态补语：的→得 需后接接续词或行尾才报（避开「做的好事」）。
+#[cfg(test)]
 const DE_RESULT_WORDS: &[&str] = &[
     "好", "快", "慢", "多", "少", "早", "晚", "远", "近", "高", "低", "大", "小", "久", "准", "对",
     "错", "干净", "清楚", "明白", "彻底", "漂亮", "厉害", "严重", "明显", "夸张", "舒服", "难受",
@@ -123,12 +152,15 @@ const DE_RESULT_WORDS: &[&str] = &[
 ];
 
 /// 补语/动词之后允许的接续（含标点与行尾）：不是这些就大概率是名词。
+#[cfg(test)]
 const CONTINUATIONS: &[char] = &[
     '了', '着', '过', '多', '少', '一', '点', '些', '起', '下', '去', '来', '极', '不', '吗', '呢',
-    '吧', '啊', '呀', '哦', '，', '。', '！', '？', '、', '；', '：', '…', '—', '」', '”', '）', ')',
+    '吧', '啊', '呀', '哦', '，', '。', '！', '？', '、', '；', '：', '…', '—', '」', '”', '）',
+    ')',
 ];
 
 /// 状语词（的→地 的左侧；都是「…地+动词」里的惯用状语）。
+#[cfg(test)]
 const DE_ADVERBS: &[&str] = &[
     "慢慢", "轻轻", "悄悄", "默默", "狠狠", "静静", "偷偷", "渐渐", "缓缓", "迅速", "快速", "缓慢",
     "大声", "小声", "仔细", "认真", "冷静", "愤怒", "兴奋", "开心", "难过", "疑惑", "好奇", "无奈",
@@ -139,6 +171,7 @@ const DE_ADVERBS: &[&str] = &[
 ];
 
 /// 无歧义的双字动词（的→地 的右侧；「笑容」「好事」这类名词不会命中）。
+#[cfg(test)]
 const DE_ADVERB_VERBS: &[&str] = &[
     "看着", "看向", "望着", "盯着", "听着", "想着", "说着", "笑着", "哭着", "走着", "跑着", "站着",
     "坐着", "躺着", "点头", "摇头", "皱眉", "叹气", "摆手", "挥手", "转身", "抬头", "低头", "开口",
@@ -165,6 +198,10 @@ pub struct ProofIssue {
     pub kind: String,
     /// 上下文片段（命中词前后各约 12 字）。
     pub snippet: String,
+    /// 扫描时的正文版本；前端只允许在版本仍一致时定位。
+    pub fingerprint: String,
+    /// 对规则的简短解释，不把“建议”冒充自动修改。
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -172,11 +209,9 @@ pub struct ProofIssue {
 pub struct ProofReport {
     pub issues: Vec<ProofIssue>,
     pub scanned_chapters: u32,
-    /// 敏感词库条数（0＝没有词库文件，前端提示怎么建）。
-    pub sensitive_words: u32,
-    /// 错词条数（含内置种子）。
+    /// 用户自定义错词条数。
     pub wrong_words: u32,
-    pub sensitive_file_exists: bool,
+    pub proper_nouns: u32,
 }
 
 // ---------- 词库 ----------
@@ -214,6 +249,7 @@ fn read_wrong_words(path: &Path) -> Result<Vec<(String, Option<String>)>, String
 }
 
 /// 内置错词种子（用户文件叠加在其上）。
+#[cfg(test)]
 fn builtin_wrong_words() -> Vec<(String, Option<String>)> {
     BUILTIN_WRONG_WORDS
         .iter()
@@ -223,12 +259,14 @@ fn builtin_wrong_words() -> Vec<(String, Option<String>)> {
 
 /// 敏感词多模式匹配（自建 Trie，不引新依赖）：从每个位置取最长命中，
 /// 命中后跳过整个词，嵌套词不重复报。
+#[cfg(test)]
 #[derive(Default)]
 struct SensitiveTrie {
     nodes: Vec<HashMap<char, usize>>,
     terminal: Vec<bool>,
 }
 
+#[cfg(test)]
 impl SensitiveTrie {
     fn new() -> Self {
         SensitiveTrie {
@@ -293,6 +331,7 @@ fn claim(taken: &mut [bool], start: usize, len: usize) -> bool {
     true
 }
 
+#[cfg(test)]
 fn ends_with_at(chars: &[char], end: usize, word: &str) -> bool {
     let w: Vec<char> = word.chars().collect();
     if end < w.len() {
@@ -301,6 +340,7 @@ fn ends_with_at(chars: &[char], end: usize, word: &str) -> bool {
     chars[end - w.len()..end] == w[..]
 }
 
+#[cfg(test)]
 fn starts_with_at(chars: &[char], start: usize, word: &str) -> bool {
     let w: Vec<char> = word.chars().collect();
     if start + w.len() > chars.len() {
@@ -309,6 +349,7 @@ fn starts_with_at(chars: &[char], start: usize, word: &str) -> bool {
     chars[start..start + w.len()] == w[..]
 }
 
+#[cfg(test)]
 fn longest_ending_at<'a>(chars: &[char], end: usize, table: &[&'a str]) -> Option<&'a str> {
     table
         .iter()
@@ -317,6 +358,7 @@ fn longest_ending_at<'a>(chars: &[char], end: usize, table: &[&'a str]) -> Optio
         .copied()
 }
 
+#[cfg(test)]
 fn longest_starting_at<'a>(chars: &[char], start: usize, table: &[&'a str]) -> Option<&'a str> {
     table
         .iter()
@@ -327,6 +369,7 @@ fn longest_starting_at<'a>(chars: &[char], start: usize, table: &[&'a str]) -> O
 
 /// 的地得小集：的→得（动词＋的＋程度/结果补语）、的→地（状语＋的＋动词）。
 /// 只在表内命中时开口，且结果补语/单字动词后必须是接续词或行尾。
+#[cfg(test)]
 fn de_hits(chars: &[char], taken: &[bool]) -> Vec<Hit> {
     let mut hits: Vec<Hit> = Vec::new();
     for (i, c) in chars.iter().enumerate() {
@@ -342,6 +385,7 @@ fn de_hits(chars: &[char], taken: &[bool]) -> Vec<Hit> {
 
 /// 的→得：动词＋的＋程度/结果补语。结果补语后必须是接续词或行尾，
 /// 否则大概率是「做的好事」这类名词短语。
+#[cfg(test)]
 fn de_de_hit(chars: &[char], i: usize) -> Option<Hit> {
     let verb = longest_ending_at(chars, i, DE_VERBS)?;
     let after = i + 1;
@@ -370,6 +414,7 @@ fn de_de_hit(chars: &[char], i: usize) -> Option<Hit> {
 
 /// 的→地：状语＋的＋动词。动词优先取无歧义双字动词；单字动词后必须
 /// 是接续词或行尾（避开「开心的笑容」这类名词短语）。
+#[cfg(test)]
 fn de_di_hit(chars: &[char], i: usize) -> Option<Hit> {
     let adverb = longest_ending_at(chars, i, DE_ADVERBS)?;
     let after = i + 1;
@@ -391,6 +436,7 @@ fn de_di_hit(chars: &[char], i: usize) -> Option<Hit> {
 }
 
 /// 一行里跑三类规则；返回按起点排序、互不重叠的命中。
+#[cfg(test)]
 fn scan_line(
     line: &str,
     sensitive: &SensitiveTrie,
@@ -497,31 +543,228 @@ fn snippet_of(chars: &[char], start: usize, len: usize) -> String {
     out
 }
 
+fn read_proper_nouns(path: &Path) -> Result<Vec<(String, Vec<String>)>, String> {
+    Ok(read_word_list(path)?
+        .into_iter()
+        .filter_map(|line| {
+            let (canonical, variants) = line.split_once("=>")?;
+            let canonical = canonical.trim().to_string();
+            let variants: Vec<String> = variants
+                .split(['|', '｜', '、', ','])
+                .map(str::trim)
+                .filter(|item| !item.is_empty() && *item != canonical)
+                .map(str::to_string)
+                .collect();
+            (!canonical.is_empty() && !variants.is_empty()).then_some((canonical, variants))
+        })
+        .collect())
+}
+
+fn push_literal_hits(
+    chars: &[char],
+    taken: &mut [bool],
+    values: impl IntoIterator<Item = (String, Option<String>, &'static str)>,
+    hits: &mut Vec<Hit>,
+) {
+    let mut candidates = Vec::new();
+    for (word, suggestion, kind) in values {
+        let needle: Vec<char> = word.chars().collect();
+        if needle.is_empty() {
+            continue;
+        }
+        for start in 0..=chars.len().saturating_sub(needle.len()) {
+            if chars[start..start + needle.len()] == needle[..] {
+                candidates.push(Hit {
+                    start,
+                    len: needle.len(),
+                    word: word.clone(),
+                    suggestion: suggestion.clone(),
+                    kind,
+                });
+            }
+        }
+    }
+    candidates.sort_by(|a, b| a.start.cmp(&b.start).then(b.len.cmp(&a.len)));
+    for hit in candidates {
+        if claim(taken, hit.start, hit.len) {
+            hits.push(hit);
+        }
+    }
+}
+
+fn is_han(c: char) -> bool {
+    ('\u{3400}'..='\u{9fff}').contains(&c)
+}
+
+/// 新规格的四项确定性规则。调用方先把 Markdown 非正文片段替换为空格，
+/// 因而字符位置仍与原文一致。
+fn scan_active_line(
+    line: &str,
+    options: &ProofreadOptions,
+    wrong_words: &[(String, Option<String>)],
+    proper_nouns: &[(String, Vec<String>)],
+) -> Vec<Hit> {
+    let chars: Vec<char> = line.chars().collect();
+    if chars.is_empty() {
+        return Vec::new();
+    }
+    let mut taken = vec![false; chars.len()];
+    let mut hits = Vec::new();
+
+    if options.punctuation {
+        for (open, close) in [
+            ('“', '”'),
+            ('‘', '’'),
+            ('（', '）'),
+            ('《', '》'),
+            ('「', '」'),
+            ('『', '』'),
+            ('【', '】'),
+        ] {
+            let mut stack = Vec::new();
+            for (i, ch) in chars.iter().enumerate() {
+                if *ch == open {
+                    stack.push(i);
+                }
+                if *ch == close {
+                    if stack.pop().is_none() && claim(&mut taken, i, 1) {
+                        hits.push(Hit {
+                            start: i,
+                            len: 1,
+                            word: close.to_string(),
+                            suggestion: None,
+                            kind: KIND_PUNCTUATION,
+                        });
+                    }
+                }
+            }
+            for i in stack {
+                if claim(&mut taken, i, 1) {
+                    hits.push(Hit {
+                        start: i,
+                        len: 1,
+                        word: open.to_string(),
+                        suggestion: Some(close.to_string()),
+                        kind: KIND_PUNCTUATION,
+                    });
+                }
+            }
+        }
+    }
+
+    if options.repetition {
+        let mut i = 0;
+        while i + 1 < chars.len() {
+            let mut found = None;
+            for len in (1..=4).rev() {
+                if i + len * 2 <= chars.len()
+                    && chars[i..i + len] == chars[i + len..i + len * 2]
+                    && chars[i..i + len].iter().all(|c| is_han(*c))
+                {
+                    found = Some(len);
+                    break;
+                }
+            }
+            if let Some(len) = found {
+                if claim(&mut taken, i, len * 2) {
+                    hits.push(Hit {
+                        start: i,
+                        len: len * 2,
+                        word: chars[i..i + len * 2].iter().collect(),
+                        suggestion: Some(chars[i..i + len].iter().collect()),
+                        kind: KIND_REPETITION,
+                    });
+                }
+                i += len * 2;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    if options.wrong_words {
+        push_literal_hits(
+            &chars,
+            &mut taken,
+            wrong_words.iter().cloned().map(|(w, s)| (w, s, KIND_WRONG)),
+            &mut hits,
+        );
+    }
+    if options.proper_nouns {
+        let values = proper_nouns.iter().flat_map(|(canonical, variants)| {
+            variants
+                .iter()
+                .map(move |variant| (variant.clone(), Some(canonical.clone()), KIND_PROPER_NOUN))
+        });
+        push_literal_hits(&chars, &mut taken, values, &mut hits);
+    }
+    hits.sort_by_key(|hit| hit.start);
+    hits
+}
+
+fn mask_markdown_line(line: &str, in_fence: &mut bool) -> String {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+        *in_fence = !*in_fence;
+        return " ".repeat(line.chars().count());
+    }
+    if *in_fence {
+        return " ".repeat(line.chars().count());
+    }
+    let mut chars: Vec<char> = line.chars().collect();
+    let mut code = false;
+    let mut link_target = false;
+    for i in 0..chars.len() {
+        if chars[i] == '`' {
+            code = !code;
+            chars[i] = ' ';
+            continue;
+        }
+        if !code && chars[i] == '(' && i > 0 && chars[i - 1] == ']' {
+            link_target = true;
+            chars[i] = ' ';
+            continue;
+        }
+        if link_target && chars[i] == ')' {
+            link_target = false;
+            chars[i] = ' ';
+            continue;
+        }
+        if code || link_target {
+            chars[i] = ' ';
+        }
+    }
+    chars.into_iter().collect()
+}
+
 // ---------- 入口 ----------
 
 /// 校对范围内的章节。范围含全书时未编号章也扫（校对不依赖章序）。
 /// root 为空＝没有库根（词库缺席），只用内置规则。
+#[cfg(test)]
 pub fn proofread_chapters(
     root: &Path,
     project: &Path,
     range: ChapterRange,
 ) -> Result<ProofReport, String> {
+    proofread_chapters_with_options(root, project, range, ProofreadOptions::default())
+}
+
+pub fn proofread_chapters_with_options(
+    root: &Path,
+    project: &Path,
+    range: ChapterRange,
+    options: ProofreadOptions,
+) -> Result<ProofReport, String> {
     let dir = (!root.as_os_str().is_empty()).then(|| proofread_dir(root));
-    let sensitive_path = dir.as_ref().map(|d| d.join(SENSITIVE_FILE));
-    let sensitive_words = match &sensitive_path {
-        Some(path) => read_word_list(path)?,
-        None => Vec::new(),
-    };
-    let sensitive_file_exists = sensitive_path.as_ref().is_some_and(|path| path.is_file());
-    let mut wrong_words = builtin_wrong_words();
+    let mut wrong_words = Vec::new();
     if let Some(path) = dir.as_ref().map(|d| d.join(WRONG_WORD_FILE)) {
         wrong_words.extend(read_wrong_words(&path)?);
     }
-
-    let mut trie = SensitiveTrie::new();
-    for word in &sensitive_words {
-        trie.insert(word);
-    }
+    let proper_nouns = match dir.as_ref().map(|d| d.join(PROPER_NOUN_FILE)) {
+        Some(path) => read_proper_nouns(&path)?,
+        None => Vec::new(),
+    };
 
     let mut issues: Vec<ProofIssue> = Vec::new();
     let mut scanned = 0u32;
@@ -537,10 +780,32 @@ pub fn proofread_chapters(
         let Ok(content) = fs::read(&entry.path) else {
             continue;
         };
+        let fingerprint = content_fingerprint(&content).to_string();
         let content = String::from_utf8_lossy(&content);
+        let mut in_frontmatter = content.starts_with("---\n") || content.starts_with("---\r\n");
+        let mut frontmatter_started = in_frontmatter;
+        let mut in_fence = false;
         for (index, line) in content.lines().enumerate() {
+            if frontmatter_started {
+                if index > 0 && line.trim() == "---" {
+                    frontmatter_started = false;
+                    in_frontmatter = false;
+                }
+                continue;
+            }
+            if in_frontmatter {
+                continue;
+            }
+            let visible = mask_markdown_line(line, &mut in_fence);
             let chars: Vec<char> = line.chars().collect();
-            for hit in scan_line(line, &trie, &wrong_words) {
+            for hit in scan_active_line(&visible, &options, &wrong_words, &proper_nouns) {
+                let reason = match hit.kind {
+                    KIND_PUNCTUATION => "成对标点没有对应的开合符号",
+                    KIND_REPETITION => "发现连续重复的字或词",
+                    KIND_WRONG => "命中用户自定义错词表",
+                    KIND_PROPER_NOUN => "写法与专有名词表中的规范名不一致",
+                    _ => "本地校对命中",
+                };
                 issues.push(ProofIssue {
                     ordinal: entry.ordinal,
                     file_name: entry.file_name.clone(),
@@ -551,6 +816,8 @@ pub fn proofread_chapters(
                     word: hit.word,
                     suggestion: hit.suggestion,
                     kind: hit.kind.to_string(),
+                    fingerprint: fingerprint.clone(),
+                    reason: reason.to_string(),
                 });
             }
         }
@@ -565,9 +832,8 @@ pub fn proofread_chapters(
     Ok(ProofReport {
         issues,
         scanned_chapters: scanned,
-        sensitive_words: sensitive_words.len() as u32,
         wrong_words: wrong_words.len() as u32,
-        sensitive_file_exists,
+        proper_nouns: proper_nouns.len() as u32,
     })
 }
 
@@ -599,6 +865,97 @@ mod tests {
     }
 
     #[test]
+    fn 四项规则可独立关闭且不再运行敏感词和的地得() {
+        let options = ProofreadOptions {
+            punctuation: false,
+            repetition: false,
+            wrong_words: true,
+            proper_nouns: false,
+        };
+        let hits = scan_active_line(
+            "敏感词跑的很慢，因该",
+            &options,
+            &[("因该".into(), Some("应该".into()))],
+            &[],
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].kind, KIND_WRONG);
+    }
+
+    #[test]
+    fn 成对标点报告缺失和多余闭合() {
+        let options = ProofreadOptions {
+            repetition: false,
+            wrong_words: false,
+            proper_nouns: false,
+            ..Default::default()
+        };
+        let hits = scan_active_line("他说：“走吧。又多了一个）", &options, &[], &[]);
+        assert!(hits
+            .iter()
+            .any(|h| h.kind == KIND_PUNCTUATION && h.word == "“"));
+        assert!(hits
+            .iter()
+            .any(|h| h.kind == KIND_PUNCTUATION && h.word == "）"));
+    }
+
+    #[test]
+    fn 重复字词报告连续重复但不把省略号当重复() {
+        let options = ProofreadOptions {
+            punctuation: false,
+            wrong_words: false,
+            proper_nouns: false,
+            ..Default::default()
+        };
+        let hits = scan_active_line("他他停住，非常非常安静……", &options, &[], &[]);
+        let words: Vec<&str> = hits.iter().map(|h| h.word.as_str()).collect();
+        assert!(words.contains(&"他他"), "{words:?}");
+        assert!(words.contains(&"非常非常"), "{words:?}");
+        assert!(!words.iter().any(|w| w.contains('…')), "{words:?}");
+    }
+
+    #[test]
+    fn 专有名词表以规范名映射多个误写() {
+        let options = ProofreadOptions {
+            punctuation: false,
+            repetition: false,
+            wrong_words: false,
+            ..Default::default()
+        };
+        let nouns = vec![("顾长安".into(), vec!["顾常安".into(), "顾长桉".into()])];
+        let hits = scan_active_line("顾常安见到了顾长安", &options, &[], &nouns);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].suggestion.as_deref(), Some("顾长安"));
+        assert_eq!(hits[0].kind, KIND_PROPER_NOUN);
+    }
+
+    #[test]
+    fn markdown_frontmatter_代码与链接目标不参与校对() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let p = project(root);
+        write(&root.join("校对/错词.txt"), "因该 => 应该\n");
+        write(
+            &p.join("正文/0001 甲.md"),
+            "---\n备注: 因该\n---\n正文因该。`因该`\n```txt\n因该\n```\n[文字](因该.md)",
+        );
+        let report = proofread_chapters_with_options(
+            root,
+            &p,
+            ChapterRange::default(),
+            ProofreadOptions {
+                punctuation: false,
+                repetition: false,
+                proper_nouns: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(report.issues.len(), 1, "{:?}", report.issues);
+        assert_eq!(report.issues[0].line, 4);
+    }
+
+    #[test]
     fn 敏感词_最长匹配_嵌套不重复报() {
         let mut trie = SensitiveTrie::new();
         trie.insert("色情");
@@ -613,7 +970,12 @@ mod tests {
     #[test]
     fn 的地得_动词加补语报得_名词短语不报() {
         let hits = scan_line("他跑的很慢，但做的好事不少", &empty_trie(), &[]);
-        assert_eq!(hits.len(), 1, "{:?}", hits.iter().map(|h| &h.word).collect::<Vec<_>>());
+        assert_eq!(
+            hits.len(),
+            1,
+            "{:?}",
+            hits.iter().map(|h| &h.word).collect::<Vec<_>>()
+        );
         assert_eq!(hits[0].word, "跑的很");
         assert_eq!(hits[0].suggestion.as_deref(), Some("跑得很"));
     }
@@ -635,7 +997,11 @@ mod tests {
         assert!(words.contains(&"仔细的打量"), "{words:?}");
         // 「跑的快慢」这类名词性搭配不报
         let hits = scan_line("看谁跑的快慢", &empty_trie(), &[]);
-        assert!(hits.is_empty(), "{:?}", hits.iter().map(|h| &h.word).collect::<Vec<_>>());
+        assert!(
+            hits.is_empty(),
+            "{:?}",
+            hits.iter().map(|h| &h.word).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -651,6 +1017,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         let p = project(root);
+        write(&root.join("校对/错词.txt"), "因该 => 应该");
         write(&p.join("正文/0001 甲.md"), "因该走，因该留");
         let report = proofread_chapters(root, &p, ChapterRange::default()).unwrap();
         let issues: Vec<&ProofIssue> = report.issues.iter().filter(|i| i.word == "因该").collect();
@@ -662,36 +1029,30 @@ mod tests {
     }
 
     #[test]
-    fn 词库_文件不存在只跑内置_存在则叠加() {
+    fn 词库_只读取用户错词且忽略旧敏感词文件() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         let p = project(root);
         write(&p.join("正文/0001 甲.md"), "这里有个怪词和一个错词");
         let report = proofread_chapters(root, &p, ChapterRange::default()).unwrap();
-        assert!(!report.sensitive_file_exists);
-        assert_eq!(report.sensitive_words, 0);
         assert_eq!(report.issues.len(), 0);
 
-        write(&root.join("校对/敏感词.txt"), "# 注释\n怪词\n");
+        write(&root.join("校对/敏感词.txt"), "# 旧文件不再读取\n怪词\n");
         write(&root.join("校对/错词.txt"), "错词 => 对词\n裸词\n");
         let report = proofread_chapters(root, &p, ChapterRange::default()).unwrap();
-        assert!(report.sensitive_file_exists);
-        assert_eq!(report.sensitive_words, 1);
-        assert_eq!(report.issues.len(), 2, "{:?}", report.issues);
-        let kinds: Vec<&str> = report.issues.iter().map(|i| i.kind.as_str()).collect();
-        assert!(kinds.contains(&KIND_SENSITIVE));
-        assert!(kinds.contains(&KIND_WRONG));
-        assert!(report.wrong_words > BUILTIN_WRONG_WORDS.len() as u32);
+        assert_eq!(report.issues.len(), 1, "{:?}", report.issues);
+        assert_eq!(report.issues[0].kind, KIND_WRONG);
+        assert_eq!(report.wrong_words, 2);
     }
 
     #[test]
-    fn 空库根_只用内置规则_不碰工作目录() {
+    fn 空库根_没有用户词表且不碰工作目录() {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
         write(&p.join("正文/0001 甲.md"), "因该");
         let report = proofread_chapters(Path::new(""), &p, ChapterRange::default()).unwrap();
         assert!(!report.sensitive_file_exists);
-        assert_eq!(report.issues.len(), 1, "{:?}", report.issues);
+        assert_eq!(report.issues.len(), 0, "{:?}", report.issues);
     }
 
     #[test]
@@ -699,6 +1060,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         let p = project(root);
+        write(&root.join("校对/错词.txt"), "因该 => 应该");
         write(&p.join("正文/0001 甲.md"), "因该");
         write(&p.join("正文/0002 乙.md"), "因该");
         write(&p.join("正文/番外.md"), "因该");
@@ -740,11 +1102,22 @@ mod tests {
             suggestion: Some("应该".to_string()),
             kind: KIND_WRONG.to_string(),
             snippet: "…因该…".to_string(),
+            fingerprint: "42".to_string(),
+            reason: "命中用户自定义错词表".to_string(),
         };
         let value = serde_json::to_value(&issue).unwrap();
         for key in [
-            "ordinal", "fileName", "path", "line", "occurrence", "word", "suggestion", "kind",
+            "ordinal",
+            "fileName",
+            "path",
+            "line",
+            "occurrence",
+            "word",
+            "suggestion",
+            "kind",
             "snippet",
+            "fingerprint",
+            "reason",
         ] {
             assert!(value.get(key).is_some(), "缺字段 {key}");
         }
@@ -752,18 +1125,11 @@ mod tests {
         let report = ProofReport {
             issues: vec![issue],
             scanned_chapters: 1,
-            sensitive_words: 0,
             wrong_words: 2,
-            sensitive_file_exists: false,
+            proper_nouns: 0,
         };
         let value = serde_json::to_value(&report).unwrap();
-        for key in [
-            "issues",
-            "scannedChapters",
-            "sensitiveWords",
-            "wrongWords",
-            "sensitiveFileExists",
-        ] {
+        for key in ["issues", "scannedChapters", "wrongWords", "properNouns"] {
             assert!(value.get(key).is_some(), "缺字段 {key}");
         }
     }

@@ -7,11 +7,13 @@ import type {
   ProjectMeta,
   ProofIssue,
   ProofReport,
+  ProofreadOptions,
 } from "./types";
 import { defaultExportTemplate } from "./types";
 import {
-  PROOFREAD_KIND_DE,
-  PROOFREAD_KIND_SENSITIVE,
+  PROOFREAD_KIND_PROPER_NOUN,
+  PROOFREAD_KIND_PUNCTUATION,
+  PROOFREAD_KIND_REPETITION,
   PROOFREAD_KIND_WRONG,
 } from "./types";
 import { chapterHead } from "./chapterFile";
@@ -30,15 +32,18 @@ interface ExportDialogProps {
   onClose: () => void;
   /** 校对命中跳回：打开该章并选中命中词。 */
   onJump: (issue: ProofIssue) => void;
+  initialTab?: Tab;
+  initialChapter?: number | null;
 }
 
 type Tab = "export" | "proof";
 
-const KINDS = [PROOFREAD_KIND_SENSITIVE, PROOFREAD_KIND_DE, PROOFREAD_KIND_WRONG];
+const KINDS = [PROOFREAD_KIND_PUNCTUATION, PROOFREAD_KIND_REPETITION, PROOFREAD_KIND_WRONG, PROOFREAD_KIND_PROPER_NOUN];
 const KIND_CLASS: Record<string, string> = {
-  [PROOFREAD_KIND_SENSITIVE]: "sensitive",
-  [PROOFREAD_KIND_DE]: "de",
+  [PROOFREAD_KIND_PUNCTUATION]: "punctuation",
+  [PROOFREAD_KIND_REPETITION]: "repetition",
   [PROOFREAD_KIND_WRONG]: "wrong",
+  [PROOFREAD_KIND_PROPER_NOUN]: "proper-noun",
 };
 
 export function ExportDialog({
@@ -48,20 +53,23 @@ export function ExportDialog({
   libraryPath,
   onClose,
   onJump,
+  initialTab = "export",
+  initialChapter = null,
 }: ExportDialogProps) {
-  const [tab, setTab] = useState<Tab>("export");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [templates, setTemplates] = useState<ExportTemplate[]>([]);
   const [form, setForm] = useState<ExportTemplate>(defaultExportTemplate());
   const [prefix, setPrefix] = useState<string | null>(null);
-  const [rangeMode, setRangeMode] = useState<"all" | "range">("all");
-  const [from, setFrom] = useState("1");
-  const [to, setTo] = useState(String(chapterCount || 1));
+  const [rangeMode, setRangeMode] = useState<"all" | "range">(initialChapter ? "range" : "all");
+  const [from, setFrom] = useState(String(initialChapter ?? 1));
+  const [to, setTo] = useState(String(initialChapter ?? (chapterCount || 1)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [report, setReport] = useState<ExportReport | null>(null);
   const [proof, setProof] = useState<ProofReport | null>(null);
   const [copied, setCopied] = useState(false);
+  const [proofOptions, setProofOptions] = useState<ProofreadOptions>({ punctuation: true, repetition: true, wrongWords: true, properNouns: true });
 
   useEffect(() => {
     void (async () => {
@@ -149,6 +157,7 @@ export function ExportDialog({
           root: libraryPath ?? "",
           project: projectDir,
           range,
+          options: proofOptions,
         }),
       );
     });
@@ -406,13 +415,22 @@ export function ExportDialog({
         ) : (
           <>
             <p className="hint">
-              只读正文、不写任何文件。敏感词与错词取库根「校对/敏感词.txt」「校对/错词.txt」，
-              {proof
-                ? proof.sensitiveFileExists
-                  ? `当前敏感词 ${formatCount(proof.sensitiveWords)} 条、错词 ${formatCount(proof.wrongWords)} 条。`
-                  : "当前没找到敏感词库（只有内置的地得规则与错词种子）。"
-                : "一行一词，错词写成「错词 => 对词」。"}
+              只读正文、不写任何文件，也不联网。错词写在库根「校对/错词.txt」，专有名词写在「校对/专有名词.txt」。
+              {proof ? ` 已读取错词 ${formatCount(proof.wrongWords)} 条、专有名词 ${formatCount(proof.properNouns)} 组。` : " 格式均为「规范或错词 => 误写或建议」，专有名词的多个误写用 | 分隔。"}
             </p>
+            <div className="proof-options" aria-label="校对规则">
+              {([
+                ["punctuation", "中文成对标点"],
+                ["repetition", "重复字词"],
+                ["wrongWords", "自定义错词"],
+                ["properNouns", "专有名词一致性"],
+              ] as const).map(([key, label]) => (
+                <label className="check" key={key}>
+                  <input type="checkbox" checked={proofOptions[key]} onChange={(e) => setProofOptions((cur) => ({ ...cur, [key]: e.target.checked }))} />
+                  {label}
+                </label>
+              ))}
+            </div>
             <div className="dialog-actions export-actions">
               <button className="btn primary" disabled={busy} onClick={handleProofread}>
                 {busy ? "扫描中……" : "开始校对"}
@@ -425,6 +443,7 @@ export function ExportDialog({
                   {KINDS.filter((k) => kindCounts[k]).map((k) => ` · ${k} ${kindCounts[k]}`).join("")}
                 </p>
                 {proof.issues.length === 0 && <p className="hint">没发现表内命中的问题。</p>}
+                {proof.issues.length > 0 && <button className="btn small" onClick={() => setProof(null)}>忽略本次结果</button>}
                 {grouped.map(([fileName, issues]) => (
                   <div key={fileName} className="proof-chapter">
                     <p className="proof-chapter-head">
@@ -449,6 +468,7 @@ export function ExportDialog({
                             {issue.suggestion && (
                               <span className="proof-suggestion">→ {issue.suggestion}</span>
                             )}
+                            <span className="proof-reason">{issue.reason}</span>
                             <span className="proof-snippet">{issue.snippet}</span>
                           </button>
                         </li>

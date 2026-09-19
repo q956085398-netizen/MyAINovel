@@ -37,7 +37,7 @@ use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
     ProjectMeta,
 };
-use proofread::ProofReport;
+use proofread::{ProofReport, ProofreadOptions};
 use relationship::{Confluence, RelationshipTable, RelationshipView};
 use trope::TropeSpan;
 use vocabulary::Vocabulary;
@@ -725,14 +725,24 @@ fn preview_export(
     export::preview_export(Path::new(&project), range, &template)
 }
 
-/// 发布前校对：只读正文，词库取库根「校对/」（root 为空＝只用内置规则）。
+/// 主动本地校对：只读正文，四类规则可独立开关；扫描在线程池运行。
 #[tauri::command]
-fn proofread_chapters(
+async fn proofread_chapters(
     root: String,
     project: String,
     range: ChapterRange,
+    options: Option<ProofreadOptions>,
 ) -> Result<ProofReport, String> {
-    proofread::proofread_chapters(Path::new(&root), Path::new(&project), range)
+    tauri::async_runtime::spawn_blocking(move || {
+        proofread::proofread_chapters_with_options(
+            Path::new(&root),
+            Path::new(&project),
+            range,
+            options.unwrap_or_default(),
+        )
+    })
+    .await
+    .map_err(|e| format!("校对任务意外结束：{e}"))?
 }
 
 #[tauri::command]

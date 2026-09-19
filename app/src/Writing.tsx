@@ -135,6 +135,7 @@ export default function Writing({
       quote: issue.word,
       line: issue.line,
       occurrence: issue.occurrence,
+      fingerprint: issue.fingerprint,
     });
   }
 
@@ -143,6 +144,7 @@ export default function Writing({
       <WritingPage
         key={`${open.project.dir}#${open.seq}`}
         project={open.project}
+        libraryPath={libraryPath}
         active={active}
         locate={open.locate}
         onAiCommand={onAiCommand}

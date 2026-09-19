@@ -19,6 +19,7 @@ import type {
   ExpectationBoard,
   Foreshadow,
   MdContent,
+  ProofIssue,
   ProjectEntry,
   ProjectMeta,
   SaveResult,
@@ -56,6 +57,7 @@ import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editor
 import { dirName, editorRender } from "./editorRender";
 import { useImageViewer } from "./ImageViewer";
 import TypographyToolbar from "./TypographyToolbar";
+import { ExportDialog } from "./ExportDialog";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 /** 自动保存防抖：停笔满设置间隔（默认 3 秒，工单 #28 起两编辑器共用）落盘。 */
@@ -176,6 +178,7 @@ type ChapterDialog = { kind: "new" | "rename" | "goal"; value: string };
 
 interface WritingPageProps {
   project: ProjectEntry;
+  libraryPath: string | null;
   /** 书写板块当前是否在前台：切走时立即保存（板块常驻挂载，不卸载）。 */
   active: boolean;
   /** 跳转请求：打开该章并选中引文（仅挂载时生效）。 */
@@ -193,6 +196,7 @@ interface WritingPageProps {
  *  状态栏＋联动侧栏。自动保存穿指纹闸（ADR 0004），写盘前留历史版本。 */
 export default function WritingPage({
   project,
+  libraryPath,
   active,
   locate,
   onBack,
@@ -230,6 +234,7 @@ export default function WritingPage({
   const [immersive, setImmersive] = useState(false);
   const [prefs, setPrefs] = useState(loadPrefs);
   const [dialog, setDialog] = useState<ChapterDialog | null>(null);
+  const [proofOpen, setProofOpen] = useState(false);
   const [history, setHistory] = useState<null | {
     list: SnapshotEntry[];
     selected: string | null;
@@ -1042,7 +1047,11 @@ export default function WritingPage({
       // 跳转落点：给行号按行定位（校对命中），否则全文找引文（伏笔/三线）。
       if (locate?.quote) {
         if (locate.line !== undefined) {
-          locateAtLine(locate.line, locate.quote, locate.occurrence ?? 0);
+          if (locate.fingerprint && locate.fingerprint !== fingerprintRef.current) {
+            window.alert("正文在校对后已经变化，请重新校对本章后再定位。");
+          } else {
+            locateAtLine(locate.line, locate.quote, locate.occurrence ?? 0);
+          }
         } else {
           locateQuote(locate.quote);
         }
@@ -1215,6 +1224,13 @@ export default function WritingPage({
               </button>
               <button className="btn" disabled={!current} onClick={() => void openHistory()}>
                 历史版本
+              </button>
+              <button
+                className="btn"
+                disabled={!current || current.ordinal === null}
+                onClick={() => void saveNow(false).then((saved) => saved && setProofOpen(true))}
+              >
+                校对本章
               </button>
               <button className="btn" onClick={() => setListOpen((v) => !v)}>
                 {listOpen ? "收起列表" : "章节列表"}
@@ -1726,6 +1742,26 @@ export default function WritingPage({
           busy={expectationBusy}
           onCancel={() => setExpFulfill(null)}
           onSubmit={(name, kind, note) => void fulfillExpectation(name, kind, note)}
+        />
+      )}
+
+      {proofOpen && current && (
+        <ExportDialog
+          projectDir={project.dir}
+          projectTitle={project.title}
+          chapterCount={chapters.filter((chapter) => chapter.ordinal !== null).length}
+          libraryPath={libraryPath}
+          initialTab="proof"
+          initialChapter={current.ordinal}
+          onClose={() => setProofOpen(false)}
+          onJump={(issue: ProofIssue) => {
+            if (issue.fingerprint !== fingerprintRef.current) {
+              window.alert("正文在校对后已经变化，请重新校对本章后再定位。");
+              return;
+            }
+            setProofOpen(false);
+            locateAtLine(issue.line, issue.word, issue.occurrence);
+          }}
         />
       )}
 
