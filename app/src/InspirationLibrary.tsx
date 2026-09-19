@@ -11,11 +11,23 @@ import type {
   ProjectEntry,
 } from "./types";
 import { CARD_CATEGORIES, emptyCardDraft } from "./types";
-import { errMsg, oneLinePreview, stripBookMarks } from "./util";
+import { errMsg, stripBookMarks } from "./util";
 import CardDialog from "./CardDialog";
 import ImportDialog from "./ImportDialog";
 import TransmuteDialog, { type TransmuteTarget } from "./TransmuteDialog";
 import type { ProjectTab } from "./ProjectPage";
+import ContentSurface from "./ContentSurface";
+import SearchHighlight from "./SearchHighlight";
+import {
+  cardMatchesQuery,
+  CONTENT_SURFACE_STORAGE_KEY,
+  contentCardDomId,
+  readCollapsedCardPaths,
+  serializeCollapsedCardPaths,
+  shouldExpandContentCard,
+} from "./contentSurfaceState";
+
+const INSPIRATION_SURFACE = "inspiration";
 
 function formatCount(n: number): string {
   return n.toLocaleString("zh-Hans-CN");
@@ -60,51 +72,75 @@ function TransmuteButton({
   const action = TRANSMUTE_ACTIONS[card.category];
   if (!action) return null;
   return (
-    <div className="card-actions">
-      <button className="btn small" title={action.hint} onClick={() => onPick(card, action.target)}>
-        {action.label}
-      </button>
-    </div>
+    <button className="btn small" title={action.hint} onClick={() => onPick(card, action.target)}>
+      {action.label}
+    </button>
   );
 }
 
 function InspirationCardItem({
   card,
   pending = false,
+  collapsed,
+  searchMatched,
+  searchQuery,
+  onToggleCollapsed,
   onEdit,
   onOpenLink,
   onTransmute,
 }: {
   card: InspirationCard;
   pending?: boolean;
+  collapsed: boolean;
+  searchMatched: boolean;
+  searchQuery: string;
+  onToggleCollapsed: (path: string) => void;
   onEdit: (draft: CardDraft, prevPath: string) => void;
   onOpenLink: (text: string) => Promise<void>;
   onTransmute: (card: InspirationCard, target: TransmuteTarget) => void;
 }) {
+  const expanded = shouldExpandContentCard(card.path, new Set(collapsed ? [card.path] : []), searchMatched);
   return (
-    <article className={`card-item ${pending ? "is-pending" : ""}`}>
-      <div className="card-title-row">
-        <button className="card-title" title="编辑这张卡片" onClick={() => onEdit(card, card.path)}>
-          {card.title}
-        </button>
+    <ContentSurface
+      identity={card.path}
+      title={<SearchHighlight text={card.title} query={searchQuery} />}
+      pending={pending}
+      searchMatched={searchMatched}
+      expanded={expanded}
+      onEdit={() => onEdit(card, card.path)}
+      onToggleExpanded={() => onToggleCollapsed(card.path)}
+      badges={
+        <>
         <span className="card-cat">{card.category}</span>
         {card.tags.map((tag) => (
           <span key={tag} className="tag">
-            {tag}
+            <SearchHighlight text={tag} query={searchQuery} />
           </span>
         ))}
-        <span className="card-date">{formatDate(card.mtime)}</span>
-      </div>
+        </>
+      }
+      trailing={<span className="card-date">{formatDate(card.mtime)}</span>}
+      actions={
+        <>
+          {pending && (
+            <button className="btn primary small" onClick={() => onEdit(card, card.path)}>
+              整理这条灵感
+            </button>
+          )}
+          <TransmuteButton card={card} onPick={onTransmute} />
+        </>
+      }
+    >
       {card.core && (
         <p className="card-core" title="一句话核心（人物＋困境＋爽点预期）">
-          一句话核心：{card.core}
+          一句话核心：<SearchHighlight text={card.core} query={searchQuery} />
         </p>
       )}
       {(card.source || card.links.length > 0) && (
         <p className="card-meta">
           {card.source && (
             <span className="card-source" title="来源">
-              来源：{card.source}
+              来源：<SearchHighlight text={card.source} query={searchQuery} />
             </span>
           )}
           {card.links.map((link) => (
@@ -114,25 +150,17 @@ function InspirationCardItem({
               title="打开关联的卡片或拆书稿"
               onClick={() => void onOpenLink(link)}
             >
-              {link}
+              <SearchHighlight text={link} query={searchQuery} />
             </button>
           ))}
         </p>
       )}
       {card.body && (
-        <p className="card-preview" title={card.body}>
-          {oneLinePreview(card.body, 120)}
-        </p>
-      )}
-      {pending && (
-        <div className="card-actions">
-          <button className="btn primary small" onClick={() => onEdit(card, card.path)}>
-            整理这条灵感
-          </button>
+        <div className="card-body">
+          <SearchHighlight text={card.body} query={searchQuery} />
         </div>
       )}
-      <TransmuteButton card={card} onPick={onTransmute} />
-    </article>
+    </ContentSurface>
   );
 }
 
@@ -166,6 +194,9 @@ export default function InspirationLibrary({
   const [query, setQuery] = useState("");
   const [quickCapture, setQuickCapture] = useState("");
   const [capturing, setCapturing] = useState(false);
+  const [collapsedCards, setCollapsedCards] = useState<Set<string>>(() =>
+    readCollapsedCardPaths(localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY), INSPIRATION_SURFACE),
+  );
 
   const [editing, setEditing] = useState<{ draft: CardDraft; prevPath: string | null } | null>(
     null,
@@ -290,16 +321,9 @@ export default function InspirationLibrary({
   }, [cards]);
 
   const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return cards
       .filter((c) => !activeCategory || c.category === activeCategory)
-      .filter((c) => {
-        if (!q) return true;
-        const haystack = [c.title, c.body, c.source ?? "", c.core ?? "", c.tags.join(" "), c.links.join(" ")]
-          .join("\n")
-          .toLowerCase();
-        return haystack.includes(q);
-      })
+      .filter((c) => cardMatchesQuery(c, query))
       .sort(newestFirst);
   }, [cards, activeCategory, query]);
 
@@ -315,8 +339,47 @@ export default function InspirationLibrary({
   // 待整理灵感已经在顶部展示，普通列表不再重复；选择「未分类」筛选时也只看顶部。
   const listed = activeCategory === "未分类" ? [] : visible.filter((card) => card.category !== "未分类");
 
+  const searchMatches = useMemo(() => {
+    if (!query.trim()) return new Set<string>();
+    return new Set(
+      [...pending, ...listed]
+        .filter((card) => cardMatchesQuery(card, query))
+        .map((card) => card.path),
+    );
+  }, [listed, pending, query]);
+
+  useEffect(() => {
+    const firstMatch = [...pending, ...listed].find((card) => searchMatches.has(card.path));
+    if (!firstMatch) return;
+    const frame = requestAnimationFrame(() => {
+      const cardElement = document.getElementById(contentCardDomId(firstMatch.path));
+      const matchElement = cardElement?.querySelector<HTMLElement>("mark[data-search-hit='true']");
+      (matchElement ?? cardElement)?.scrollIntoView({
+        block: "center",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [listed, pending, searchMatches]);
+
+  function toggleCollapsed(path: string) {
+    setCollapsedCards((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      localStorage.setItem(
+        CONTENT_SURFACE_STORAGE_KEY,
+        serializeCollapsedCardPaths(
+          localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY),
+          INSPIRATION_SURFACE,
+          next,
+        ),
+      );
+      return next;
+    });
+  }
+
   return (
-    <div className="page">
+    <div className="page inspiration-library">
       <header className="page-header">
         <div>
           <h1>灵感库</h1>
@@ -417,6 +480,10 @@ export default function InspirationLibrary({
                 key={card.path}
                 card={card}
                 pending
+                collapsed={collapsedCards.has(card.path)}
+                searchMatched={searchMatches.has(card.path)}
+                searchQuery={query}
+                onToggleCollapsed={toggleCollapsed}
                 onEdit={(draft, prevPath) => setEditing({ draft, prevPath })}
                 onOpenLink={openLink}
                 onTransmute={(picked, target) => setTransmuting({ card: picked, target })}
@@ -486,6 +553,10 @@ export default function InspirationLibrary({
                 <InspirationCardItem
                   key={card.path}
                   card={card}
+                  collapsed={collapsedCards.has(card.path)}
+                  searchMatched={searchMatches.has(card.path)}
+                  searchQuery={query}
+                  onToggleCollapsed={toggleCollapsed}
                   onEdit={(draft, prevPath) => setEditing({ draft, prevPath })}
                   onOpenLink={openLink}
                   onTransmute={(picked, target) => setTransmuting({ card: picked, target })}
