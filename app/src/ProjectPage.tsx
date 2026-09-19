@@ -17,6 +17,7 @@ import ArrangementView from "./ArrangementView";
 import CircleView from "./CircleView";
 import ExpectationBoard from "./ExpectationBoard";
 import ForeshadowBoard from "./ForeshadowBoard";
+import MapsView from "./MapsView";
 import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
 import RelationshipCanvas from "./RelationshipCanvas";
@@ -38,10 +39,11 @@ const TABS = [
   "排布",
   "人物",
   "世界观",
+  "地图",
   "开头",
 ] as const;
 const NAV_GROUPS = [
-  { step: "第一步", label: "定书", tabs: ["大纲", "类型圈", "人物", "世界观", "开头"] },
+  { step: "第一步", label: "定书", tabs: ["大纲", "类型圈", "人物", "世界观", "地图", "开头"] },
   { step: "第二步", label: "生情节", tabs: ["矛盾", "桥段库", "单元", "排布"] },
   { step: "第三步", label: "织张力", tabs: ["伏笔", "期待感", "目标"] },
 ] as const;
@@ -312,6 +314,7 @@ export default function ProjectPage({
         <div className="project-content" key={`${tab}-${reloadKey}`}>
           {tab === "大纲" && <PlanningView project={project.dir} unitNames={units.map((unit) => unit.name)} />}
           {tab === "类型圈" && <CircleView project={project.dir} vocab={vocab} />}
+          {tab === "地图" && <MapsView project={project.dir} onChanged={refreshAll} />}
           {tab === "桥段库" && (
             <BridgeLibrary
               project={project.dir}

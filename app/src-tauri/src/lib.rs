@@ -274,13 +274,36 @@ fn read_map_workspace(project: String) -> Result<MapWorkspace, String> {
 }
 
 #[tauri::command]
-fn save_map(project: String, draft: MapDraft) -> Result<MapEntry, String> {
-    map::save_map(Path::new(&project), &draft)
+fn save_map(
+    project: String,
+    draft: MapDraft,
+    prev_path: Option<String>,
+) -> Result<MapEntry, String> {
+    map::save_map(Path::new(&project), &draft, prev_path.as_deref().map(Path::new))
 }
 
 #[tauri::command]
-fn save_region(project: String, draft: RegionDraft) -> Result<RegionEntry, String> {
-    map::save_region(Path::new(&project), &draft)
+fn save_region(
+    project: String,
+    draft: RegionDraft,
+    prev_path: Option<String>,
+) -> Result<RegionEntry, String> {
+    map::save_region(Path::new(&project), &draft, prev_path.as_deref().map(Path::new))
+}
+
+#[tauri::command]
+fn delete_map_place(path: String) -> Result<(), String> {
+    map::delete_place(Path::new(&path))
+}
+
+/// 地域归属唯一（工单 #65）：设置/改换所属地图，整表读-合-写。
+#[tauri::command]
+fn set_region_containment(
+    project: String,
+    region: String,
+    map_name: Option<String>,
+) -> Result<MapStructure, String> {
+    map::set_region_containment(Path::new(&project), &region, map_name.as_deref())
 }
 
 #[tauri::command]
@@ -897,6 +920,8 @@ pub fn run() {
             read_map_workspace,
             save_map,
             save_region,
+            delete_map_place,
+            set_region_containment,
             read_map_structure,
             save_map_structure,
             preview_geo_upgrade,

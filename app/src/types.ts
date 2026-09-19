@@ -123,28 +123,97 @@ export function emptyProjectMeta(): ProjectMeta {
   return { title: null, chapterPrefix: null, plotLines: [], maps: [] };
 }
 
-// --- 地图、地域与转场（工单 #61）；实体档案与结构网分开保存 ---
+// --- 地图、地域与转场（工单 #61 数据底座、#65 完整档案）；实体档案与结构网分开保存 ---
 
 export type GeoUpgradeTarget = "地图" | "地域";
+
+/** 尺度种子（spec 地图与地域 §2.2）：只提示和筛选，不校验。 */
+export const PLACE_SCALES = ["地点", "村落", "城镇", "城市", "区域", "国家", "世界", "异界"];
 
 export interface MapDraft {
   name: string;
   scale: string | null;
+  boundary: string | null;
+  eras: string[];
+  role: string | null;
+  stageGoal: string | null;
+  centralConflict: string | null;
+  coreSecret: string | null;
+  localMainline: string | null;
+  entryCondition: string | null;
+  exitCondition: string | null;
+  people: string[];
+  organizations: string[];
+  units: string[];
+  milestones: string[];
   body: string;
+}
+
+export function emptyMapDraft(): MapDraft {
+  return {
+    name: "",
+    scale: null,
+    boundary: null,
+    eras: [],
+    role: null,
+    stageGoal: null,
+    centralConflict: null,
+    coreSecret: null,
+    localMainline: null,
+    entryCondition: null,
+    exitCondition: null,
+    people: [],
+    organizations: [],
+    units: [],
+    milestones: [],
+    body: "",
+  };
 }
 
 export interface MapEntry extends MapDraft {
   path: string;
+  /** 待打磨中：frontmatter 布尔键派生，随档案文件保存。 */
+  pending: boolean;
 }
 
 export interface RegionDraft {
   name: string;
   scale: string | null;
+  plotRole: string | null;
+  people: string[];
+  organizations: string[];
+  contradictions: string[];
+  units: string[];
+  foreshadows: string[];
+  eras: string[];
+  localMainline: string | null;
+  secret: string | null;
+  /** 展开为另一张地图：名字引用，两张档案互不复制。 */
+  expandsTo: string | null;
   body: string;
+}
+
+export function emptyRegionDraft(): RegionDraft {
+  return {
+    name: "",
+    scale: null,
+    plotRole: null,
+    people: [],
+    organizations: [],
+    contradictions: [],
+    units: [],
+    foreshadows: [],
+    eras: [],
+    localMainline: null,
+    secret: null,
+    expandsTo: null,
+    body: "",
+  };
 }
 
 export interface RegionEntry extends RegionDraft {
   path: string;
+  pending: boolean;
 }
 
 export interface MapWorkspace {
@@ -371,7 +440,7 @@ export interface ArrangementCheck {
 /** 排布属性的约定值（只提示不校验，词表同款纪律）。 */
 export const UPGRADE_BATTLE_VALUES = ["升级", "战斗"];
 export const PACE_VALUES = ["紧绷", "舒缓"];
-export const WORLDVIEW_CATEGORIES = ["力量体系", "地理", "势力", "其他"];
+export const WORLDVIEW_CATEGORIES = ["力量体系", "地理", "势力", "时代", "其他"];
 export const OPENING_STATUS_VALUES = ["备选", "选定"];
 export const CONTRADICTION_STATUS_VALUES = ["池中", "已成单元", "弃用"];
 

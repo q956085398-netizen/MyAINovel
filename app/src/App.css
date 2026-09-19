@@ -858,6 +858,63 @@ body {
   gap: var(--sp-4);
 }
 
+/* ---------- 地图页（工单 #65）：两列档案卡与字段行 ---------- */
+
+/* 人物/组织/地图/地域＝两列档案卡（spec 工作台与卡片呈现 §2.2）：
+   稳定行序，不用瀑布流制造阅读顺序歧义。 */
+.map-archive .card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  align-items: start;
+  gap: var(--sp-4);
+}
+
+.field-line {
+  margin: 0;
+  font-size: var(--fs-ui);
+  line-height: 1.7;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.field-label {
+  color: var(--ink-soft);
+  margin-right: var(--sp-2);
+}
+
+.field-label::after {
+  content: "：";
+}
+
+.transition-arrow {
+  color: var(--ink-soft);
+  margin: 0 var(--sp-1);
+}
+
+/* 空页引导（工单 #65）：简短、可关闭；正文一行＋关闭入口。 */
+.dismissable-intro {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.subtab-count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: var(--r-tiny);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-sub);
+}
+
+/* 对话框里成对的短字段（尺度/归属、进入/离开条件等）。 */
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+}
+
 .card-item {
   background: var(--panel);
   border: 1px solid var(--line);

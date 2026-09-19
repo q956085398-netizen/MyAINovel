@@ -1,4 +1,4 @@
-//! 地图、地域与转场（工单 #61，docs/spec/地图与地域.md）。
+//! 地图、地域与转场（工单 #61 数据底座、#65 完整档案，docs/spec/地图与地域.md）。
 //!
 //! 地图和地域各自是一文件实体；`地图结构.yaml` 只保存它们之间的
 //! 包含、关系、转场及画布布局。旧世界观「地理」词条只读兼容，升级须先
@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
 use crate::book_file::{
-    has_md_extension, is_hidden, map_list, map_scalar, read_text,
-    sanitize_file_name, set_map_list, set_map_scalar, split_frontmatter,
-    strip_bom, write_frontmatter, write_text_atomic, write_yaml_mapping,
+    file_stem_of, frontmatter_mapping, has_md_extension, is_hidden, is_pending, map_list,
+    map_scalar, read_text, sanitize_file_name, set_map_list, set_map_scalar, split_frontmatter,
+    strip_bom, unique_file_path, write_frontmatter, write_text_atomic, write_yaml_mapping,
 };
 use crate::project::{self, NoteKind};
 
@@ -38,38 +38,93 @@ impl GeoUpgradeTarget {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// 地图档案（工单 #65 / T15）：整体故事空间的完整卡面字段。frontmatter
+/// 以中文键落盘；未列入手补键（如 背景图，留给两级画布工单）读-合-写
+/// 原样保留。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MapDraft {
+    pub name: String,
+    pub scale: Option<String>,
+    pub boundary: Option<String>,
+    pub eras: Vec<String>,
+    pub role: Option<String>,
+    pub stage_goal: Option<String>,
+    pub central_conflict: Option<String>,
+    pub core_secret: Option<String>,
+    pub local_mainline: Option<String>,
+    pub entry_condition: Option<String>,
+    pub exit_condition: Option<String>,
+    pub people: Vec<String>,
+    pub organizations: Vec<String>,
+    pub units: Vec<String>,
+    pub milestones: Vec<String>,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MapEntry {
     pub path: PathBuf,
     pub name: String,
     pub scale: Option<String>,
+    pub boundary: Option<String>,
+    pub eras: Vec<String>,
+    pub role: Option<String>,
+    pub stage_goal: Option<String>,
+    pub central_conflict: Option<String>,
+    pub core_secret: Option<String>,
+    pub local_mainline: Option<String>,
+    pub entry_condition: Option<String>,
+    pub exit_condition: Option<String>,
+    pub people: Vec<String>,
+    pub organizations: Vec<String>,
+    pub units: Vec<String>,
+    pub milestones: Vec<String>,
     pub body: String,
+    /// 待打磨中：frontmatter 布尔键「待打磨: true」派生，随文件保存。
+    pub pending: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// 地域档案：地图内部局部区域。地域连接与跨地图转场分开存（结构表），
+/// 档案只管这个地方本身。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MapDraft {
+pub struct RegionDraft {
     pub name: String,
     pub scale: Option<String>,
+    pub plot_role: Option<String>,
+    pub people: Vec<String>,
+    pub organizations: Vec<String>,
+    pub contradictions: Vec<String>,
+    pub units: Vec<String>,
+    pub foreshadows: Vec<String>,
+    pub eras: Vec<String>,
+    pub local_mainline: Option<String>,
+    pub secret: Option<String>,
+    /// 展开为另一张地图：只是名字引用，两张档案互不复制。
+    pub expands_to: Option<String>,
     pub body: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegionEntry {
     pub path: PathBuf,
     pub name: String,
     pub scale: Option<String>,
+    pub plot_role: Option<String>,
+    pub people: Vec<String>,
+    pub organizations: Vec<String>,
+    pub contradictions: Vec<String>,
+    pub units: Vec<String>,
+    pub foreshadows: Vec<String>,
+    pub eras: Vec<String>,
+    pub local_mainline: Option<String>,
+    pub secret: Option<String>,
+    pub expands_to: Option<String>,
     pub body: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RegionDraft {
-    pub name: String,
-    pub scale: Option<String>,
-    pub body: String,
+    pub pending: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -206,32 +261,63 @@ fn scan_maps(project: &Path) -> Result<Vec<MapEntry>, String> {
 fn read_map(path: &Path) -> MapEntry {
     let mut entry = MapEntry {
         path: path.to_path_buf(),
-        name: path
-            .file_stem()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        scale: None,
-        body: String::new(),
+        name: file_stem_of(path),
+        ..MapEntry::default()
     };
-    let Ok(raw) = read_text(path) else {
-        return entry;
-    };
-    let raw = strip_bom(&raw);
-    let Some((yaml, body)) = split_frontmatter(raw) else {
-        entry.body = raw.to_string();
-        return entry;
-    };
-    let Ok(Value::Mapping(map)) = serde_yaml::from_str::<Value>(&yaml) else {
-        entry.body = raw.to_string();
+    let Some((map, body)) = place_parts(path) else {
+        // 无/坏 frontmatter：原文整段当正文，编辑保存即重建头部（内容不丢）。
+        entry.body = place_raw_body(path);
         return entry;
     };
     entry.scale = map_scalar(&map, "尺度");
+    entry.boundary = map_scalar(&map, "边界");
+    entry.eras = map_list(&map, "时代");
+    entry.role = map_scalar(&map, "作用");
+    entry.stage_goal = map_scalar(&map, "阶段目标");
+    entry.central_conflict = map_scalar(&map, "中心矛盾");
+    entry.core_secret = map_scalar(&map, "核心秘密");
+    entry.local_mainline = map_scalar(&map, "当地主线");
+    entry.entry_condition = map_scalar(&map, "进入条件");
+    entry.exit_condition = map_scalar(&map, "离开条件");
+    entry.people = map_list(&map, "人物");
+    entry.organizations = map_list(&map, "组织");
+    entry.units = map_list(&map, "单元");
+    entry.milestones = map_list(&map, "主线里程碑");
+    entry.pending = is_pending(&map);
     entry.body = body;
     entry
 }
 
-pub fn save_map(project: &Path, draft: &MapDraft) -> Result<MapEntry, String> {
-    let path = save_place(project, MAP_DIR, &draft.name, draft.scale.as_deref(), &draft.body)?;
+fn apply_map_draft(frontmatter: &mut Mapping, draft: &MapDraft) {
+    set_map_scalar(frontmatter, "尺度", draft.scale.as_deref());
+    set_map_scalar(frontmatter, "边界", draft.boundary.as_deref());
+    set_map_list(frontmatter, "时代", &draft.eras);
+    set_map_scalar(frontmatter, "作用", draft.role.as_deref());
+    set_map_scalar(frontmatter, "阶段目标", draft.stage_goal.as_deref());
+    set_map_scalar(frontmatter, "中心矛盾", draft.central_conflict.as_deref());
+    set_map_scalar(frontmatter, "核心秘密", draft.core_secret.as_deref());
+    set_map_scalar(frontmatter, "当地主线", draft.local_mainline.as_deref());
+    set_map_scalar(frontmatter, "进入条件", draft.entry_condition.as_deref());
+    set_map_scalar(frontmatter, "离开条件", draft.exit_condition.as_deref());
+    set_map_list(frontmatter, "人物", &draft.people);
+    set_map_list(frontmatter, "组织", &draft.organizations);
+    set_map_list(frontmatter, "单元", &draft.units);
+    set_map_list(frontmatter, "主线里程碑", &draft.milestones);
+}
+
+/// 保存地图：新建或编辑（改名＝文件改名）。frontmatter 以现有文件为底
+/// 合并（背景图等未管理键不丢），同名续号不覆盖他人——与构思笔记同口径。
+pub fn save_map(
+    project: &Path,
+    draft: &MapDraft,
+    prev_path: Option<&Path>,
+) -> Result<MapEntry, String> {
+    let path = place_path(project, MAP_DIR, &draft.name, prev_path)?;
+    let base = prev_path.filter(|p| *p != path).unwrap_or(&path);
+    let mut frontmatter = frontmatter_mapping(base).unwrap_or_default();
+    apply_map_draft(&mut frontmatter, draft);
+    rename_prev(prev_path, &path, MAP_DIR)?;
+    write_frontmatter(&path, frontmatter, &draft.body)?;
     Ok(read_map(&path))
 }
 
@@ -250,33 +336,130 @@ fn scan_regions(project: &Path) -> Result<Vec<RegionEntry>, String> {
 }
 
 fn read_region(path: &Path) -> RegionEntry {
-    let map = read_map(path);
-    RegionEntry { path: map.path, name: map.name, scale: map.scale, body: map.body }
+    let mut entry = RegionEntry {
+        path: path.to_path_buf(),
+        name: file_stem_of(path),
+        ..RegionEntry::default()
+    };
+    let Some((map, body)) = place_parts(path) else {
+        entry.body = place_raw_body(path);
+        return entry;
+    };
+    entry.scale = map_scalar(&map, "尺度");
+    entry.plot_role = map_scalar(&map, "剧情功能");
+    entry.people = map_list(&map, "人物");
+    entry.organizations = map_list(&map, "组织");
+    entry.contradictions = map_list(&map, "矛盾");
+    entry.units = map_list(&map, "单元");
+    entry.foreshadows = map_list(&map, "伏笔");
+    entry.eras = map_list(&map, "时代");
+    entry.local_mainline = map_scalar(&map, "当地主线");
+    entry.secret = map_scalar(&map, "秘密");
+    entry.expands_to = map_scalar(&map, "展开为");
+    entry.pending = is_pending(&map);
+    entry.body = body;
+    entry
 }
 
-pub fn save_region(project: &Path, draft: &RegionDraft) -> Result<RegionEntry, String> {
-    let path = save_place(project, REGION_DIR, &draft.name, draft.scale.as_deref(), &draft.body)?;
+fn apply_region_draft(frontmatter: &mut Mapping, draft: &RegionDraft) {
+    set_map_scalar(frontmatter, "尺度", draft.scale.as_deref());
+    set_map_scalar(frontmatter, "剧情功能", draft.plot_role.as_deref());
+    set_map_list(frontmatter, "人物", &draft.people);
+    set_map_list(frontmatter, "组织", &draft.organizations);
+    set_map_list(frontmatter, "矛盾", &draft.contradictions);
+    set_map_list(frontmatter, "单元", &draft.units);
+    set_map_list(frontmatter, "伏笔", &draft.foreshadows);
+    set_map_list(frontmatter, "时代", &draft.eras);
+    set_map_scalar(frontmatter, "当地主线", draft.local_mainline.as_deref());
+    set_map_scalar(frontmatter, "秘密", draft.secret.as_deref());
+    set_map_scalar(frontmatter, "展开为", draft.expands_to.as_deref());
+}
+
+pub fn save_region(
+    project: &Path,
+    draft: &RegionDraft,
+    prev_path: Option<&Path>,
+) -> Result<RegionEntry, String> {
+    let path = place_path(project, REGION_DIR, &draft.name, prev_path)?;
+    let base = prev_path.filter(|p| *p != path).unwrap_or(&path);
+    let mut frontmatter = frontmatter_mapping(base).unwrap_or_default();
+    apply_region_draft(&mut frontmatter, draft);
+    rename_prev(prev_path, &path, REGION_DIR)?;
+    write_frontmatter(&path, frontmatter, &draft.body)?;
     Ok(read_region(&path))
 }
 
-fn save_place(
+/// 档案文件的（frontmatter 底图, 正文）；无 frontmatter 或解析失败返回
+/// None，由调用方按「原文即正文」降级。
+fn place_parts(path: &Path) -> Option<(Mapping, String)> {
+    let raw = read_text(path).ok()?;
+    let raw = strip_bom(&raw);
+    let (yaml, body) = split_frontmatter(raw)?;
+    if yaml.trim().is_empty() {
+        return Some((Mapping::new(), body));
+    }
+    match serde_yaml::from_str::<Value>(&yaml) {
+        Ok(Value::Mapping(map)) => Some((map, body)),
+        _ => None,
+    }
+}
+
+fn place_raw_body(path: &Path) -> String {
+    read_text(path)
+        .map(|raw| strip_bom(&raw).to_string())
+        .unwrap_or_default()
+}
+
+fn place_path(
     project: &Path,
     dir_name: &str,
     raw_name: &str,
-    scale: Option<&str>,
-    body: &str,
+    prev_path: Option<&Path>,
 ) -> Result<PathBuf, String> {
     let name = sanitize_file_name(raw_name)?;
     let dir = project.join(project::CONCEPT_DIR).join(dir_name);
-    let path = dir.join(format!("{name}.md"));
-    if path.exists() {
-        return Err(format!("已存在同名{dir_name}「{name}」"));
-    }
     fs::create_dir_all(&dir).map_err(|e| format!("无法创建{dir_name}目录 {}：{e}", dir.display()))?;
-    let mut frontmatter = Mapping::new();
-    set_map_scalar(&mut frontmatter, "尺度", scale);
-    write_frontmatter(&path, frontmatter, body)?;
-    Ok(path)
+    Ok(unique_file_path(&dir, &format!("{name}.md"), prev_path))
+}
+
+fn rename_prev(prev_path: Option<&Path>, path: &Path, dir_name: &str) -> Result<(), String> {
+    if let Some(prev) = prev_path {
+        if prev != path {
+            fs::rename(prev, path)
+                .map_err(|e| format!("无法移动{dir_name}到 {}：{e}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// 删除一份地图/地域档案。结构表里的引用（包含、关系、转场）不自动
+/// 清理——引用失效照常显示缺省节点（spec 地图与地域 §三）。
+pub fn delete_place(path: &Path) -> Result<(), String> {
+    fs::remove_file(path).map_err(|e| format!("无法删除 {}：{e}", path.display()))
+}
+
+/// 地域归属唯一：设置/改换所属地图＝替换该地域的包含行；传 None 移出
+/// 任何地图。整表读-合-写，坏结构在读取端先行报错、绝不覆盖。
+pub fn set_region_containment(
+    project: &Path,
+    region: &str,
+    map_name: Option<&str>,
+) -> Result<MapStructure, String> {
+    let region = region.trim();
+    if region.is_empty() {
+        return Err("地域名不能为空".into());
+    }
+    let mut table = read_map_structure(project)?;
+    table.contains.retain(|row| row.region.trim() != region);
+    if let Some(map_name) = map_name.map(str::trim).filter(|s| !s.is_empty()) {
+        table.contains.push(MapContainment {
+            map: map_name.to_string(),
+            region: region.to_string(),
+            extra: Mapping::new(),
+        });
+    }
+    save_map_structure(project, &table)?;
+    read_map_structure(project)
 }
 
 pub fn map_structure_path(project: &Path) -> PathBuf {
@@ -655,9 +838,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        confirm_geo_upgrade, geo_upgrade_preview, map_workspace, read_map_structure, save_map,
-        save_map_structure, save_region, GeoUpgradeTarget, MapDraft, MapStructure,
-        MapContainment, MapTransition, RegionDraft, RegionRelation,
+        confirm_geo_upgrade, delete_place, geo_upgrade_preview, map_workspace, read_map_structure,
+        save_map, save_map_structure, save_region, set_region_containment, GeoUpgradeTarget,
+        MapDraft, MapStructure, MapContainment, MapTransition, RegionDraft, RegionRelation,
     };
     use crate::project::{check_project_arrangement, ArrangementItem};
 
@@ -692,12 +875,113 @@ mod tests {
     }
 
     #[test]
+    fn 地图档案_完整字段往返_未知键保留_改名移动_待打磨派生() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《山河》");
+        let created = save_map(
+            &project,
+            &MapDraft {
+                name: "大墟".into(),
+                scale: Some("世界".into()),
+                boundary: Some("四周环海，唯一陆桥通外界".into()),
+                eras: vec!["上古".into(), "今朝".into()],
+                role: Some("核心".into()),
+                stage_goal: Some("主角在大墟之外建立自己的力量".into()),
+                central_conflict: Some("大墟的真相与外部秩序冲突".into()),
+                core_secret: Some("大墟本身就是封印".into()),
+                local_mainline: Some("每次远行后回到大墟揭开一层秘密".into()),
+                entry_condition: Some("被逐出师门".into()),
+                exit_condition: Some("集齐三把钥匙".into()),
+                people: vec!["主角".into()],
+                organizations: vec!["巡山司".into()],
+                units: vec!["初入大墟".into()],
+                milestones: vec!["封印松动".into()],
+                body: "自由正文。".into(),
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(created.pending, false);
+
+        // 模拟 Obsidian 手补：背景图（未管理键）与待打磨布尔键。
+        fs::write(
+            &created.path,
+            "---\n尺度: 世界\n背景图: ../附件/大墟.webp\n待打磨: true\n---\n手补过的\n",
+        )
+        .unwrap();
+        let workspace = map_workspace(&project).unwrap();
+        let reloaded = workspace.maps.iter().find(|m| m.name == "大墟").unwrap();
+        assert_eq!(reloaded.pending, true, "待打磨布尔键应派生进读模型");
+
+        // 编辑（改名）：frontmatter 以现有文件为底，背景图与待打磨键存活。
+        let saved = save_map(
+            &project,
+            &MapDraft {
+                name: "大墟世界".into(),
+                scale: Some("世界".into()),
+                ..MapDraft::default()
+            },
+            Some(&created.path),
+        )
+        .unwrap();
+        assert_eq!(saved.name, "大墟世界");
+        assert!(!created.path.exists(), "改名＝文件移动，不留旧文件");
+        let text = fs::read_to_string(&saved.path).unwrap();
+        assert!(text.contains("背景图: ../附件/大墟.webp"), "未管理键必须保留：{text}");
+        assert_eq!(saved.pending, true, "待打磨是 frontmatter 键，编辑后照常存活");
+
+        // 删除档案：文件移除；结构引用不自动清理（spec §三）。
+        delete_place(&saved.path).unwrap();
+        assert!(!saved.path.exists());
+    }
+
+    #[test]
+    fn 地域档案_完整字段往返_含展开为与归属唯一() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《山河》");
+        save_map(&project, &MapDraft { name: "人间".into(), ..MapDraft::default() }, None).unwrap();
+        save_map(&project, &MapDraft { name: "仙界".into(), ..MapDraft::default() }, None).unwrap();
+        let region = save_region(
+            &project,
+            &RegionDraft {
+                name: "京城".into(),
+                scale: Some("城市".into()),
+                plot_role: Some("权力中心与身份危机的主舞台".into()),
+                people: vec!["主角".into(), "皇后".into()],
+                organizations: vec!["新朝".into(), "前朝暗线".into()],
+                contradictions: vec!["潜伏京城".into()],
+                units: vec!["初入京城".into()],
+                foreshadows: vec!["皇城地宫".into()],
+                eras: vec!["开国时代".into()],
+                local_mainline: Some("在新朝眼皮底下站稳脚跟".into()),
+                secret: Some("地宫里躺着前朝真龙".into()),
+                expands_to: Some("京城地图".into()),
+                body: "氛围与视觉印象。".into(),
+            },
+            None,
+        )
+        .unwrap();
+        let workspace = map_workspace(&project).unwrap();
+        let got = workspace.regions.iter().find(|r| r.name == "京城").unwrap();
+        assert_eq!(got, &region, "读模型与保存结果一致（没有第二份内容）");
+
+        // 归属唯一：先归人间再改仙界，包含表里只有一行。
+        let table = set_region_containment(&project, "京城", Some("人间")).unwrap();
+        assert_eq!(table.contains.len(), 1);
+        let table = set_region_containment(&project, "京城", Some("仙界")).unwrap();
+        assert_eq!(table.contains.len(), 1, "换地图＝替换包含行，不是叠加");
+        assert_eq!(table.contains[0].map, "仙界");
+        let table = set_region_containment(&project, "京城", None).unwrap();
+        assert!(table.contains.is_empty(), "None＝移出任何地图");
+    }
+
+    #[test]
     fn 地图地域与转场_各自落在对应实体与结构字段() {
         let root = tempdir().unwrap();
         let project = root.path().join("项目/《山河》");
-        save_map(&project, &MapDraft { name: "人间".into(), scale: None, body: String::new() }).unwrap();
-        save_map(&project, &MapDraft { name: "仙界".into(), scale: None, body: String::new() }).unwrap();
-        save_region(&project, &RegionDraft { name: "京城".into(), scale: None, body: String::new() }).unwrap();
+        save_map(&project, &MapDraft { name: "人间".into(), ..MapDraft::default() }, None).unwrap();
+        save_map(&project, &MapDraft { name: "仙界".into(), ..MapDraft::default() }, None).unwrap();
+        save_region(&project, &RegionDraft { name: "京城".into(), ..RegionDraft::default() }, None).unwrap();
 
         let table = MapStructure {
             contains: vec![MapContainment { map: "人间".into(), region: "京城".into(), extra: Mapping::new() }],
@@ -736,7 +1020,7 @@ mod tests {
         let project = root.path().join("项目/《山河》");
         fs::create_dir_all(&project).unwrap();
         fs::write(project.join("项目.yaml"), "地图:\n  - 旧江南\n").unwrap();
-        save_map(&project, &MapDraft { name: "新京城".into(), scale: None, body: String::new() }).unwrap();
+        save_map(&project, &MapDraft { name: "新京城".into(), ..MapDraft::default() }, None).unwrap();
 
         let check = check_project_arrangement(
             &project,
