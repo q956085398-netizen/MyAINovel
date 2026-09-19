@@ -596,6 +596,36 @@ fn is_han(c: char) -> bool {
     ('\u{3400}'..='\u{9fff}').contains(&c)
 }
 
+fn repetition_hits(chars: &[char]) -> Vec<Hit> {
+    let mut hits = Vec::new();
+    let mut i = 0;
+    while i + 1 < chars.len() {
+        let mut found = None;
+        for len in (1..=4).rev() {
+            if i + len * 2 <= chars.len()
+                && chars[i..i + len] == chars[i + len..i + len * 2]
+                && chars[i..i + len].iter().all(|c| is_han(*c))
+            {
+                found = Some(len);
+                break;
+            }
+        }
+        if let Some(len) = found {
+            hits.push(Hit {
+                start: i,
+                len: len * 2,
+                word: chars[i..i + len * 2].iter().collect(),
+                suggestion: Some(chars[i..i + len].iter().collect()),
+                kind: KIND_REPETITION,
+            });
+            i += len * 2;
+        } else {
+            i += 1;
+        }
+    }
+    hits
+}
+
 /// 新规格的四项确定性规则。调用方先把 Markdown 非正文片段替换为空格，
 /// 因而字符位置仍与原文一致。
 fn scan_active_line(
@@ -612,31 +642,9 @@ fn scan_active_line(
     let mut hits = Vec::new();
 
     if options.repetition {
-        let mut i = 0;
-        while i + 1 < chars.len() {
-            let mut found = None;
-            for len in (1..=4).rev() {
-                if i + len * 2 <= chars.len()
-                    && chars[i..i + len] == chars[i + len..i + len * 2]
-                    && chars[i..i + len].iter().all(|c| is_han(*c))
-                {
-                    found = Some(len);
-                    break;
-                }
-            }
-            if let Some(len) = found {
-                if claim(&mut taken, i, len * 2) {
-                    hits.push(Hit {
-                        start: i,
-                        len: len * 2,
-                        word: chars[i..i + len * 2].iter().collect(),
-                        suggestion: Some(chars[i..i + len].iter().collect()),
-                        kind: KIND_REPETITION,
-                    });
-                }
-                i += len * 2;
-            } else {
-                i += 1;
+        for hit in repetition_hits(&chars) {
+            if claim(&mut taken, hit.start, hit.len) {
+                hits.push(hit);
             }
         }
     }

@@ -1757,7 +1757,7 @@ export default function WritingPage({
           nonModal
           onClose={() => setProofOpen(false)}
           onJump={(issue: ProofIssue) => {
-            if (issue.fingerprint !== fingerprintRef.current) {
+            if (dirtyRef.current || issue.fingerprint !== fingerprintRef.current) {
               window.alert("正文在校对后已经变化，请重新校对本章后再定位。");
               return;
             }
