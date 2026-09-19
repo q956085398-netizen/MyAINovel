@@ -113,6 +113,91 @@ export function emptyProjectMeta(): ProjectMeta {
   return { title: null, chapterPrefix: null, plotLines: [], maps: [] };
 }
 
+// --- 地图、地域与转场（工单 #61）；实体档案与结构网分开保存 ---
+
+export type GeoUpgradeTarget = "地图" | "地域";
+
+export interface MapDraft {
+  name: string;
+  scale: string | null;
+  body: string;
+}
+
+export interface MapEntry extends MapDraft {
+  path: string;
+}
+
+export interface RegionDraft {
+  name: string;
+  scale: string | null;
+  body: string;
+}
+
+export interface RegionEntry extends RegionDraft {
+  path: string;
+}
+
+export interface MapWorkspace {
+  maps: MapEntry[];
+  regions: RegionEntry[];
+}
+
+export interface SpatialLegendItem {
+  name: string;
+  directed: boolean;
+  extra: Record<string, unknown>;
+}
+
+export interface MapRelation {
+  from: string;
+  to: string;
+  kind: string;
+  extra: Record<string, unknown>;
+}
+
+export interface RegionRelation {
+  from: string;
+  to: string;
+  /** 图例只提示不校验；手写类型照常保留。 */
+  kind: string;
+  extra: Record<string, unknown>;
+}
+
+export interface MapContainment {
+  map: string;
+  region: string;
+  extra: Record<string, unknown>;
+}
+
+export interface MapTransition {
+  from: string;
+  to: string;
+  reason: string | null;
+  advancePeople: string[];
+  clues: string[];
+  unresolved: string[];
+  returnCondition: string | null;
+  units: string[];
+  extra: Record<string, unknown>;
+}
+
+export interface MapStructure {
+  mapLegend: SpatialLegendItem[];
+  regionLegend: SpatialLegendItem[];
+  mapRelations: MapRelation[];
+  regionRelations: RegionRelation[];
+  contains: MapContainment[];
+  transitions: MapTransition[];
+  layout: Record<string, unknown>;
+}
+
+export interface GeoUpgradePreview {
+  sourcePath: string;
+  targetPath: string;
+  backupPath: string;
+  target: GeoUpgradeTarget;
+}
+
 /** 构思/大纲.md：自由纸面，首次保存可采用轻模板。 */
 export interface Outline {
   body: string;

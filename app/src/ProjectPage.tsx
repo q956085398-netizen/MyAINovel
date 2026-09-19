@@ -4,6 +4,7 @@ import type {
   AiCommandKind,
   AiSeed,
   ArrangementItem,
+  MapWorkspace,
   NoteEntry,
   NoteKind,
   ProjectEntry,
@@ -93,6 +94,7 @@ export default function ProjectPage({
   const [vocab, setVocab] = useState<Vocabulary | null>(null);
   const [units, setUnits] = useState<NoteEntry[]>([]);
   const [worldview, setWorldview] = useState<NoteEntry[]>([]);
+  const [mapWorkspace, setMapWorkspace] = useState<MapWorkspace>({ maps: [], regions: [] });
   const [arrangement, setArrangement] = useState<ArrangementItem[]>([]);
   const [arrangementError, setArrangementError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -130,6 +132,15 @@ export default function ProjectPage({
     }
   }, [project.dir]);
 
+  const loadMapWorkspace = useCallback(async () => {
+    try {
+      setMapWorkspace(await invoke<MapWorkspace>("read_map_workspace", { project: project.dir }));
+    } catch {
+      // 地图实体是新增的可选目录；损坏文件不应妨碍旧项目继续排布。
+      setMapWorkspace({ maps: [], regions: [] });
+    }
+  }, [project.dir]);
+
   const loadArrangement = useCallback(async () => {
     try {
       setArrangement(await invoke<ArrangementItem[]>("read_arrangement", { project: project.dir }));
@@ -155,10 +166,11 @@ export default function ProjectPage({
     void loadMeta();
     void loadUnits();
     void loadWorldview();
+    void loadMapWorkspace();
     void loadArrangement();
     void loadVocab();
     // 切页时重读跨页数据（单元/世界观/项目资料是排布页的输入）。
-  }, [loadMeta, loadUnits, loadWorldview, loadArrangement, loadVocab, tab, reloadKey]);
+  }, [loadMeta, loadUnits, loadWorldview, loadMapWorkspace, loadArrangement, loadVocab, tab, reloadKey]);
 
   /** 页内某处保存成功：只通知上层刷新项目列表计数，不重挂当前页
    *  （重挂会把排布/列表的滚动与刚存下的状态冲掉）。 */
@@ -217,6 +229,9 @@ export default function ProjectPage({
     ...worldview
       .filter((n) => n.category === "地理" && !meta.maps.includes(n.name))
       .map((n) => n.name),
+    ...mapWorkspace.maps
+      .map((map) => map.name)
+      .filter((name) => !meta.maps.includes(name) && !worldview.some((note) => note.category === "地理" && note.name === name)),
   ];
 
   return (

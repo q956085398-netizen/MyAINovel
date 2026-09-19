@@ -4,6 +4,7 @@ import type { NoteDraft, NoteEntry, NoteKind, Vocabulary } from "./types";
 import { emptyNoteDraft } from "./types";
 import { errMsg, oneLinePreview } from "./util";
 import NoteDialog from "./NoteDialog";
+import GeoUpgradeDialog from "./GeoUpgradeDialog";
 
 interface NoteListProps {
   project: string;
@@ -52,6 +53,7 @@ export default function NoteList({
     null,
   );
   const [promoting, setPromoting] = useState<string | null>(null);
+  const [upgrading, setUpgrading] = useState<NoteEntry | null>(null);
 
   const scan = useCallback(async () => {
     setLoading(true);
@@ -188,7 +190,7 @@ export default function NoteList({
                 {oneLinePreview(note.body, 120)}
               </p>
             )}
-            {(kind === "矛盾" || (kind === "人物" && onChat)) && (
+            {(kind === "矛盾" || (kind === "人物" && onChat) || (kind === "世界观" && note.category === "地理")) && (
               <div className="card-actions">
                 {kind === "人物" && onChat && (
                   <button
@@ -207,6 +209,15 @@ export default function NoteList({
                     onClick={() => void promote(note)}
                   >
                     {promoting === note.path ? "正在提…" : "提为单元"}
+                  </button>
+                )}
+                {kind === "世界观" && note.category === "地理" && (
+                  <button
+                    className="btn small"
+                    title="先查看将创建与备份的文件位置，再决定是否升级为地图或地域"
+                    onClick={() => setUpgrading(note)}
+                  >
+                    升级为地图／地域
                   </button>
                 )}
               </div>
@@ -230,6 +241,18 @@ export default function NoteList({
           }}
           onDeleted={() => {
             setEditing(null);
+            onChanged();
+            void scan();
+          }}
+        />
+      )}
+      {upgrading && (
+        <GeoUpgradeDialog
+          project={project}
+          source={upgrading}
+          onClose={() => setUpgrading(null)}
+          onUpgraded={() => {
+            setUpgrading(null);
             onChanged();
             void scan();
           }}

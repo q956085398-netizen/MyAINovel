@@ -971,7 +971,8 @@ pub struct MapCount {
 }
 
 /// 排布体检（派生视图，只提示不拦截）：升级:战斗比例、连续同节奏、
-/// 按名引用失效、未进排布的单元、地图分布。
+/// 按名引用失效、未进排布的单元、地图分布。地图定义兼容旧项目清单、
+/// 世界观「地理」词条与新版一等地图实体。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArrangementCheck {
@@ -1114,6 +1115,14 @@ pub fn check_project_arrangement(
     for note in scan_notes(project, NoteKind::Worldview).unwrap_or_default() {
         if note.category.as_deref() == Some("地理") && !map_names.contains(&note.name) {
             map_names.push(note.name);
+        }
+    }
+    for map in crate::map::map_workspace(project)
+        .map(|workspace| workspace.maps)
+        .unwrap_or_default()
+    {
+        if !map_names.contains(&map.name) {
+            map_names.push(map.name);
         }
     }
     Ok(check_arrangement(items, &unit_names, &line_names, &map_names))

@@ -8,6 +8,7 @@ mod export;
 mod foreshadow;
 mod inspiration;
 mod library;
+mod map;
 mod planning;
 mod project;
 mod proofread;
@@ -27,6 +28,10 @@ use export::{ChapterRange, ExportReport, ExportTemplate};
 use foreshadow::{Foreshadow, ForeshadowView};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
+use map::{
+    GeoUpgradePreview, GeoUpgradeTarget, MapDraft, MapEntry, MapStructure, MapWorkspace,
+    RegionDraft, RegionEntry,
+};
 use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, Outline};
 use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
@@ -249,6 +254,52 @@ fn read_project_meta(project: String) -> Result<ProjectMeta, String> {
 #[tauri::command]
 fn save_project_meta(project: String, meta: ProjectMeta) -> Result<(), String> {
     project::write_project_meta(Path::new(&project), &meta)
+}
+
+// --- 地图、地域与转场（工单 #61）：空间实体与兼容升级底座 ---
+
+#[tauri::command]
+fn read_map_workspace(project: String) -> Result<MapWorkspace, String> {
+    map::map_workspace(Path::new(&project))
+}
+
+#[tauri::command]
+fn save_map(project: String, draft: MapDraft) -> Result<MapEntry, String> {
+    map::save_map(Path::new(&project), &draft)
+}
+
+#[tauri::command]
+fn save_region(project: String, draft: RegionDraft) -> Result<RegionEntry, String> {
+    map::save_region(Path::new(&project), &draft)
+}
+
+#[tauri::command]
+fn read_map_structure(project: String) -> Result<MapStructure, String> {
+    map::read_map_structure(Path::new(&project))
+}
+
+#[tauri::command]
+fn save_map_structure(project: String, table: MapStructure) -> Result<(), String> {
+    map::save_map_structure(Path::new(&project), &table)
+}
+
+/// 迁移预览是只读的：UI 必须先展示目标/备份位置，用户确认后再调执行接口。
+#[tauri::command]
+fn preview_geo_upgrade(
+    project: String,
+    source: String,
+    target: GeoUpgradeTarget,
+) -> Result<GeoUpgradePreview, String> {
+    map::geo_upgrade_preview(Path::new(&project), Path::new(&source), target)
+}
+
+#[tauri::command]
+fn confirm_geo_upgrade(
+    project: String,
+    source: String,
+    target: GeoUpgradeTarget,
+) -> Result<MapWorkspace, String> {
+    map::confirm_geo_upgrade(Path::new(&project), Path::new(&source), target)
 }
 
 /// 大纲纸面（工单 #41）：自由 Markdown，缺失文件即空状态。
@@ -814,6 +865,13 @@ pub fn run() {
             create_project,
             read_project_meta,
             save_project_meta,
+            read_map_workspace,
+            save_map,
+            save_region,
+            read_map_structure,
+            save_map_structure,
+            preview_geo_upgrade,
+            confirm_geo_upgrade,
             read_outline,
             save_outline,
             read_mainlines,
