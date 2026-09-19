@@ -1,29 +1,30 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { MapStructure, MapTransition } from "./types";
+import type { MapTransition } from "./types";
 import { errMsg, splitList } from "./util";
 
 interface TransitionDialogProps {
   project: string;
   /** 正在编辑的转场；null 为新建。 */
   initial: MapTransition | null;
-  /** 编辑时在结构表「转场」里的下标；新建为 null。 */
+  /** 编辑时在「转场」列表里的下标；新建为 null。 */
   index: number | null;
   mapNames: string[];
-  /** 当前结构表整份带回：保存＝只改转场数组的读-合-写。 */
-  structure: MapStructure;
+  /** 当前转场数组：新建＝追加，编辑＝按下标替换。 */
+  transitions: MapTransition[];
   onClose: () => void;
   onSaved: () => void;
 }
 
 /** 跨地图转场编辑框（工单 #65 / T15）：起止两张地图之间的叙事承接；
- *  地域之间的相邻/通道是「地域连接」，不在这里（spec 地图与地域 §一）。 */
+ *  地域之间的相邻/通道是「地域连接」，不在这里（spec 地图与地域 §一）。
+ *  保存走窄写命令：只替换结构表的「转场」节，其余从盘上现读保留。 */
 export default function TransitionDialog({
   project,
   initial,
   index,
   mapNames,
-  structure,
+  transitions,
   onClose,
   onSaved,
 }: TransitionDialogProps) {
@@ -58,18 +59,15 @@ export default function TransitionDialog({
       units: splitList(unitsText),
       extra: initial?.extra ?? {},
     };
-    const transitions = [...structure.transitions];
+    const transitions_next = [...transitions];
     if (index === null) {
-      transitions.push(transition);
+      transitions_next.push(transition);
     } else {
-      transitions[index] = transition;
+      transitions_next[index] = transition;
     }
     setBusy(true);
     try {
-      await invoke("save_map_structure", {
-        project,
-        table: { ...structure, transitions },
-      });
+      await invoke("save_map_transitions", { project, transitions: transitions_next });
       onSaved();
     } catch (e) {
       window.alert(`转场保存失败：${errMsg(e)}`);
@@ -81,13 +79,10 @@ export default function TransitionDialog({
   async function remove() {
     if (index === null || busy) return;
     if (!window.confirm(`确定删除「${from} → ${to}」这条转场？`)) return;
-    const transitions = structure.transitions.filter((_, i) => i !== index);
+    const next = transitions.filter((_, i) => i !== index);
     setBusy(true);
     try {
-      await invoke("save_map_structure", {
-        project,
-        table: { ...structure, transitions },
-      });
+      await invoke("save_map_transitions", { project, transitions: next });
       onSaved();
     } catch (e) {
       window.alert(`删除失败：${errMsg(e)}`);
@@ -175,7 +170,7 @@ export default function TransitionDialog({
             placeholder="转场前后涉及的单元"
           />
         </label>
-        <p className="hint">保存写入 构思/地图结构.yaml 的「转场」表（整表读-合-写，未知字段保留）。</p>
+        <p className="hint">保存写入 构思/地图结构.yaml 的「转场」表（只改这一节，其余结构与未知字段保留）。</p>
         <div className="dialog-actions">
           {initial && (
             <button className="btn danger" disabled={busy} onClick={() => void remove()}>

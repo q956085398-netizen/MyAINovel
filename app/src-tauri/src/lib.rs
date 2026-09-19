@@ -30,8 +30,8 @@ use foreshadow::{Foreshadow, ForeshadowView};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
 use library::BookEntry;
 use map::{
-    GeoUpgradePreview, GeoUpgradeTarget, MapDraft, MapEntry, MapStructure, MapWorkspace,
-    RegionDraft, RegionEntry,
+    GeoUpgradePreview, GeoUpgradeTarget, MapDraft, MapEntry, MapStructure, MapTransition,
+    MapWorkspace, RegionDraft, RegionEntry,
 };
 use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, Outline};
 use pending::PendingLine;
@@ -296,14 +296,27 @@ fn delete_map_place(path: String) -> Result<(), String> {
     map::delete_place(Path::new(&path))
 }
 
-/// 地域归属唯一（工单 #65）：设置/改换所属地图，整表读-合-写。
+/// 地域归属唯一（工单 #65）：设置/改换所属地图、改名时对账包含行，
+/// 整表读-合-写。
 #[tauri::command]
 fn set_region_containment(
     project: String,
+    prev_region: Option<String>,
     region: String,
     map_name: Option<String>,
-) -> Result<MapStructure, String> {
-    map::set_region_containment(Path::new(&project), &region, map_name.as_deref())
+) -> Result<(), String> {
+    map::set_region_containment(
+        Path::new(&project),
+        prev_region.as_deref(),
+        &region,
+        map_name.as_deref(),
+    )
+}
+
+/// 转场窄写（工单 #65）：只替换结构表的「转场」节，其余从盘上现读保留。
+#[tauri::command]
+fn save_map_transitions(project: String, transitions: Vec<MapTransition>) -> Result<(), String> {
+    map::save_map_transitions(Path::new(&project), &transitions)
 }
 
 #[tauri::command]
@@ -922,6 +935,7 @@ pub fn run() {
             save_region,
             delete_map_place,
             set_region_containment,
+            save_map_transitions,
             read_map_structure,
             save_map_structure,
             preview_geo_upgrade,

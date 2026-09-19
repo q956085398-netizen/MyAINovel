@@ -438,19 +438,25 @@ pub fn delete_place(path: &Path) -> Result<(), String> {
     fs::remove_file(path).map_err(|e| format!("无法删除 {}：{e}", path.display()))
 }
 
-/// 地域归属唯一：设置/改换所属地图＝替换该地域的包含行；传 None 移出
-/// 任何地图。整表读-合-写，坏结构在读取端先行报错、绝不覆盖。
+/// 地域归属唯一（工单 #65）：设置/改换/跟随改名对账包含行。`prev_region`
+/// 是改名前的旧名（与新名相同即普通编辑）；`map_name` 为 None＝移出任何
+/// 地图。整表读-合-写，坏结构在读取端先行报错、绝不覆盖。
 pub fn set_region_containment(
     project: &Path,
+    prev_region: Option<&str>,
     region: &str,
     map_name: Option<&str>,
-) -> Result<MapStructure, String> {
+) -> Result<(), String> {
     let region = region.trim();
     if region.is_empty() {
         return Err("地域名不能为空".into());
     }
     let mut table = read_map_structure(project)?;
-    table.contains.retain(|row| row.region.trim() != region);
+    let stale = prev_region.map(str::trim).filter(|s| !s.is_empty() && *s != region);
+    table.contains.retain(|row| {
+        let name = row.region.trim();
+        name != region && Some(name) != stale
+    });
     if let Some(map_name) = map_name.map(str::trim).filter(|s| !s.is_empty()) {
         table.contains.push(MapContainment {
             map: map_name.to_string(),
@@ -458,8 +464,16 @@ pub fn set_region_containment(
             extra: Mapping::new(),
         });
     }
-    save_map_structure(project, &table)?;
-    read_map_structure(project)
+    save_map_structure(project, &table)
+}
+
+/// 只改「转场」一节的窄写（工单 #65）：整表从盘上现读、仅替换转场数组、
+/// 走同一套校验与读-合-写。页签快照整表回写会吞掉打开期间的外部改动，
+/// 这里把覆盖面收窄到这一节。
+pub fn save_map_transitions(project: &Path, transitions: &[MapTransition]) -> Result<(), String> {
+    let mut table = read_map_structure(project)?;
+    table.transitions = transitions.to_vec();
+    save_map_structure(project, &table)
 }
 
 pub fn map_structure_path(project: &Path) -> PathBuf {
@@ -839,8 +853,9 @@ mod tests {
 
     use super::{
         confirm_geo_upgrade, delete_place, geo_upgrade_preview, map_workspace, read_map_structure,
-        save_map, save_map_structure, save_region, set_region_containment, GeoUpgradeTarget,
-        MapDraft, MapStructure, MapContainment, MapTransition, RegionDraft, RegionRelation,
+        save_map, save_map_structure, save_map_transitions, save_region, set_region_containment,
+        GeoUpgradeTarget, MapDraft, MapStructure, MapContainment, MapTransition, RegionDraft,
+        RegionRelation,
     };
     use crate::project::{check_project_arrangement, ArrangementItem};
 
@@ -965,14 +980,55 @@ mod tests {
         let got = workspace.regions.iter().find(|r| r.name == "京城").unwrap();
         assert_eq!(got, &region, "读模型与保存结果一致（没有第二份内容）");
 
-        // 归属唯一：先归人间再改仙界，包含表里只有一行。
-        let table = set_region_containment(&project, "京城", Some("人间")).unwrap();
+        // 归属唯一：先归人间再改仙界，包含表里只有一行；改名时旧名行跟着对账。
+        set_region_containment(&project, None, "京城", Some("人间")).unwrap();
+        let table = read_map_structure(&project).unwrap();
         assert_eq!(table.contains.len(), 1);
-        let table = set_region_containment(&project, "京城", Some("仙界")).unwrap();
+        set_region_containment(&project, Some("京城"), "京城", Some("仙界")).unwrap();
+        let table = read_map_structure(&project).unwrap();
         assert_eq!(table.contains.len(), 1, "换地图＝替换包含行，不是叠加");
         assert_eq!(table.contains[0].map, "仙界");
-        let table = set_region_containment(&project, "京城", None).unwrap();
+        set_region_containment(&project, Some("京城"), "皇城", Some("仙界")).unwrap();
+        let table = read_map_structure(&project).unwrap();
+        assert_eq!(table.contains.len(), 1, "改名对账：旧名行替换成新名，不留两行");
+        assert_eq!(table.contains[0].region, "皇城");
+        set_region_containment(&project, Some("皇城"), "皇城", None).unwrap();
+        let table = read_map_structure(&project).unwrap();
         assert!(table.contains.is_empty(), "None＝移出任何地图");
+    }
+
+    #[test]
+    fn 转场窄写_只动转场节_外部改动的包含行不丢() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《山河》");
+        let seeded = MapStructure {
+            contains: vec![MapContainment { map: "人间".into(), region: "京城".into(), extra: Mapping::new() }],
+            ..MapStructure::default()
+        };
+        save_map_structure(&project, &seeded).unwrap();
+
+        // 保存端拿的是旧快照时也只覆盖转场节：现读盘上的包含行原样保留。
+        save_map_transitions(
+            &project,
+            &[MapTransition {
+                from: "人间".into(),
+                to: "仙界".into(),
+                reason: Some("寻找师父".into()),
+                ..MapTransition::default()
+            }],
+        )
+        .unwrap();
+        let table = read_map_structure(&project).unwrap();
+        assert_eq!(table.contains, seeded.contains, "窄写不得吞掉外部改动");
+        assert_eq!(table.transitions.len(), 1);
+        assert_eq!(table.transitions[0].reason.as_deref(), Some("寻找师父"));
+
+        // 校验照常：起止同图仍拒绝落盘。
+        assert!(save_map_transitions(
+            &project,
+            &[MapTransition { from: "人间".into(), to: "人间".into(), ..MapTransition::default() }]
+        )
+        .is_err());
     }
 
     #[test]

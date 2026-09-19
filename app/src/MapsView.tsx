@@ -3,12 +3,14 @@ import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   MapDraft,
+  MapEntry,
   MapStructure,
   MapTransition,
   MapWorkspace,
   NoteDraft,
   NoteEntry,
   RegionDraft,
+  RegionEntry,
 } from "./types";
 import { emptyMapDraft, emptyNoteDraft, emptyRegionDraft } from "./types";
 import { errMsg } from "./util";
@@ -59,6 +61,39 @@ function listText(values: string[]): string | null {
   return values.length > 0 ? values.join("、") : null;
 }
 
+/** 地图卡的完整字段行（紧凑卡与待打磨便笺同一份，spec §2.3 完整内容）。 */
+function mapFieldRows(map: MapEntry | MapDraft): [string, string | null][] {
+  return [
+    ["作用", map.role ?? null],
+    ["边界", map.boundary ?? null],
+    ["时代", listText(map.eras)],
+    ["阶段目标", map.stageGoal ?? null],
+    ["中心矛盾", map.centralConflict ?? null],
+    ["核心秘密", map.coreSecret ?? null],
+    ["当地主线", map.localMainline ?? null],
+    ["进入条件", map.entryCondition ?? null],
+    ["离开条件", map.exitCondition ?? null],
+    ["人物", listText(map.people)],
+    ["组织", listText(map.organizations)],
+    ["单元", listText(map.units)],
+    ["主线里程碑", listText(map.milestones)],
+  ];
+}
+
+function regionFieldRows(region: RegionEntry | RegionDraft): [string, string | null][] {
+  return [
+    ["剧情功能", region.plotRole ?? null],
+    ["当地主线", region.localMainline ?? null],
+    ["秘密", region.secret ?? null],
+    ["人物", listText(region.people)],
+    ["组织", listText(region.organizations)],
+    ["矛盾", listText(region.contradictions)],
+    ["单元", listText(region.units)],
+    ["伏笔", listText(region.foreshadows)],
+    ["时代", listText(region.eras)],
+  ];
+}
+
 /** 空页引导（工单 #65）：简短、可关闭；关闭记在本地，不再打扰。 */
 function DismissableIntro({ id, children }: { id: string; children: ReactNode }) {
   const storageKey = `gongbi.maps.intro.${id}`;
@@ -104,6 +139,8 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
   const [regionEditing, setRegionEditing] = useState<{
     draft: RegionDraft;
     prevPath: string | null;
+    /** 改名前的旧名：包含行对账依据。 */
+    prevName: string | null;
     ownerMap: string | null;
   } | null>(null);
   const [transitionEditing, setTransitionEditing] = useState<{
@@ -120,28 +157,29 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
 
   const scan = useCallback(async () => {
     setLoading(true);
-    try {
-      setWorkspace(await invoke<MapWorkspace>("read_map_workspace", { project }));
-    } catch {
-      // 档案目录是可选的；单个损坏文件不拖垮整页（后端按原文降级）。
-      setWorkspace({ maps: [], regions: [] });
-    }
-    try {
-      setStructure(await invoke<MapStructure>("read_map_structure", { project }));
+    // 档案、结构与世界观三份互不依赖，并行读；各自失败各自降级，
+    // 单份坏了不拖垮整页（后端对损坏档案按原文降级）。
+    const [nextWorkspace, nextStructure, nextWorldview] = await Promise.all([
+      invoke<MapWorkspace>("read_map_workspace", { project }).catch(() => ({
+        maps: [],
+        regions: [],
+      }) as MapWorkspace),
+      invoke<MapStructure>("read_map_structure", { project }).catch((e) => {
+        setStructure(null);
+        setStructureError(
+          `地图结构.yaml 解析失败：${errMsg(e)}。应用不覆盖读不懂的文件，请先在 Obsidian 里修好再回来编辑。`,
+        );
+        return null;
+      }),
+      invoke<NoteEntry[]>("scan_notes", { project, kind: "世界观" }).catch(() => [] as NoteEntry[]),
+    ]);
+    setWorkspace(nextWorkspace);
+    if (nextStructure) {
+      setStructure(nextStructure);
       setStructureError(null);
-    } catch (e) {
-      setStructure(null);
-      setStructureError(
-        `地图结构.yaml 解析失败：${errMsg(e)}。应用不覆盖读不懂的文件，请先在 Obsidian 里修好再回来编辑。`,
-      );
     }
-    try {
-      setWorldview(await invoke<NoteEntry[]>("scan_notes", { project, kind: "世界观" }));
-    } catch {
-      setWorldview([]);
-    } finally {
-      setLoading(false);
-    }
+    setWorldview(nextWorldview);
+    setLoading(false);
   }, [project]);
 
   useEffect(() => {
@@ -228,7 +266,12 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
             <button
               className="btn primary"
               onClick={() =>
-                setRegionEditing({ draft: emptyRegionDraft(), prevPath: null, ownerMap: null })
+                setRegionEditing({
+                  draft: emptyRegionDraft(),
+                  prevPath: null,
+                  prevName: null,
+                  ownerMap: null,
+                })
               }
             >
               新建地域
@@ -237,8 +280,14 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
           {subtab === "转场" && (
             <button
               className="btn primary"
-              disabled={mapNames.length < 2}
-              title={mapNames.length < 2 ? "转场需要至少两张地图，先去「全貌」建图。" : undefined}
+              disabled={mapNames.length < 2 || !structure || !!structureError}
+              title={
+                mapNames.length < 2
+                  ? "转场需要至少两张地图，先去「全貌」建图。"
+                  : !structure || structureError
+                    ? "地图结构.yaml 目前读不懂，先修好再编辑转场。"
+                    : undefined
+              }
               onClick={() => setTransitionEditing({ initial: null, index: null })}
             >
               新建转场
@@ -306,12 +355,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                       </button>
                       {map.scale && <span className="card-cat">{map.scale}</span>}
                     </div>
-                    {fieldLines([
-                      ["阶段目标", map.stageGoal],
-                      ["中心矛盾", map.centralConflict],
-                      ["核心秘密", map.coreSecret],
-                      ["当地主线", map.localMainline],
-                    ])}
+                    {fieldLines(mapFieldRows(map))}
                     {map.body && <div className="card-body">{map.body}</div>}
                     <div className="card-actions">
                       <button
@@ -349,12 +393,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                   key={map.path}
                   identity={map.path}
                   title={map.name}
-                  badges={
-                    <>
-                      {map.scale && <span className="card-cat">{map.scale}</span>}
-                      {map.eras.length > 0 && <span className="card-cat">{map.eras.join("·")}</span>}
-                    </>
-                  }
+                  badges={map.scale ? <span className="card-cat">{map.scale}</span> : undefined}
                   expanded={!collapsedCards.has(map.path)}
                   onEdit={() => setMapEditing({ draft: map, prevPath: map.path })}
                   onToggleExpanded={() => toggleCollapsed(map.path)}
@@ -369,20 +408,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                     </button>
                   }
                 >
-                  {fieldLines([
-                    ["作用", map.role],
-                    ["边界", map.boundary],
-                    ["阶段目标", map.stageGoal],
-                    ["中心矛盾", map.centralConflict],
-                    ["核心秘密", map.coreSecret],
-                    ["当地主线", map.localMainline],
-                    ["进入条件", map.entryCondition],
-                    ["离开条件", map.exitCondition],
-                    ["人物", listText(map.people)],
-                    ["组织", listText(map.organizations)],
-                    ["单元", listText(map.units)],
-                    ["主线里程碑", listText(map.milestones)],
-                  ])}
+                  {fieldLines(mapFieldRows(map))}
                   {map.body && <div className="card-body">{map.body}</div>}
                 </ContentSurface>
               ))}
@@ -409,6 +435,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                           setRegionEditing({
                             draft: region,
                             prevPath: region.path,
+                            prevName: region.name,
                             ownerMap: regionOwner.get(region.name) ?? null,
                           })
                         }
@@ -417,11 +444,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                       </button>
                       {region.scale && <span className="card-cat">{region.scale}</span>}
                     </div>
-                    {fieldLines([
-                      ["剧情功能", region.plotRole],
-                      ["当地主线", region.localMainline],
-                      ["秘密", region.secret],
-                    ])}
+                    {fieldLines(regionFieldRows(region))}
                     {region.body && <div className="card-body">{region.body}</div>}
                     <div className="card-actions">
                       <button
@@ -438,6 +461,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                           setRegionEditing({
                             draft: region,
                             prevPath: region.path,
+                            prevName: region.name,
                             ownerMap: regionOwner.get(region.name) ?? null,
                           })
                         }
@@ -486,6 +510,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                       setRegionEditing({
                         draft: region,
                         prevPath: region.path,
+                        prevName: region.name,
                         ownerMap: owner ?? null,
                       })
                     }
@@ -502,16 +527,8 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                     }
                   >
                     {fieldLines([
-                      ["剧情功能", region.plotRole],
-                      ["当地主线", region.localMainline],
-                      ["秘密", region.secret],
+                      ...regionFieldRows(region),
                       ["展开为", region.expandsTo ? mapRef(region.expandsTo) : null],
-                      ["人物", listText(region.people)],
-                      ["组织", listText(region.organizations)],
-                      ["矛盾", listText(region.contradictions)],
-                      ["单元", listText(region.units)],
-                      ["伏笔", listText(region.foreshadows)],
-                      ["时代", listText(region.eras)],
                     ])}
                     {connections.length > 0 && (
                       <p className="field-line">
@@ -649,6 +666,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
           project={project}
           initial={regionEditing.draft}
           prevPath={regionEditing.prevPath}
+          prevName={regionEditing.prevName}
           ownerMap={regionEditing.ownerMap}
           mapNames={mapNames}
           onClose={() => setRegionEditing(null)}
@@ -668,7 +686,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
           initial={transitionEditing.initial}
           index={transitionEditing.index}
           mapNames={mapNames}
-          structure={structure}
+          transitions={structure.transitions}
           onClose={() => setTransitionEditing(null)}
           onSaved={() => {
             setTransitionEditing(null);

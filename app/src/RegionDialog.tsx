@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { MapStructure, RegionDraft, RegionEntry } from "./types";
+import type { RegionDraft, RegionEntry } from "./types";
 import { PLACE_SCALES } from "./types";
 import { errMsg, splitList } from "./util";
 import { dirName } from "./editorRender";
@@ -12,21 +12,24 @@ interface RegionDialogProps {
   initial: RegionDraft;
   /** 编辑既有地域时的文件位置；null 为新建。 */
   prevPath: string | null;
+  /** 改名前的旧名（新建＝null）：包含行的对账依据。 */
+  prevName: string | null;
   /** 当前所属地图名（结构表「包含」行派生）；null＝尚未归入任何地图。 */
   ownerMap: string | null;
   /** 现有地图名：归属与「展开为」的选择项。 */
   mapNames: string[];
   onClose: () => void;
-  onSaved: (entry: RegionEntry, structure: MapStructure | null) => void;
+  onSaved: (entry: RegionEntry) => void;
   onDeleted: (path: string) => void;
 }
 
 /** 地域档案编辑框（工单 #65 / T15）：地图内部的局部区域。档案管地方
- *  本身；归属（包含）单独落在结构表，保存时一并对账。 */
+ *  本身；归属（包含）单独落在结构表，改名或换图时一并对账。 */
 export default function RegionDialog({
   project,
   initial,
   prevPath,
+  prevName,
   ownerMap,
   mapNames,
   onClose,
@@ -39,7 +42,10 @@ export default function RegionDialog({
   const [plotRole, setPlotRole] = useState(initial.plotRole ?? "");
   const [localMainline, setLocalMainline] = useState(initial.localMainline ?? "");
   const [secret, setSecret] = useState(initial.secret ?? "");
-  const [expandsTo, setExpandsTo] = useState(initial.expandsTo ?? "");
+  // 手补数据可能把「展开为」指向自己的所属地图：按不冲突的口径呈现。
+  const [expandsTo, setExpandsTo] = useState(
+    initial.expandsTo && initial.expandsTo !== ownerMap ? initial.expandsTo : "",
+  );
   const [peopleText, setPeopleText] = useState(initial.people.join("、"));
   const [orgsText, setOrgsText] = useState(initial.organizations.join("、"));
   const [contrasText, setContrasText] = useState(initial.contradictions.join("、"));
@@ -48,6 +54,11 @@ export default function RegionDialog({
   const [erasText, setErasText] = useState(initial.eras.join("、"));
   const [body, setBody] = useState(initial.body);
   const [busy, setBusy] = useState(false);
+
+  function changeOwner(next: string) {
+    setOwner(next);
+    if (next === expandsTo) setExpandsTo("");
+  }
 
   async function save() {
     if (busy) return;
@@ -73,16 +84,23 @@ export default function RegionDialog({
     setBusy(true);
     try {
       const entry = await invoke<RegionEntry>("save_region", { project, draft, prevPath });
-      // 档案与归属分开保存：档案先落盘；归属变了再整表对账结构文件。
-      let structure: MapStructure | null = null;
-      if (owner !== (ownerMap ?? "")) {
-        structure = await invoke<MapStructure>("set_region_containment", {
-          project,
-          region: entry.name,
-          mapName: owner || null,
-        });
+      // 档案与归属分开保存：档案先落盘；改名或换图时对账结构表的包含行。
+      if (draft.name !== (prevName ?? "") || owner !== (ownerMap ?? "")) {
+        try {
+          await invoke("set_region_containment", {
+            project,
+            prevRegion: prevName,
+            region: entry.name,
+            mapName: owner || null,
+          });
+        } catch (e) {
+          window.alert(
+            `档案已保存，但所属地图更新失败：${errMsg(e)}\n结构表读取或校验出了问题，请先处理再重试保存。`,
+          );
+          return;
+        }
       }
-      onSaved(entry, structure);
+      onSaved(entry);
     } catch (e) {
       window.alert(`地域保存失败：${errMsg(e)}`);
     } finally {
@@ -139,7 +157,7 @@ export default function RegionDialog({
           </label>
           <label>
             所属地图（包含关系；一个地域只归一张地图）
-            <select value={owner} onChange={(e) => setOwner(e.target.value)}>
+            <select value={owner} onChange={(e) => changeOwner(e.target.value)}>
               <option value="">（不属于任何地图）</option>
               {mapNames.map((m) => (
                 <option key={m} value={m}>
