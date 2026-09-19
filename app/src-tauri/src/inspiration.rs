@@ -146,6 +146,8 @@ pub struct InspirationCard {
     pub body: String,
     /// Unix 秒，前端按「最近在前」排；取不到为 0。
     pub mtime: u64,
+    /// 待打磨中（工单 #64）：frontmatter 的 `待打磨: true`；随卡片文件保存。
+    pub pending: bool,
 }
 
 /// 旧「灵感.md」拆出的一条灵感：预览时可改类别，确认后按卡落盘。
@@ -227,6 +229,7 @@ pub fn read_card(path: &Path) -> InspirationCard {
         core: None,
         body: String::new(),
         mtime: mtime_of(path),
+        pending: false,
     };
 
     let Ok(raw) = read_text(path) else {
@@ -244,6 +247,7 @@ pub fn read_card(path: &Path) -> InspirationCard {
                         card.source = map_scalar(&map, "来源");
                         card.links = map_list(&map, "关联");
                         card.core = map_scalar(&map, "一句话核心");
+                        card.pending = crate::book_file::is_pending(&map);
                         card.body = body;
                     }
                     _ => {
@@ -914,5 +918,119 @@ mod tests {
         assert_eq!(cards.len(), 3);
         let 导入卡 = cards.iter().find(|c| c.path == paths[1]).unwrap();
         assert_eq!(导入卡.source.as_deref(), Some("导入自 灵感.md"));
+    }
+
+    // --- 待打磨（工单 #64 / T03）：状态随卡片文件保存，不挪文件不建副本 ---
+
+    #[test]
+    fn 待打磨_进入退出_键落盘_未知键与正文不动_类别路径不动() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let card = save_card(&root, &draft(), None).unwrap();
+        // 模拟用户在 Obsidian 里手补的键。
+        let text = fs::read_to_string(&card.path).unwrap();
+        write(
+            &card.path,
+            &text.replacen("\n---\n", "\n自定义键: 保留我\n---\n", 1),
+        );
+        let before = crate::book_file::count_files_recursive(&root);
+        let mtime = fs::metadata(&card.path).unwrap().modified().unwrap();
+
+        // 进入：文件里多一个「待打磨: true」，其余原样。
+        crate::book_file::set_pending(&card.path, true).unwrap();
+        let text = fs::read_to_string(&card.path).unwrap();
+        assert!(text.contains("待打磨: true"), "{text}");
+        assert!(text.contains("自定义键: 保留我"), "{text}");
+        assert!(text.ends_with("一句话展开的正文，可以是多行。"), "{text}");
+        let scanned = scan_inspirations(&root).unwrap();
+        assert_eq!(scanned.len(), 1);
+        assert!(scanned[0].pending);
+        assert_eq!(scanned[0].category, CardCategory::Story, "类别（目录）不动");
+        assert_eq!(scanned[0].path, card.path, "路径不动，排序位置自然不动");
+
+        // 退出：键移除，未知键与正文仍在；没有产生第二份文件；便笺区清空。
+        crate::book_file::set_pending(&card.path, false).unwrap();
+        let text = fs::read_to_string(&card.path).unwrap();
+        assert!(!text.contains("待打磨"), "{text}");
+        assert!(text.contains("自定义键: 保留我"), "{text}");
+        assert!(text.contains("一句话展开的正文"), "{text}");
+        let scanned = scan_inspirations(&root).unwrap();
+        assert!(!scanned[0].pending);
+        assert!(
+            scanned.iter().filter(|c| c.pending).count() == 0,
+            "读模型里待打磨区为空（前端整个区域不渲染）"
+        );
+        assert_eq!(crate::book_file::count_files_recursive(&root), before, "进出待打磨不建副本或便笺库");
+        // 状态操作不顶「最近在前」的排序：mtime 复原，卡片回原位置。
+        let after = fs::metadata(&card.path).unwrap().modified().unwrap();
+        assert_eq!(after, mtime, "切换待打磨不改修改时间（排序键不动）");
+    }
+
+    #[test]
+    fn 待打磨_便笺中编辑_保存合并保留状态_权威文件同一内容() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        let card = save_card(&root, &draft(), None).unwrap();
+        crate::book_file::set_pending(&card.path, true).unwrap();
+
+        // 便笺里的编辑走正常保存路径：frontmatter 以现有文件为底合并，
+        // 「待打磨」不在草稿字段里，也不该被抹掉。
+        let mut d = draft();
+        d.body = "在便笺里改过的正文".to_string();
+        let saved = save_card(&root, &d, Some(&card.path)).unwrap();
+
+        assert_eq!(saved.path, card.path, "编辑不挪文件");
+        assert!(saved.pending, "保存合并后仍是待打磨");
+        assert_eq!(saved.body, "在便笺里改过的正文");
+        assert_eq!(scan_inspirations(&root).unwrap()[0].body, "在便笺里改过的正文");
+        assert!(fs::read_to_string(&card.path).unwrap().contains("待打磨: true"));
+
+        // 改名/换类别的编辑同样带状态走（底图取旧位置）。
+        d.title = "换个名字".to_string();
+        d.category = CardCategory::GoldenFinger;
+        let moved = save_card(&root, &d, Some(&card.path)).unwrap();
+        assert!(moved.pending, "改名换类别也保留待打磨");
+        assert!(moved.path.ends_with("灵感库/金手指卡/换个名字.md"));
+    }
+
+    #[test]
+    fn 待打磨_旧内容与手写false_按普通内容() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        // 旧内容：没有该键。
+        write(&root.join("灵感库/故事卡/老卡.md"), "---\n标签: [掉马甲]\n---\n\n旧正文");
+        // 手写 false：不算待打磨，键值原样保留。
+        write(&root.join("灵感库/故事卡/手写卡.md"), "---\n待打磨: false\n---\n\n手写正文");
+
+        let cards = scan_inspirations(&root).unwrap();
+        assert!(cards.iter().all(|c| !c.pending), "旧内容按普通内容处理");
+        let 手写卡 = cards.iter().find(|c| c.title == "手写卡").unwrap();
+        assert!(fs::read_to_string(&手写卡.path)
+            .unwrap()
+            .contains("待打磨: false"), "不认识的值不改动");
+
+        // 手写 false 的卡再进入：true 覆盖；退出：整键移除。
+        crate::book_file::set_pending(&手写卡.path, true).unwrap();
+        assert!(scan_inspirations(&root).unwrap().iter().find(|c| c.title == "手写卡").unwrap().pending);
+        crate::book_file::set_pending(&手写卡.path, false).unwrap();
+        let text = fs::read_to_string(&手写卡.path).unwrap();
+        assert!(!text.contains("待打磨"), "{text}");
+        assert!(text.contains("手写正文"), "{text}");
+    }
+
+    #[test]
+    fn 待打磨_无frontmatter与损坏头_正文保全() {
+        let root = TempDir::new().unwrap().path().to_path_buf();
+        write(&root.join("灵感库/未分类/裸文件.md"), "只有正文的速记");
+        crate::book_file::set_pending(&root.join("灵感库/未分类/裸文件.md"), true).unwrap();
+        let text = fs::read_to_string(&root.join("灵感库/未分类/裸文件.md")).unwrap();
+        assert!(text.contains("待打磨: true"), "{text}");
+        assert!(text.contains("只有正文的速记"), "{text}");
+        assert!(scan_inspirations(&root).unwrap()[0].pending);
+
+        // 损坏头与保存同一口径：整文件入正文、重建头，内容不丢。
+        write(&root.join("灵感库/未分类/坏头.md"), "---\n{{{{不是 yaml\n---\n\n正文在下面");
+        crate::book_file::set_pending(&root.join("灵感库/未分类/坏头.md"), true).unwrap();
+        let scanned = scan_inspirations(&root).unwrap();
+        let 坏头 = scanned.iter().find(|c| c.title == "坏头").unwrap();
+        assert!(坏头.pending);
+        assert!(坏头.body.contains("正文在下面"), "坏头卡正文不丢");
     }
 }

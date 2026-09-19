@@ -5,6 +5,8 @@ import { emptyNoteDraft } from "./types";
 import { errMsg, oneLinePreview } from "./util";
 import NoteDialog from "./NoteDialog";
 import GeoUpgradeDialog from "./GeoUpgradeDialog";
+import PendingZone from "./PendingZone";
+import { usePendingToggle } from "./pendingToggle";
 
 interface NoteListProps {
   project: string;
@@ -36,7 +38,59 @@ const KIND_HINTS: Record<NoteKind, string> = {
   开头: "开篇构思的多版本形态：每版一文件，标「备选/选定」；多份「选定」应用会提醒你。",
 };
 
-/** 构思笔记列表（五类共用）：一笔记一文件，点击编辑。 */
+/** 卡片标题行里的类别/标签徽章；紧凑卡与待打磨便笺同一份。 */
+function NoteBadges({ kind, note }: { kind: NoteKind; note: NoteEntry }) {
+  return (
+    <>
+      {kind === "矛盾" && note.status && <span className="card-cat">{note.status}</span>}
+      {kind === "开头" && note.status && <span className="card-cat">{note.status}</span>}
+      {kind === "世界观" && note.category && <span className="card-cat">{note.category}</span>}
+      {kind === "人物" && note.group && <span className="card-cat">{note.group}</span>}
+      {note.types.map((t) => (
+        <span key={t} className="tag">
+          {t}
+        </span>
+      ))}
+      {note.aliases.map((a) => (
+        <span key={a} className="tag">
+          别名：{a}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** 一句话核心／来源等字段行；便笺与紧凑卡共用。 */
+function NoteCoreLines({ kind, note }: { kind: NoteKind; note: NoteEntry }) {
+  if (!note.core && !(kind === "矛盾" && (note.source || note.links.length > 0))) {
+    return null;
+  }
+  return (
+    <>
+      {note.core && (
+        <p className="card-core" title={kind === "单元" ? "核心矛盾" : "一句话核心"}>
+          {kind === "单元" ? "核心矛盾" : "一句话核心"}：{note.core}
+        </p>
+      )}
+      {kind === "矛盾" && note.source && (
+        <p className="card-meta">
+          <span className="card-source" title="来源">
+            来源：{note.source}
+          </span>
+          {note.links.map((l) => (
+            <span key={l} className="card-source">
+              {l}
+            </span>
+          ))}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** 构思笔记列表（五类共用）：一笔记一文件，点击编辑。
+ *  待打磨的笔记以完整便笺集中在本页顶部（工单 #64）：便笺只是状态
+ *  视图，内容仍是那一份文件；整理完成即回原类别与原排序位置。 */
 export default function NoteList({
   project,
   kind,
@@ -72,6 +126,14 @@ export default function NoteList({
     void scan();
   }, [scan]);
 
+  /** 待打磨切换（工单 #64）：成功后通知项目页刷新计数并重扫本页。 */
+  const { switching, toggle: togglePending } = usePendingToggle(
+    useCallback(async () => {
+      onChanged();
+      await scan();
+    }, [onChanged, scan]),
+  );
+
   async function promote(note: NoteEntry) {
     if (promoting) return;
     if (
@@ -94,6 +156,9 @@ export default function NoteList({
       setPromoting(null);
     }
   }
+
+  const polishing = notes.filter((n) => n.pending);
+  const normal = notes.filter((n) => !n.pending);
 
   const selectedStatus =
     kind === "开头" && notes.filter((n) => n.status === "选定").length > 1
@@ -126,6 +191,47 @@ export default function NoteList({
         </div>
       </div>
 
+      <PendingZone
+        label={`待打磨的${kind}`}
+        count={polishing.length}
+        hint="还在发酵；整理完成后回到下面的原位置。"
+      >
+        <div className="card-list">
+          {polishing.map((note) => (
+            <article key={note.path} className="card-item is-pending">
+              <div className="card-title-row">
+                <button
+                  className="card-title"
+                  title="编辑这篇笔记"
+                  onClick={() => setEditing({ draft: note, prevPath: note.path })}
+                >
+                  {note.name}
+                </button>
+                <NoteBadges kind={kind} note={note} />
+              </div>
+              <NoteCoreLines kind={kind} note={note} />
+              {note.body && <div className="card-body">{note.body}</div>}
+              <div className="card-actions">
+                <button
+                  className="btn primary small"
+                  disabled={switching === note.path}
+                  title="解除待打磨：笔记回到原排序位置"
+                  onClick={() => void togglePending(note.path, false)}
+                >
+                  整理完成
+                </button>
+                <button
+                  className="btn small"
+                  onClick={() => setEditing({ draft: note, prevPath: note.path })}
+                >
+                  编辑
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </PendingZone>
+
       {selectedStatus > 1 && (
         <div className="hint-box">有 {selectedStatus} 版开头都标着「选定」——只留一版是常态，回头看看。</div>
       )}
@@ -140,7 +246,7 @@ export default function NoteList({
       )}
 
       <div className="card-list">
-        {notes.map((note) => (
+        {normal.map((note) => (
           <div key={note.path} className="card-item">
             <div className="card-title-row">
               <button
@@ -150,78 +256,53 @@ export default function NoteList({
               >
                 {note.name}
               </button>
-              {kind === "矛盾" && note.status && <span className="card-cat">{note.status}</span>}
-              {kind === "开头" && note.status && <span className="card-cat">{note.status}</span>}
-              {kind === "世界观" && note.category && (
-                <span className="card-cat">{note.category}</span>
-              )}
-              {kind === "人物" && note.group && <span className="card-cat">{note.group}</span>}
-              {note.types.map((t) => (
-                <span key={t} className="tag">
-                  {t}
-                </span>
-              ))}
-              {note.aliases.map((a) => (
-                <span key={a} className="tag">
-                  别名：{a}
-                </span>
-              ))}
+              <NoteBadges kind={kind} note={note} />
             </div>
 
-            {note.core && (
-              <p className="card-core" title={kind === "单元" ? "核心矛盾" : "一句话核心"}>
-                {kind === "单元" ? "核心矛盾" : "一句话核心"}：{note.core}
-              </p>
-            )}
-            {kind === "矛盾" && note.source && (
-              <p className="card-meta">
-                <span className="card-source" title="来源">
-                  来源：{note.source}
-                </span>
-                {note.links.map((l) => (
-                  <span key={l} className="card-source">
-                    {l}
-                  </span>
-                ))}
-              </p>
-            )}
+            <NoteCoreLines kind={kind} note={note} />
             {note.body && (
               <p className="card-preview" title={note.body}>
                 {oneLinePreview(note.body, 120)}
               </p>
             )}
-            {(kind === "矛盾" || (kind === "人物" && onChat) || (kind === "世界观" && note.category === "地理")) && (
-              <div className="card-actions">
-                {kind === "人物" && onChat && (
-                  <button
-                    className="btn small"
-                    title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋类型圈当人格底座）"
-                    onClick={() => onChat(note.name)}
-                  >
-                    跟 TA 聊
-                  </button>
-                )}
-                {kind === "矛盾" && (
-                  <button
-                    className="btn small"
-                    disabled={promoting === note.path}
-                    title="新建同名单元草稿，矛盾状态改「已成单元」"
-                    onClick={() => void promote(note)}
-                  >
-                    {promoting === note.path ? "正在提…" : "提为单元"}
-                  </button>
-                )}
-                {kind === "世界观" && note.category === "地理" && (
-                  <button
-                    className="btn small"
-                    title="先查看将创建与备份的文件位置，再决定是否升级为地图或地域"
-                    onClick={() => setUpgrading(note)}
-                  >
-                    升级为地图／地域
-                  </button>
-                )}
-              </div>
-            )}
+            <div className="card-actions">
+              <button
+                className="btn small"
+                disabled={switching === note.path}
+                title="挪到本页顶部的待打磨区；文件与排序位置都不动"
+                onClick={() => void togglePending(note.path, true)}
+              >
+                待打磨
+              </button>
+              {kind === "人物" && onChat && (
+                <button
+                  className="btn small"
+                  title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋类型圈当人格底座）"
+                  onClick={() => onChat(note.name)}
+                >
+                  跟 TA 聊
+                </button>
+              )}
+              {kind === "矛盾" && (
+                <button
+                  className="btn small"
+                  disabled={promoting === note.path}
+                  title="新建同名单元草稿，矛盾状态改「已成单元」"
+                  onClick={() => void promote(note)}
+                >
+                  {promoting === note.path ? "正在提…" : "提为单元"}
+                </button>
+              )}
+              {kind === "世界观" && note.category === "地理" && (
+                <button
+                  className="btn small"
+                  title="先查看将创建与备份的文件位置，再决定是否升级为地图或地域"
+                  onClick={() => setUpgrading(note)}
+                >
+                  升级为地图／地域
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </div>

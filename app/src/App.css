@@ -752,8 +752,28 @@ body {
 /* ---------- 灵感库 ---------- */
 
 .quick-capture,
-.pending-inspirations {
+.pending-inspirations,
+.pending-zone {
   margin-bottom: var(--sp-6);
+}
+
+/* 待打磨便笺（工单 #64）：轻纸感＝虚线左边＋小色签，随区统一、不挑卡片
+ *  实现（笔记便笺与灵感 ContentSurface 同一皮肤）；不做仿真泛黄、厚阴影
+ *  或随机旋转（spec 工作台与卡片呈现 §2.3）。 */
+.pending-zone .card-item {
+  position: relative;
+  border-left: 3px dashed var(--accent-line);
+}
+
+.pending-zone .card-item::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: var(--sp-6);
+  width: 30px;
+  height: 6px;
+  border-radius: 0 0 var(--r-tiny) var(--r-tiny);
+  background: var(--accent-line);
 }
 
 .quick-capture {

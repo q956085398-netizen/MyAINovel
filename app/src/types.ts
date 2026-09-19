@@ -328,6 +328,8 @@ export function emptyNoteDraft(kind: NoteKind, name = ""): NoteDraft {
 /** 与 Rust 侧 project::NoteEntry 对应；path 即笔记身份。 */
 export interface NoteEntry extends NoteDraft {
   path: string;
+  /** 待打磨中（工单 #64）：frontmatter 的「待打磨: true」，随笔记文件保存。 */
+  pending: boolean;
 }
 
 /** 与 Rust 侧 project::Circle 对应（构思/类型圈.md）。 */
@@ -715,6 +717,8 @@ export interface InspirationCard extends CardDraft {
   path: string;
   /** Unix 秒，最近在前排序。 */
   mtime: number;
+  /** 待打磨中（工单 #64）：frontmatter 的「待打磨: true」，随卡片文件保存。 */
+  pending: boolean;
 }
 
 /** 与 Rust 侧 inspiration.rs::ImportEntry 对应。 */

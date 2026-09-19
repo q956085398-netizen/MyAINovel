@@ -17,7 +17,9 @@ import ImportDialog from "./ImportDialog";
 import TransmuteDialog, { type TransmuteTarget } from "./TransmuteDialog";
 import type { ProjectTab } from "./ProjectPage";
 import ContentSurface from "./ContentSurface";
+import PendingZone from "./PendingZone";
 import SearchHighlight from "./SearchHighlight";
+import { usePendingToggle } from "./pendingToggle";
 import {
   cardMatchesQuery,
   CONTENT_SURFACE_STORAGE_KEY,
@@ -80,31 +82,38 @@ function TransmuteButton({
 
 function InspirationCardItem({
   card,
-  pending = false,
+  zone,
   collapsed,
   searchMatched,
   searchQuery,
+  switching = false,
   onToggleCollapsed,
   onEdit,
   onOpenLink,
   onTransmute,
+  onTogglePolishing,
 }: {
   card: InspirationCard;
-  pending?: boolean;
+  /** 卡片所在的展示区：待打磨便笺区｜待整理（未分类）区｜普通列表；
+   *  区只决定动作按钮，内容三处同一份（工单 #64：便笺只是状态视图）。 */
+  zone: "polishing" | "unclassified" | "listed";
   collapsed: boolean;
   searchMatched: boolean;
   searchQuery: string;
+  /** 待打磨切换进行中（防连点）。 */
+  switching?: boolean;
   onToggleCollapsed: (path: string) => void;
   onEdit: (draft: CardDraft, prevPath: string) => void;
   onOpenLink: (text: string) => Promise<void>;
   onTransmute: (card: InspirationCard, target: TransmuteTarget) => void;
+  onTogglePolishing: (card: InspirationCard, next: boolean) => void;
 }) {
   const expanded = shouldExpandContentCard(card.path, new Set(collapsed ? [card.path] : []), searchMatched);
   return (
     <ContentSurface
       identity={card.path}
       title={<SearchHighlight text={card.title} query={searchQuery} />}
-      pending={pending}
+      pending={zone !== "listed"}
       searchMatched={searchMatched}
       expanded={expanded}
       onEdit={() => onEdit(card, card.path)}
@@ -122,8 +131,27 @@ function InspirationCardItem({
       trailing={<span className="card-date">{formatDate(card.mtime)}</span>}
       actions={
         <>
-          {pending && (
-            <button className="btn primary small" onClick={() => onEdit(card, card.path)}>
+          {zone === "polishing" ? (
+            <button
+              className="btn primary small"
+              disabled={switching}
+              title="解除待打磨：卡片回到原类别与原排序位置"
+              onClick={() => onTogglePolishing(card, false)}
+            >
+              整理完成
+            </button>
+          ) : (
+            <button
+              className="btn small"
+              disabled={switching}
+              title="挪到页面顶部的待打磨区，慢慢发酵；类别与位置都记在原处"
+              onClick={() => onTogglePolishing(card, true)}
+            >
+              待打磨
+            </button>
+          )}
+          {zone === "unclassified" && (
+            <button className="btn small" onClick={() => onEdit(card, card.path)}>
               整理这条灵感
             </button>
           )}
@@ -226,6 +254,13 @@ export default function InspirationLibrary({
     if (libraryPath) void scan(libraryPath);
   }, [libraryPath, scan]);
 
+  /** 待打磨切换（工单 #64）：成功后重扫灵感库。 */
+  const { switching, toggle: togglePending } = usePendingToggle(
+    useCallback(async () => {
+      if (libraryPath) await scan(libraryPath);
+    }, [libraryPath, scan]),
+  );
+
   /** 关联跳转：卡片标题 → 打开卡片；「《书名》/名字」（转生去向）→ 打开
    *  该项目的对应页签（先单元、再人物、再矛盾/世界观/开头，工单 #8 §五）；
    *  拆书稿书名 → 打开拆书稿。 */
@@ -327,29 +362,44 @@ export default function InspirationLibrary({
       .sort(newestFirst);
   }, [cards, activeCategory, query]);
 
-  // 待整理灵感始终常驻顶部，不随搜索或类别筛选隐藏；只有手动改为其他类别才离开。
-  const pending = useMemo(
+  // 待打磨便笺区（工单 #64）：所有类别里标了待打磨的卡片集中到顶部，
+  // 类别与排序位置记在原处，整理完成即回去。
+  const polishing = useMemo(
+    () => cards.filter((card) => card.pending).sort(newestFirst),
+    [cards],
+  );
+
+  // 待整理灵感（未分类）常驻顶部，不随搜索或类别筛选隐藏；已在打磨中的
+  // 卡片只出现在待打磨区，一处一份。
+  const unclassified = useMemo(
     () =>
       cards
-        .filter((card) => card.category === "未分类")
+        .filter((card) => card.category === "未分类" && !card.pending)
         .sort(newestFirst),
     [cards],
   );
 
-  // 待整理灵感已经在顶部展示，普通列表不再重复；选择「未分类」筛选时也只看顶部。
-  const listed = activeCategory === "未分类" ? [] : visible.filter((card) => card.category !== "未分类");
+  // 顶部两区已展示的卡片，普通列表不再重复；「未分类」筛选时也只看顶部。
+  const listed =
+    activeCategory === "未分类"
+      ? []
+      : visible.filter(
+          (card) => card.category !== "未分类" && !card.pending,
+        );
 
   const searchMatches = useMemo(() => {
     if (!query.trim()) return new Set<string>();
     return new Set(
-      [...pending, ...listed]
+      [...polishing, ...unclassified, ...listed]
         .filter((card) => cardMatchesQuery(card, query))
         .map((card) => card.path),
     );
-  }, [listed, pending, query]);
+  }, [listed, polishing, unclassified, query]);
 
   useEffect(() => {
-    const firstMatch = [...pending, ...listed].find((card) => searchMatches.has(card.path));
+    const firstMatch = [...polishing, ...unclassified, ...listed].find((card) =>
+      searchMatches.has(card.path),
+    );
     if (!firstMatch) return;
     const frame = requestAnimationFrame(() => {
       const cardElement = document.getElementById(contentCardDomId(firstMatch.path));
@@ -359,7 +409,7 @@ export default function InspirationLibrary({
       });
     });
     return () => cancelAnimationFrame(frame);
-  }, [listed, pending, searchMatches]);
+  }, [listed, polishing, unclassified, searchMatches]);
 
   function toggleCollapsed(path: string) {
     setCollapsedCards((current) => {
@@ -466,27 +516,56 @@ export default function InspirationLibrary({
         </section>
       )}
 
-      {libraryPath && !scanning && pending.length > 0 && (
-        <section className="pending-inspirations" aria-labelledby="pending-inspirations-title">
-          <div className="section-heading">
-            <div>
-              <h2 id="pending-inspirations-title">待整理灵感（{formatCount(pending.length)}）</h2>
-              <p>归类后会从这里离开。</p>
-            </div>
-          </div>
+      {libraryPath && !scanning && (
+        <PendingZone
+          label="待打磨"
+          count={polishing.length}
+          hint="还在发酵的灵感集中在这里；整理完成就回到原类别与原排序位置。"
+        >
           <div className="card-list">
-            {pending.map((card) => (
+            {polishing.map((card) => (
               <InspirationCardItem
                 key={card.path}
                 card={card}
-                pending
+                zone="polishing"
                 collapsed={collapsedCards.has(card.path)}
                 searchMatched={searchMatches.has(card.path)}
                 searchQuery={query}
+                switching={switching === card.path}
                 onToggleCollapsed={toggleCollapsed}
                 onEdit={(draft, prevPath) => setEditing({ draft, prevPath })}
                 onOpenLink={openLink}
                 onTransmute={(picked, target) => setTransmuting({ card: picked, target })}
+                onTogglePolishing={(picked, next) => void togglePending(picked.path, next)}
+              />
+            ))}
+          </div>
+        </PendingZone>
+      )}
+
+      {libraryPath && !scanning && unclassified.length > 0 && (
+        <section className="pending-inspirations" aria-labelledby="pending-inspirations-title">
+          <div className="section-heading">
+            <div>
+              <h2 id="pending-inspirations-title">待整理灵感（{formatCount(unclassified.length)}）</h2>
+              <p>还没归类；补上类别后会从这里离开。</p>
+            </div>
+          </div>
+          <div className="card-list">
+            {unclassified.map((card) => (
+              <InspirationCardItem
+                key={card.path}
+                card={card}
+                zone="unclassified"
+                collapsed={collapsedCards.has(card.path)}
+                searchMatched={searchMatches.has(card.path)}
+                searchQuery={query}
+                switching={switching === card.path}
+                onToggleCollapsed={toggleCollapsed}
+                onEdit={(draft, prevPath) => setEditing({ draft, prevPath })}
+                onOpenLink={openLink}
+                onTransmute={(picked, target) => setTransmuting({ card: picked, target })}
+                onTogglePolishing={(picked, next) => void togglePending(picked.path, next)}
               />
             ))}
           </div>
@@ -553,13 +632,16 @@ export default function InspirationLibrary({
                 <InspirationCardItem
                   key={card.path}
                   card={card}
+                  zone="listed"
                   collapsed={collapsedCards.has(card.path)}
                   searchMatched={searchMatches.has(card.path)}
                   searchQuery={query}
+                  switching={switching === card.path}
                   onToggleCollapsed={toggleCollapsed}
                   onEdit={(draft, prevPath) => setEditing({ draft, prevPath })}
                   onOpenLink={openLink}
                   onTransmute={(picked, target) => setTransmuting({ card: picked, target })}
+                  onTogglePolishing={(picked, next) => void togglePending(picked.path, next)}
                 />
               ))}
             </div>

@@ -207,6 +207,14 @@ fn delete_inspiration_card(path: String) -> Result<(), String> {
     inspiration::delete_card(Path::new(&path))
 }
 
+/// 切换内容对象的待打磨状态（工单 #64 / T03）：对对象的 md 文件本身
+/// 动 frontmatter 的「待打磨」键，灵感卡与构思笔记同一机制；不挪文件、
+/// 不建副本，退出即恢复原类别与原排序位置。
+#[tauri::command]
+fn set_content_pending(path: String, pending: bool) -> Result<(), String> {
+    book_file::set_pending(Path::new(&path), pending)
+}
+
 /// 解析旧「灵感.md」为待确认条目（只读，不改原文件）。
 #[tauri::command]
 fn import_inspiration_preview(path: String) -> Result<Vec<ImportEntry>, String> {
@@ -879,6 +887,7 @@ pub fn run() {
             save_inspiration_card,
             capture_inspiration,
             delete_inspiration_card,
+            set_content_pending,
             import_inspiration_preview,
             confirm_import_inspirations,
             scan_projects,

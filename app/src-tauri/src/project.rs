@@ -469,6 +469,8 @@ pub struct NoteEntry {
     pub start_chapter: Option<u32>,
     pub end_chapter: Option<u32>,
     pub body: String,
+    /// 待打磨中（工单 #64）：frontmatter 的 `待打磨: true`；随笔记文件保存。
+    pub pending: bool,
 }
 
 pub fn notes_dir(project: &Path, kind: NoteKind) -> PathBuf {
@@ -535,6 +537,7 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
         start_chapter: None,
         end_chapter: None,
         body: String::new(),
+        pending: false,
     };
     let Ok(raw) = read_text(path) else {
         return entry;
@@ -570,6 +573,7 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
             }
         }
     }
+    entry.pending = crate::book_file::is_pending(&map);
     entry.body = body;
     entry
 }
@@ -1478,6 +1482,83 @@ mod tests {
         delete_note(&saved.path).unwrap();
         assert!(!saved.path.exists());
         assert!(delete_note(&saved.path).is_err());
+    }
+
+    // --- 待打磨（工单 #64 / T03）：五类笔记同一机制，随笔记文件保存 ---
+
+    #[test]
+    fn 待打磨_笔记_进入浏览退出_排序恢复_无副本() {
+        let root = root();
+        let dir = project(&root);
+        for name in ["初入京城", "宫变前夜", "收尾"] {
+            let mut unit = draft(NoteKind::Unit, name);
+            unit.core = Some(format!("{name}的核心矛盾"));
+            save_note(&dir, &unit, None).unwrap();
+        }
+        let order = |notes: &[NoteEntry]| notes.iter().map(|n| n.name.clone()).collect::<Vec<_>>();
+        let before = scan_notes(&dir, NoteKind::Unit).unwrap();
+        assert_eq!(order(&before), vec!["初入京城", "宫变前夜", "收尾"]);
+        let files_before = crate::book_file::count_files_recursive(&dir);
+
+        // 进入：宫变前夜 → 待打磨，仍在原目录原位置（路径序即列表序）。
+        let target = &before[1];
+        crate::book_file::set_pending(&target.path, true).unwrap();
+        let during = scan_notes(&dir, NoteKind::Unit).unwrap();
+        assert_eq!(order(&during), vec!["初入京城", "宫变前夜", "收尾"], "路径序不变");
+        assert!(during[1].pending);
+        assert!(!during[0].pending && !during[2].pending);
+
+        // 便笺中的编辑走正常保存：内容更新且状态保留（合并不抹键）。
+        let mut edited = draft(NoteKind::Unit, "宫变前夜");
+        edited.core = Some("在便笺里改过的核心矛盾".into());
+        edited.body = "在便笺里改过的正文".into();
+        save_note(&dir, &edited, Some(&target.path)).unwrap();
+        let during = scan_notes(&dir, NoteKind::Unit).unwrap();
+        assert!(during[1].pending, "编辑后仍是待打磨");
+        assert_eq!(during[1].core.as_deref(), Some("在便笺里改过的核心矛盾"));
+        let raw = fs::read_to_string(&during[1].path).unwrap();
+        assert!(raw.contains("待打磨: true"), "权威文件即同一份内容：{raw}");
+        assert!(raw.contains("在便笺里改过的正文"));
+
+        // 退出：键移除，回到原类别原排序位置；文件数不变（没有第二份便笺）。
+        crate::book_file::set_pending(&during[1].path, false).unwrap();
+        let after = scan_notes(&dir, NoteKind::Unit).unwrap();
+        assert_eq!(order(&after), vec!["初入京城", "宫变前夜", "收尾"], "退出按原位置恢复");
+        assert!(
+            after.iter().filter(|n| n.pending).count() == 0,
+            "读模型里待打磨区为空（前端整个区域不渲染）"
+        );
+        assert!(after[1].body.contains("在便笺里改过的正文"), "退出不动内容");
+        assert_eq!(crate::book_file::count_files_recursive(&dir), files_before, "进出待打磨不建便笺库");
+    }
+
+    #[test]
+    fn 待打磨_五类笔记与手写值_各归各的键() {
+        let root = root();
+        let dir = project(&root);
+        let mut contradiction = draft(NoteKind::Contradiction, "通缉身份");
+        contradiction.core = Some("背着通缉身份在京城立足".into());
+        let saved = save_note(&dir, &contradiction, None).unwrap();
+        crate::book_file::set_pending(&saved.path, true).unwrap();
+        let read = scan_notes(&dir, NoteKind::Contradiction).unwrap();
+        assert!(read[0].pending);
+        assert_eq!(read[0].core.as_deref(), Some("背着通缉身份在京城立足"));
+
+        // 旧内容（无键）与手写 false 都按普通内容处理，值原样保留。
+        write(&dir.join("构思/矛盾/手写false.md"), "---\n待打磨: false\n状态: 池中\n---\n\n正文");
+        let read = scan_notes(&dir, NoteKind::Contradiction).unwrap();
+        let 手写 = read.iter().find(|n| n.name == "手写false").unwrap();
+        assert!(!手写.pending);
+        assert!(fs::read_to_string(&手写.path)
+            .unwrap()
+            .contains("待打磨: false"), "不认识的值不改动");
+        assert_eq!(手写.status.as_deref(), Some("池中"));
+
+        // 矛盾提为单元：读-合-写同样不抹待打磨键。
+        let promoted = promote_contradiction(&saved.path).unwrap();
+        assert!(!promoted.pending, "新单元默认不是待打磨");
+        let back = scan_notes(&dir, NoteKind::Contradiction).unwrap();
+        assert!(back.iter().find(|n| n.name == "通缉身份").unwrap().pending, "提为单元不动原矛盾的状态");
     }
 
     #[test]
