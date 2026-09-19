@@ -5,6 +5,7 @@
   --ink-soft: #7c766a;
   --accent: #a8432f;
   --accent-strong: #8f3826;
+  --accent-ink: #fff;
   --accent-soft: #f3e3de;
   --line: #e3ded4;
   --sidebar-bg: #2e2c28;
@@ -82,6 +83,7 @@
   --ink-soft: #9a9282;
   --accent: #cf7a62;
   --accent-strong: #df8d76;
+  --accent-ink: #1e1c18;
   --accent-soft: #452f27;
   --line: #3b382e;
   --sidebar-bg: #171511;
@@ -299,7 +301,7 @@ body {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 
 .btn.primary:hover {
@@ -649,7 +651,7 @@ body {
 .chip.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 
 .card-list {
@@ -2409,7 +2411,6 @@ body {
   border-left: var(--rail-subtle) solid var(--accent-line);
   border-radius: var(--r-card);
   background: var(--surface-2);
-  overflow: hidden;
 }
 
 .chapter-intent-card summary {
