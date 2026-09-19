@@ -1227,7 +1227,7 @@ export default function WritingPage({
               </button>
               <button
                 className="btn"
-                disabled={!current || current.ordinal === null}
+                disabled={!current}
                 onClick={() => void saveNow(false).then((saved) => saved && setProofOpen(true))}
               >
                 校对本章
@@ -1753,6 +1753,8 @@ export default function WritingPage({
           libraryPath={libraryPath}
           initialTab="proof"
           initialChapter={current.ordinal}
+          initialPath={current.path}
+          nonModal
           onClose={() => setProofOpen(false)}
           onJump={(issue: ProofIssue) => {
             if (issue.fingerprint !== fingerprintRef.current) {

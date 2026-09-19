@@ -732,6 +732,7 @@ async fn proofread_chapters(
     project: String,
     range: ChapterRange,
     options: Option<ProofreadOptions>,
+    chapter_path: Option<String>,
 ) -> Result<ProofReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
         proofread::proofread_chapters_with_options(
@@ -739,6 +740,7 @@ async fn proofread_chapters(
             Path::new(&project),
             range,
             options.unwrap_or_default(),
+            chapter_path.as_deref().map(Path::new),
         )
     })
     .await

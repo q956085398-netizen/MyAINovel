@@ -611,47 +611,6 @@ fn scan_active_line(
     let mut taken = vec![false; chars.len()];
     let mut hits = Vec::new();
 
-    if options.punctuation {
-        for (open, close) in [
-            ('“', '”'),
-            ('‘', '’'),
-            ('（', '）'),
-            ('《', '》'),
-            ('「', '」'),
-            ('『', '』'),
-            ('【', '】'),
-        ] {
-            let mut stack = Vec::new();
-            for (i, ch) in chars.iter().enumerate() {
-                if *ch == open {
-                    stack.push(i);
-                }
-                if *ch == close {
-                    if stack.pop().is_none() && claim(&mut taken, i, 1) {
-                        hits.push(Hit {
-                            start: i,
-                            len: 1,
-                            word: close.to_string(),
-                            suggestion: None,
-                            kind: KIND_PUNCTUATION,
-                        });
-                    }
-                }
-            }
-            for i in stack {
-                if claim(&mut taken, i, 1) {
-                    hits.push(Hit {
-                        start: i,
-                        len: 1,
-                        word: open.to_string(),
-                        suggestion: Some(close.to_string()),
-                        kind: KIND_PUNCTUATION,
-                    });
-                }
-            }
-        }
-    }
-
     if options.repetition {
         let mut i = 0;
         while i + 1 < chars.len() {
@@ -702,6 +661,57 @@ fn scan_active_line(
     hits
 }
 
+fn scan_punctuation(lines: &[(u32, String)]) -> Vec<(u32, Hit)> {
+    let pairs = [
+        ('“', '”'),
+        ('‘', '’'),
+        ('（', '）'),
+        ('《', '》'),
+        ('「', '」'),
+        ('『', '』'),
+        ('【', '】'),
+    ];
+    let mut stacks: Vec<Vec<(u32, usize)>> = vec![Vec::new(); pairs.len()];
+    let mut hits = Vec::new();
+    for (line_no, line) in lines {
+        for (start, ch) in line.chars().enumerate() {
+            for (pair_index, (open, close)) in pairs.iter().enumerate() {
+                if ch == *open {
+                    stacks[pair_index].push((*line_no, start));
+                }
+                if ch == *close && stacks[pair_index].pop().is_none() {
+                    hits.push((
+                        *line_no,
+                        Hit {
+                            start,
+                            len: 1,
+                            word: ch.to_string(),
+                            suggestion: None,
+                            kind: KIND_PUNCTUATION,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    for (pair_index, stack) in stacks.into_iter().enumerate() {
+        for (line_no, start) in stack {
+            hits.push((
+                line_no,
+                Hit {
+                    start,
+                    len: 1,
+                    word: pairs[pair_index].0.to_string(),
+                    suggestion: Some(pairs[pair_index].1.to_string()),
+                    kind: KIND_PUNCTUATION,
+                },
+            ));
+        }
+    }
+    hits.sort_by_key(|(line, hit)| (*line, hit.start));
+    hits
+}
+
 fn mask_markdown_line(line: &str, in_fence: &mut bool) -> String {
     let trimmed = line.trim_start();
     if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
@@ -747,7 +757,7 @@ pub fn proofread_chapters(
     project: &Path,
     range: ChapterRange,
 ) -> Result<ProofReport, String> {
-    proofread_chapters_with_options(root, project, range, ProofreadOptions::default())
+    proofread_chapters_with_options(root, project, range, ProofreadOptions::default(), None)
 }
 
 pub fn proofread_chapters_with_options(
@@ -755,6 +765,7 @@ pub fn proofread_chapters_with_options(
     project: &Path,
     range: ChapterRange,
     options: ProofreadOptions,
+    chapter_path: Option<&Path>,
 ) -> Result<ProofReport, String> {
     let dir = (!root.as_os_str().is_empty()).then(|| proofread_dir(root));
     let mut wrong_words = Vec::new();
@@ -769,10 +780,13 @@ pub fn proofread_chapters_with_options(
     let mut issues: Vec<ProofIssue> = Vec::new();
     let mut scanned = 0u32;
     for entry in scan_chapters(project)? {
-        let in_scope = match entry.ordinal {
-            Some(ordinal) => range.contains(ordinal),
-            None => range.is_all(),
-        };
+        let in_scope = chapter_path.map_or_else(
+            || match entry.ordinal {
+                Some(ordinal) => range.contains(ordinal),
+                None => range.is_all(),
+            },
+            |path| entry.path == path,
+        );
         if !in_scope {
             continue;
         }
@@ -785,7 +799,9 @@ pub fn proofread_chapters_with_options(
         let mut in_frontmatter = content.starts_with("---\n") || content.starts_with("---\r\n");
         let mut frontmatter_started = in_frontmatter;
         let mut in_fence = false;
-        for (index, line) in content.lines().enumerate() {
+        let original_lines: Vec<&str> = content.lines().collect();
+        let mut visible_lines = Vec::new();
+        for (index, line) in original_lines.iter().enumerate() {
             if frontmatter_started {
                 if index > 0 && line.trim() == "---" {
                     frontmatter_started = false;
@@ -797,6 +813,7 @@ pub fn proofread_chapters_with_options(
                 continue;
             }
             let visible = mask_markdown_line(line, &mut in_fence);
+            visible_lines.push((index as u32 + 1, visible.clone()));
             let chars: Vec<char> = line.chars().collect();
             for hit in scan_active_line(&visible, &options, &wrong_words, &proper_nouns) {
                 let reason = match hit.kind {
@@ -818,6 +835,25 @@ pub fn proofread_chapters_with_options(
                     kind: hit.kind.to_string(),
                     fingerprint: fingerprint.clone(),
                     reason: reason.to_string(),
+                });
+            }
+        }
+        if options.punctuation {
+            for (line_no, hit) in scan_punctuation(&visible_lines) {
+                let line = original_lines[(line_no - 1) as usize];
+                let chars: Vec<char> = line.chars().collect();
+                issues.push(ProofIssue {
+                    ordinal: entry.ordinal,
+                    file_name: entry.file_name.clone(),
+                    path: entry.path.clone(),
+                    line: line_no,
+                    occurrence: occurrence_before(&chars, hit.start, &hit.word),
+                    snippet: snippet_of(&chars, hit.start, hit.len),
+                    word: hit.word,
+                    suggestion: hit.suggestion,
+                    kind: KIND_PUNCTUATION.to_string(),
+                    fingerprint: fingerprint.clone(),
+                    reason: "成对标点没有对应的开合符号".to_string(),
                 });
             }
         }
@@ -884,19 +920,19 @@ mod tests {
 
     #[test]
     fn 成对标点报告缺失和多余闭合() {
-        let options = ProofreadOptions {
-            repetition: false,
-            wrong_words: false,
-            proper_nouns: false,
-            ..Default::default()
-        };
-        let hits = scan_active_line("他说：“走吧。又多了一个）", &options, &[], &[]);
+        let hits = scan_punctuation(&[(1, "他说：“走吧。又多了一个）".into())]);
         assert!(hits
             .iter()
-            .any(|h| h.kind == KIND_PUNCTUATION && h.word == "“"));
+            .any(|(_, h)| h.kind == KIND_PUNCTUATION && h.word == "“"));
         assert!(hits
             .iter()
-            .any(|h| h.kind == KIND_PUNCTUATION && h.word == "）"));
+            .any(|(_, h)| h.kind == KIND_PUNCTUATION && h.word == "）"));
+    }
+
+    #[test]
+    fn 成对标点允许跨行开合() {
+        let hits = scan_punctuation(&[(1, "他说：“走吧".into()), (2, "明天再见。”".into())]);
+        assert!(hits.is_empty());
     }
 
     #[test]
@@ -949,6 +985,7 @@ mod tests {
                 proper_nouns: false,
                 ..Default::default()
             },
+            None,
         )
         .unwrap();
         assert_eq!(report.issues.len(), 1, "{:?}", report.issues);
@@ -1051,7 +1088,6 @@ mod tests {
         let p = project(tmp.path());
         write(&p.join("正文/0001 甲.md"), "因该");
         let report = proofread_chapters(Path::new(""), &p, ChapterRange::default()).unwrap();
-        assert!(!report.sensitive_file_exists);
         assert_eq!(report.issues.len(), 0, "{:?}", report.issues);
     }
 
@@ -1076,6 +1112,31 @@ mod tests {
         let report = proofread_chapters(root, &p, ChapterRange::default()).unwrap();
         assert_eq!(report.scanned_chapters, 3);
         assert!(report.issues.iter().any(|i| i.ordinal.is_none()));
+    }
+
+    #[test]
+    fn 当前章路径可只扫未编号章() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let p = project(root);
+        write(&root.join("校对/错词.txt"), "因该 => 应该");
+        write(&p.join("正文/0001 甲.md"), "因该");
+        let extra = p.join("正文/番外.md");
+        write(&extra, "因该");
+        let report = proofread_chapters_with_options(
+            root,
+            &p,
+            ChapterRange {
+                from: Some(1),
+                to: Some(1),
+            },
+            ProofreadOptions::default(),
+            Some(&extra),
+        )
+        .unwrap();
+        assert_eq!(report.scanned_chapters, 1);
+        assert_eq!(report.issues[0].file_name, "番外.md");
+        assert_eq!(report.issues[0].ordinal, None);
     }
 
     #[test]

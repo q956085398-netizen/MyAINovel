@@ -34,17 +34,20 @@ interface ExportDialogProps {
   onJump: (issue: ProofIssue) => void;
   initialTab?: Tab;
   initialChapter?: number | null;
+  initialPath?: string;
+  nonModal?: boolean;
 }
 
 type Tab = "export" | "proof";
 
-const KINDS = [PROOFREAD_KIND_PUNCTUATION, PROOFREAD_KIND_REPETITION, PROOFREAD_KIND_WRONG, PROOFREAD_KIND_PROPER_NOUN];
-const KIND_CLASS: Record<string, string> = {
-  [PROOFREAD_KIND_PUNCTUATION]: "punctuation",
-  [PROOFREAD_KIND_REPETITION]: "repetition",
-  [PROOFREAD_KIND_WRONG]: "wrong",
-  [PROOFREAD_KIND_PROPER_NOUN]: "proper-noun",
-};
+const PROOF_RULES: ReadonlyArray<{ option: keyof ProofreadOptions; kind: string; label: string; className: string }> = [
+  { option: "punctuation", kind: PROOFREAD_KIND_PUNCTUATION, label: "中文成对标点", className: "punctuation" },
+  { option: "repetition", kind: PROOFREAD_KIND_REPETITION, label: "重复字词", className: "repetition" },
+  { option: "wrongWords", kind: PROOFREAD_KIND_WRONG, label: "自定义错词", className: "wrong" },
+  { option: "properNouns", kind: PROOFREAD_KIND_PROPER_NOUN, label: "专有名词一致性", className: "proper-noun" },
+];
+const KINDS = PROOF_RULES.map((rule) => rule.kind);
+const KIND_CLASS = Object.fromEntries(PROOF_RULES.map((rule) => [rule.kind, rule.className]));
 
 export function ExportDialog({
   projectDir,
@@ -55,6 +58,8 @@ export function ExportDialog({
   onJump,
   initialTab = "export",
   initialChapter = null,
+  initialPath,
+  nonModal = false,
 }: ExportDialogProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [templates, setTemplates] = useState<ExportTemplate[]>([]);
@@ -158,6 +163,7 @@ export function ExportDialog({
           project: projectDir,
           range,
           options: proofOptions,
+          chapterPath: initialPath ?? null,
         }),
       );
     });
@@ -197,7 +203,7 @@ export function ExportDialog({
 
   return (
     <div
-      className="dialog-overlay"
+      className={`dialog-overlay ${nonModal ? "proof-nonmodal" : ""}`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -419,15 +425,10 @@ export function ExportDialog({
               {proof ? ` 已读取错词 ${formatCount(proof.wrongWords)} 条、专有名词 ${formatCount(proof.properNouns)} 组。` : " 格式均为「规范或错词 => 误写或建议」，专有名词的多个误写用 | 分隔。"}
             </p>
             <div className="proof-options" aria-label="校对规则">
-              {([
-                ["punctuation", "中文成对标点"],
-                ["repetition", "重复字词"],
-                ["wrongWords", "自定义错词"],
-                ["properNouns", "专有名词一致性"],
-              ] as const).map(([key, label]) => (
-                <label className="check" key={key}>
-                  <input type="checkbox" checked={proofOptions[key]} onChange={(e) => setProofOptions((cur) => ({ ...cur, [key]: e.target.checked }))} />
-                  {label}
+              {PROOF_RULES.map((rule) => (
+                <label className="check" key={rule.option}>
+                  <input type="checkbox" checked={proofOptions[rule.option]} onChange={(e) => setProofOptions((cur) => ({ ...cur, [rule.option]: e.target.checked }))} />
+                  {rule.label}
                 </label>
               ))}
             </div>

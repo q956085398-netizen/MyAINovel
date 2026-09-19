@@ -1749,6 +1749,20 @@ body {
   padding-bottom: 20px;
 }
 
+.dialog-overlay.proof-nonmodal {
+  background: transparent;
+  pointer-events: none;
+  justify-content: flex-end;
+  align-items: stretch;
+  padding-left: 42%;
+}
+
+.dialog-overlay.proof-nonmodal .dialog {
+  pointer-events: auto;
+  max-height: 100%;
+  border-radius: var(--r-dialog) 0 0 var(--r-dialog);
+}
+
 .project-nav-group + .project-nav-group {
   margin-top: var(--sp-4);
   padding-top: var(--sp-4);
