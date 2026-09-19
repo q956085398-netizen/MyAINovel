@@ -654,6 +654,56 @@ pub(crate) fn push_split(out: &mut Vec<String>, s: &str) {
 
 // --- frontmatter 笔记文件（灵感卡、构思笔记共用）：yaml 头 + 自由正文 ---
 
+/// 待打磨标记的 frontmatter 键（工单 #64 / T03）：内容状态随对象文件
+/// 保存，只有布尔 true 算「待打磨中」；退出即删键，不留时间戳——
+/// 原类别与原排序从未动过，恢复是无操作而不是重排。
+pub const PENDING_KEY: &str = "待打磨";
+
+/// 映射里的待打磨标记：只有布尔 true 算；手写的 false、空值都按普通内容。
+pub(crate) fn is_pending(map: &serde_yaml::Mapping) -> bool {
+    matches!(
+        map.get(Value::String(PENDING_KEY.to_string())),
+        Some(Value::Bool(true))
+    )
+}
+
+/// 原文的 frontmatter 底图与正文；无/坏 frontmatter 返回 None（调用方
+/// 按空底处理）。frontmatter_mapping 与 set_pending 共用一份解析。
+fn mapping_base(raw: &str) -> Option<(Mapping, String)> {
+    let (yaml_text, body) = split_frontmatter(raw)?;
+    match serde_yaml::from_str::<Value>(&yaml_text) {
+        Ok(Value::Mapping(map)) => Some((map, body)),
+        _ => None,
+    }
+}
+
+/// 切换对象的待打磨状态：以现有文件为底只动这一个键，未知键与正文
+/// 原样保留；无/坏 frontmatter 按空底重建（与保存策略同一口径）。
+/// 文件名与所在目录一概不动，写后把修改时间复原——切换是状态操作
+/// 不是内容编辑，mtime 排序的列表（灵感墙）不该被它顶到最前。
+pub fn set_pending(path: &Path, pending: bool) -> Result<(), String> {
+    let raw = read_text(path)?;
+    let raw = strip_bom(&raw);
+    let (mut map, body) = mapping_base(raw)
+        // frontmatter 损坏：整文件原样入正文，保存即重建（内容不丢）。
+        .unwrap_or_else(|| (Mapping::new(), raw.to_string()));
+    let mtime = fs::metadata(path).and_then(|m| m.modified()).ok();
+    let key = Value::String(PENDING_KEY.to_string());
+    if pending {
+        map.insert(key, Value::Bool(true));
+    } else {
+        map.remove(&key);
+    }
+    write_frontmatter(path, map, &body)?;
+    if let Some(time) = mtime {
+        // 复原失败不拦：排序影响是外观性的，不值得让切换报错。
+        if let Ok(file) = fs::File::options().write(true).open(path) {
+            let _ = file.set_modified(time);
+        }
+    }
+    Ok(())
+}
+
 /// frontmatter 块（起始 `---` 行到下一个 `---` 行）；不完整时返回 None。
 /// 返回（yaml 文本带尾换行，正文文本）。
 pub(crate) fn split_frontmatter(raw: &str) -> Option<(String, String)> {
@@ -690,11 +740,7 @@ pub(crate) fn split_frontmatter(raw: &str) -> Option<(String, String)> {
 /// （调用方按空底处理，保存即重建——与灵感卡同一策略）。
 pub(crate) fn frontmatter_mapping(path: &Path) -> Option<Mapping> {
     let raw = read_text(path).ok()?;
-    let (yaml_text, _) = split_frontmatter(strip_bom(&raw))?;
-    match serde_yaml::from_str::<Value>(&yaml_text) {
-        Ok(Value::Mapping(map)) => Some(map),
-        _ => None,
-    }
+    mapping_base(strip_bom(&raw)).map(|(map, _)| map)
 }
 
 /// 写 frontmatter＋正文：`---\nyaml---\n\n正文`；映射为空时只写正文
@@ -721,6 +767,24 @@ pub(crate) fn scalar_to_string(value: &Value) -> Option<String> {
         Value::Bool(b) => Some(b.to_string()),
         _ => None,
     }
+}
+
+/// 数一棵目录树下的文件总数（测试用：证明切换待打磨没多出副本）。
+#[cfg(test)]
+pub(crate) fn count_files_recursive(dir: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut n = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            n += count_files_recursive(&path);
+        } else {
+            n += 1;
+        }
+    }
+    n
 }
 
 fn meta_scalar(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
