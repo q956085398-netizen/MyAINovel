@@ -110,6 +110,116 @@
   --sh-media: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
+/* 三套配色与明暗模式是正交维度（工单 #62）。朱砂沿用根变量；
+   竹青与靛青完整重定义 chrome、表面、边线、文字和强调色。 */
+[data-palette="bamboo"] {
+  --bg: #edf1ee;
+  --panel: #f9fbf9;
+  --ink: #233330;
+  --ink-soft: #667873;
+  --accent: #2f6f68;
+  --accent-strong: #245b55;
+  --accent-ink: #fff;
+  --accent-soft: #dbeae6;
+  --line: #cedbd6;
+  --sidebar-bg: #18302e;
+  --sidebar-ink: #d4e0dc;
+  --paper: #fff;
+  --surface: #f1f6f3;
+  --surface-2: #e9f0ec;
+  --surface-hover: #dfeae5;
+  --accent-line: #9fc5bc;
+  --ok: #347553;
+  --ok-line: #75a58a;
+  --ok-soft: #e6f1e9;
+  --warn-ink: #745d27;
+  --warn-line: #c3a45b;
+  --warn-soft: #f7f1df;
+  --mark-bg: #e5dda5;
+  --goal-line: #4d747a;
+}
+
+[data-palette="bamboo"][data-theme="dark"] {
+  --bg: #152220;
+  --panel: #1d2c29;
+  --ink: #dce7e2;
+  --ink-soft: #91a49e;
+  --accent: #72b7aa;
+  --accent-strong: #8bc9bd;
+  --accent-ink: #13211f;
+  --accent-soft: #28443f;
+  --line: #324742;
+  --sidebar-bg: #0d1918;
+  --sidebar-ink: #bdcec8;
+  --paper: #263733;
+  --surface: #22312e;
+  --surface-2: #293a36;
+  --surface-hover: #334842;
+  --accent-line: #42675f;
+  --ok: #87bc97;
+  --ok-line: #6f9f7e;
+  --ok-soft: #24372b;
+  --warn-ink: #d5ba72;
+  --warn-line: #89713a;
+  --warn-soft: #39311f;
+  --mark-bg: #615728;
+  --goal-line: #78a7ad;
+}
+
+[data-palette="indigo"] {
+  --bg: #f1f2f5;
+  --panel: #fbfbfc;
+  --ink: #252d38;
+  --ink-soft: #6e7785;
+  --accent: #334f78;
+  --accent-strong: #273f63;
+  --accent-ink: #fff;
+  --accent-soft: #e0e6ef;
+  --line: #d7dce4;
+  --sidebar-bg: #1e2735;
+  --sidebar-ink: #d5dce7;
+  --paper: #fff;
+  --surface: #f5f6f8;
+  --surface-2: #eef1f5;
+  --surface-hover: #e5e9ef;
+  --accent-line: #aebdd3;
+  --ok: #3f715d;
+  --ok-line: #7ca18f;
+  --ok-soft: #e9f1ed;
+  --warn-ink: #745b2c;
+  --warn-line: #c6a65d;
+  --warn-soft: #f7f1e2;
+  --mark-bg: #e6dca9;
+  --goal-line: #536f98;
+}
+
+[data-palette="indigo"][data-theme="dark"] {
+  --bg: #171d27;
+  --panel: #202937;
+  --ink: #e1e6ee;
+  --ink-soft: #98a3b3;
+  --accent: #83a7d8;
+  --accent-strong: #9bbce6;
+  --accent-ink: #141b25;
+  --accent-soft: #2b3b52;
+  --line: #354154;
+  --sidebar-bg: #101722;
+  --sidebar-ink: #c4cedc;
+  --paper: #293445;
+  --surface: #252f3e;
+  --surface-2: #2b3647;
+  --surface-hover: #354258;
+  --accent-line: #455f82;
+  --ok: #8ab99f;
+  --ok-line: #719984;
+  --ok-soft: #25362d;
+  --warn-ink: #d5b974;
+  --warn-line: #886e38;
+  --warn-soft: #39301f;
+  --mark-bg: #62572a;
+  --goal-line: #86a9d6;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1629,6 +1739,202 @@ button.save-chip {
 
 .settings-section .hint {
   margin: var(--sp-1) 0 var(--sp-3);
+}
+
+/* ---------- 独立设置页（工单 #62） ---------- */
+
+.settings-page {
+  height: 100%;
+  overflow: auto;
+  padding: var(--sp-7) var(--sp-8);
+  background: var(--bg);
+}
+
+.settings-page-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-5);
+  max-width: 1080px;
+  margin: 0 auto var(--sp-6);
+}
+
+.settings-page-header h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-page);
+}
+
+.settings-page-header p {
+  margin: var(--sp-1) 0 0;
+  color: var(--ink-soft);
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: var(--sp-6);
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  align-self: start;
+  position: sticky;
+  top: 0;
+}
+
+.settings-tabs button {
+  border: 0;
+  border-radius: var(--r-ctl);
+  padding: 10px var(--sp-4);
+  color: var(--ink-soft);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-tabs button:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.settings-tabs button.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.settings-content {
+  min-width: 0;
+}
+
+.settings-content .settings-section {
+  margin: 0 0 var(--sp-5);
+  padding: var(--sp-6);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--panel);
+  box-shadow: var(--sh-1);
+}
+
+.settings-content .settings-section > h2,
+.provider-settings-form > h2 {
+  margin: 0 0 var(--sp-2);
+  color: var(--ink);
+  font-size: var(--fs-lg);
+}
+
+.palette-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.palette-option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  color: var(--ink-soft);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.palette-option:hover,
+.palette-option.active {
+  border-color: var(--accent);
+  box-shadow: var(--sh-2);
+}
+
+.palette-option.active {
+  background: var(--accent-soft);
+}
+
+.palette-option strong {
+  color: var(--ink);
+}
+
+.palette-option > span:last-child {
+  font-size: var(--fs-sub);
+}
+
+.palette-swatches {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  height: 28px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-inner);
+}
+
+.settings-path,
+.settings-library-path {
+  overflow-wrap: anywhere;
+}
+
+.settings-field-stacked {
+  align-items: flex-start;
+}
+
+.settings-text-field {
+  display: grid;
+  gap: var(--sp-2);
+  color: var(--ink);
+}
+
+.settings-text-field small {
+  color: var(--ink-soft);
+}
+
+.settings-note {
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--line);
+}
+
+.settings-note h3 {
+  margin: 0 0 var(--sp-2);
+  color: var(--ink);
+  font-size: var(--fs-md);
+}
+
+.settings-note p {
+  margin: var(--sp-2) 0 0;
+}
+
+.provider-settings-form .provider-fieldset {
+  background: var(--surface);
+}
+
+@media (max-width: 760px) {
+  .settings-page {
+    padding: var(--sp-5);
+  }
+
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-tabs {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .settings-tabs button {
+    flex: 0 0 auto;
+  }
+
+  .palette-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---------- 弹窗 ---------- */

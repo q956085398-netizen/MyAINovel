@@ -28,7 +28,6 @@ import type {
 } from "./types";
 import { errMsg, oneLinePreview, stripBookMarks } from "./util";
 import ChatAdoptDialog, { type ChatExcerptEntry } from "./ChatAdoptDialog";
-import ProviderSettingsDialog from "./ProviderSettingsDialog";
 
 interface AiSidebarProps {
   open: boolean;
@@ -44,6 +43,8 @@ interface AiSidebarProps {
   adoptTrope: (startLine: number, endLine: number, s: TropeSuggestion) => void;
   /** 采纳润色稿：替换写作页当前选区（没有选区/编辑器未就绪返回 false）。 */
   replaceSelection: (text: string) => boolean;
+  /** 供应商与模型统一在全局独立设置页管理。 */
+  onOpenSettings: () => void;
 }
 
 function nowSec(): number {
@@ -62,6 +63,7 @@ export default function AiSidebar({
   adoptCallout,
   adoptTrope,
   replaceSelection,
+  onOpenSettings,
 }: AiSidebarProps) {
   const [config, setConfig] = useState<AiConfig | null>(null);
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
@@ -71,7 +73,6 @@ export default function AiSidebar({
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [docAttached, setDocAttached] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const streamingRef = useRef(false);
   const tokenRef = useRef(0);
@@ -113,7 +114,7 @@ export default function AiSidebar({
   }
 
   useEffect(() => {
-    void (async () => {
+    const loadConfig = async () => {
       try {
         const cfg = await invoke<AiConfig>("load_ai_config");
         setConfig(cfg);
@@ -121,8 +122,18 @@ export default function AiSidebar({
         setError(errMsg(e));
         setConfig({ providers: [], activeProviderId: null });
       }
+    };
+    const onConfigChanged = (event: Event) => {
+      const config = (event as CustomEvent<AiConfig>).detail;
+      if (config) setConfig(config);
+      else void loadConfig();
+    };
+    window.addEventListener("gongbi:ai-config-changed", onConfigChanged);
+    void (async () => {
+      await loadConfig();
       await refreshSessions();
     })();
+    return () => window.removeEventListener("gongbi:ai-config-changed", onConfigChanged);
   }, []);
 
   useEffect(() => {
@@ -156,7 +167,7 @@ export default function AiSidebar({
     if (!text || streamingRef.current) return;
     if (!provider) {
       setError("先在「设置」里配置并选择供应商。");
-      setSettingsOpen(true);
+      onOpenSettings();
       return;
     }
 
@@ -249,7 +260,7 @@ export default function AiSidebar({
           ? "先配置供应商，配好后会自动开始与这个人物的对话。"
           : "先配置供应商，「" + seed.kind + "」命令会在配好后自动发出。",
       );
-      setSettingsOpen(true);
+      onOpenSettings();
       return;
     }
     if (seed.persona) {
@@ -458,9 +469,6 @@ export default function AiSidebar({
         >
           删除
         </button>
-        <button className="btn small" onClick={() => setSettingsOpen(true)}>
-          设置
-        </button>
         <button className="btn small with-icon" onClick={onClose} title="收起面板" aria-label="收起面板">
           <Icon as={X} size={ICON_SIZE_DENSE} />
         </button>
@@ -489,7 +497,7 @@ export default function AiSidebar({
         </div>
       ) : (
         <div className="ai-session-bar">
-          <button className="btn" onClick={() => setSettingsOpen(true)}>
+          <button className="btn" onClick={onOpenSettings}>
             去配置供应商
           </button>
         </div>
@@ -627,17 +635,6 @@ export default function AiSidebar({
           )}
         </div>
       </div>
-
-      {settingsOpen && config && (
-        <ProviderSettingsDialog
-          initial={config}
-          onClose={() => setSettingsOpen(false)}
-          onSaved={(cfg) => {
-            setConfig(cfg);
-            setSettingsOpen(false);
-          }}
-        />
-      )}
 
       {adoptOpen && persona && pickedEntries.length > 0 && (
         <ChatAdoptDialog
