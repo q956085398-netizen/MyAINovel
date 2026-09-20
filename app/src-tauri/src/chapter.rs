@@ -6,7 +6,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -14,7 +16,8 @@ use serde_yaml::Value;
 use crate::book_file::{
     billed_word_count, content_fingerprint, file_stem_of, han_word_count, has_md_extension,
     is_hidden, read_text, scalar_to_string, snapshot_existing_file, snapshot_files,
-    split_frontmatter, strip_bom, write_screenshot, write_text_atomic, SaveResult,
+    snapshot_restore_point, split_frontmatter, strip_bom, write_screenshot, write_text_atomic,
+    SaveResult,
 };
 use crate::book_file::snapshot_dir as snapshot_dir_under;
 
@@ -55,6 +58,29 @@ pub struct SnapshotEntry {
     /// Unix 毫秒，列表按时间倒序。
     pub time: u64,
     pub word_count: u64,
+}
+
+/// 光标拆章的只读预览。确认时整个对象原样回传，其中的
+/// 内容指纹是 ADR 0004 乐观锁的对账依据。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSplitPreview {
+    pub source_path: PathBuf,
+    pub target_path: PathBuf,
+    pub ordinal: u32,
+    pub title: String,
+    pub target_exists: bool,
+    pub before: String,
+    pub after: String,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSplitResult {
+    pub updated: ChapterEntry,
+    pub created: ChapterEntry,
+    pub fingerprint: String,
 }
 
 /// 联动侧栏的单元摘要（本章所在单元＋它在排布里的位置）。
@@ -248,6 +274,244 @@ pub fn rename_chapter(path: &Path, title: &str) -> Result<ChapterEntry, String> 
     }
     fs::rename(path, &target).map_err(|e| format!("无法重命名 {}：{e}", path.display()))?;
     Ok(read_chapter_entry(&target))
+}
+
+fn byte_index_at_utf16(content: &str, offset: usize) -> Option<usize> {
+    let mut units = 0usize;
+    for (byte, ch) in content.char_indices() {
+        if units == offset {
+            return Some(byte);
+        }
+        units += ch.len_utf16();
+        if units > offset {
+            return None;
+        }
+    }
+    (units == offset).then_some(content.len())
+}
+
+fn body_start_byte(content: &str) -> Result<usize, String> {
+    let stripped = strip_bom(content);
+    if stripped.lines().next().is_some_and(|line| line.trim() == "---") {
+        if split_frontmatter(stripped).is_none() {
+            return Err("章节 frontmatter 未闭合，请先修复后再拆章".to_string());
+        }
+        let body = crate::book_file::body_after_frontmatter(content);
+        return Ok(body.as_ptr() as usize - content.as_ptr() as usize);
+    }
+    Ok(0)
+}
+
+/// 只读预览：光标位置使用 CodeMirror/JavaScript 的 UTF-16 偏移。
+pub fn preview_chapter_split(
+    project: &Path,
+    source: &Path,
+    cursor_utf16: usize,
+    title: &str,
+) -> Result<ChapterSplitPreview, String> {
+    if source.parent() != Some(chapters_dir(project).as_path()) {
+        return Err("只能拆分当前项目正文目录里的章节".to_string());
+    }
+    let entry = read_chapter_entry(source);
+    let ordinal = entry
+        .ordinal
+        .ok_or_else(|| "未编号章不能拆分，请先为它编号".to_string())?
+        .checked_add(1)
+        .ok_or_else(|| "章序已达上限，无法拆分".to_string())?;
+    let bytes = fs::read(source).map_err(|e| format!("无法读取文件 {}：{e}", source.display()))?;
+    let content = String::from_utf8_lossy(&bytes).into_owned();
+    let split_byte = byte_index_at_utf16(&content, cursor_utf16)
+        .ok_or_else(|| "光标不在有效文本边界上".to_string())?;
+    if split_byte < body_start_byte(&content)? {
+        return Err("只能在章节正文位置拆章".to_string());
+    }
+    let title = sanitize_title(title);
+    let target_path = chapters_dir(project).join(chapter_file_name(ordinal, &title));
+    let target_exists = target_path.exists();
+    Ok(ChapterSplitPreview {
+        source_path: source.to_path_buf(),
+        target_path,
+        ordinal,
+        title,
+        target_exists,
+        before: content[..split_byte].to_string(),
+        after: content[split_byte..].to_string(),
+        fingerprint: content_fingerprint(&bytes).to_string(),
+    })
+}
+
+static SPLIT_PUBLISH_ID: AtomicU64 = AtomicU64::new(1);
+
+#[cfg(windows)]
+fn rename_new_atomic(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "Kernel32")]
+    extern "system" {
+        fn MoveFileExW(existing: *const u16, new: *const u16, flags: u32) -> i32;
+    }
+
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
+    let from: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
+    // 不带 REPLACE_EXISTING：目标被外部程序抢先创建时必须失败。
+    let ok = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) };
+    if ok == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn rename_new_atomic(from: &Path, to: &Path) -> io::Result<()> {
+    // 非 Windows 的便携回退：hard_link 同样具有 create-if-absent 语义，
+    // 且只会把已完整写好的同目录临时文件发布为可见章节。
+    fs::hard_link(from, to)?;
+    fs::remove_file(from)
+}
+
+fn publish_new_chapter(path: &Path, content: &str) -> Result<(), String> {
+    let id = SPLIT_PUBLISH_ID.fetch_add(1, Ordering::Relaxed);
+    let stage = path.with_file_name(format!(".拆章发布-{}-{id}.tmp", std::process::id()));
+    write_text_atomic(&stage, content)?;
+    if let Err(e) = rename_new_atomic(&stage, path) {
+        let _ = fs::remove_file(&stage);
+        return Err(format!("无法发布新章 {}：{e}", path.display()));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SplitStep {
+    SourceSnapshot,
+    TargetSnapshot,
+    TargetPublish,
+    TargetPublished,
+    SourceReplace,
+}
+
+fn split_chapter_with_hook<F>(
+    project: &Path,
+    preview: &ChapterSplitPreview,
+    mut hook: F,
+) -> Result<ChapterSplitResult, String>
+where
+    F: FnMut(SplitStep) -> Result<(), String>,
+{
+    if preview.source_path.parent() != Some(chapters_dir(project).as_path())
+        || preview.target_path.parent() != Some(chapters_dir(project).as_path())
+    {
+        return Err("拆章路径不属于当前项目正文目录".to_string());
+    }
+    let expected_target = chapters_dir(project)
+        .join(chapter_file_name(preview.ordinal, &sanitize_title(&preview.title)));
+    if preview.target_path != expected_target {
+        return Err("拆章目标文件名与预览不一致".to_string());
+    }
+    let old = fs::read(&preview.source_path)
+        .map_err(|e| format!("无法读取文件 {}：{e}", preview.source_path.display()))?;
+    if content_fingerprint(&old).to_string() != preview.fingerprint {
+        return Err("原章在预览后已被外部修改，请重新加载并再次预览".to_string());
+    }
+    let current = String::from_utf8_lossy(&old);
+    if format!("{}{}", preview.before, preview.after) != current {
+        return Err("拆章预览内容与原章不一致，请重新预览".to_string());
+    }
+    if preview.target_path.exists() {
+        return Err(format!("{} 已存在，不会覆盖", preview.target_path.display()));
+    }
+
+    // 恢复点是提交闸，不是事后尽力而为：任一快照无法完成时，
+    // 两份正文都还没开始改动。空内容按全局快照纪律不落空文件。
+    hook(SplitStep::SourceSnapshot)?;
+    snapshot_restore_point(&snapshot_dir(project, &preview.source_path), &old)
+    .map_err(|e| format!("无法建立原章恢复点，已取消拆章：{e}"))?;
+    hook(SplitStep::TargetSnapshot)?;
+    snapshot_restore_point(
+        &snapshot_dir(project, &preview.target_path),
+        preview.after.as_bytes(),
+    )
+    .map_err(|e| format!("无法建立新章恢复点，已取消拆章：{e}"))?;
+
+    // 两条可见写路都复用同目录临时文件＋rename（ADR 0004）。
+    // 原章在新章完整发布前始终留在原位；原章替换失败就撤回新章。
+    hook(SplitStep::TargetPublish)?;
+    publish_new_chapter(&preview.target_path, &preview.after)
+        .map_err(|e| format!("无法创建新章：{e}"))?;
+    let target_fingerprint = content_fingerprint(preview.after.as_bytes()).to_string();
+    let rollback_target = |reason: String| -> Result<ChapterSplitResult, String> {
+        let id = SPLIT_PUBLISH_ID.fetch_add(1, Ordering::Relaxed);
+        let quarantine = preview.target_path.with_file_name(format!(
+            ".拆章撤回-{}-{id}.md",
+            std::process::id()
+        ));
+        if let Err(e) = fs::rename(&preview.target_path, &quarantine) {
+            return Err(format!("{reason}；无法撤回新章：{e}"));
+        }
+        let owned = fs::read(&quarantine)
+            .map(|bytes| content_fingerprint(&bytes).to_string() == target_fingerprint)
+            .unwrap_or(false);
+        if !owned {
+            return match rename_new_atomic(&quarantine, &preview.target_path) {
+                Ok(()) => Err(format!(
+                    "{reason}；新章在撤回前已被外部修改，已原样恢复"
+                )),
+                Err(restore) => Err(format!(
+                    "{reason}；外部修改内容已保留在 {}，恢复原名失败：{restore}",
+                    quarantine.display()
+                )),
+            };
+        }
+        // 不直接删除：隔离文件不参与章节扫描，也使任何失败都有可恢复副本。
+        Err(format!(
+            "{reason}；新章已撤回，原章保持完整（恢复副本：{}）",
+            quarantine.display()
+        ))
+    };
+    if let Err(e) = hook(SplitStep::TargetPublished) {
+        return rollback_target(format!("拆章提交已中止：{e}"));
+    }
+    // 外部程序若在发布新章后改了它，不再继续截断原章。
+    let target_still_ours = fs::read(&preview.target_path)
+        .map(|bytes| content_fingerprint(&bytes).to_string() == target_fingerprint)
+        .unwrap_or(false);
+    if !target_still_ours {
+        return rollback_target("新章发布后已被外部修改，已取消原章替换".to_string());
+    }
+    if let Err(e) = hook(SplitStep::SourceReplace) {
+        return rollback_target(format!("拆章提交已中止：{e}"));
+    }
+    match save_chapter_md(
+        project,
+        &preview.source_path,
+        &preview.before,
+        Some(&preview.fingerprint),
+        false,
+    ) {
+        Ok(SaveResult::Saved { .. }) => {}
+        Ok(SaveResult::Conflict) => {
+            return rollback_target(
+                "原章在预览后已被外部修改，请重新加载并再次预览".to_string(),
+            );
+        }
+        Err(e) => return rollback_target(format!("无法替换原章：{e}")),
+    }
+
+    Ok(ChapterSplitResult {
+        updated: read_chapter_entry(&preview.source_path),
+        created: read_chapter_entry(&preview.target_path),
+        fingerprint: content_fingerprint(preview.before.as_bytes()).to_string(),
+    })
+}
+
+/// 确认拆章：两份结果先完整落到同目录临时文件，再提交；
+/// 提交中途失败会删除新章并恢复原章，不留半成品。
+pub fn split_chapter(
+    project: &Path,
+    preview: &ChapterSplitPreview,
+) -> Result<ChapterSplitResult, String> {
+    split_chapter_with_hook(project, preview, |_| Ok(()))
 }
 
 /// 删除章文件。快照留在 `.gongbi/历史/` 不删（文件没了还能手动取回）。
@@ -652,6 +916,205 @@ mod tests {
         save_chapter_md(&p, &chapter, "第四版", Some(&fingerprint), true).unwrap();
         assert_eq!(read_text(&chapter).unwrap(), "第四版");
         assert_eq!(list_chapter_snapshots(&p, &chapter).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn 拆章预览_章中分开并保留中文边界() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        let chapter = p.join("正文/0003 夜宴.md");
+        let content = "---\n状态: 完稿\n---\n\n前半章。\n后半章。";
+        write(&chapter, content);
+        let split_at = content.find("后半章").unwrap();
+        let cursor_utf16 = content[..split_at].encode_utf16().count();
+
+        let preview = preview_chapter_split(&p, &chapter, cursor_utf16, "风雨欲来").unwrap();
+
+        assert_eq!(preview.ordinal, 4);
+        assert_eq!(preview.title, "风雨欲来");
+        assert_eq!(preview.target_path, p.join("正文/0004 风雨欲来.md"));
+        assert_eq!(preview.before, "---\n状态: 完稿\n---\n\n前半章。\n");
+        assert_eq!(preview.after, "后半章。");
+        assert!(!preview.fingerprint.is_empty());
+    }
+
+    #[test]
+    fn 拆章_章首章尾与空后半段都可提交() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+
+        let at_start = p.join("正文/0001 甲.md");
+        write(&at_start, "全部移走");
+        let preview = preview_chapter_split(&p, &at_start, 0, "乙").unwrap();
+        let result = split_chapter(&p, &preview).unwrap();
+        assert_eq!(read_text(&at_start).unwrap(), "");
+        assert_eq!(read_text(&result.created.path).unwrap(), "全部移走");
+
+        let at_end = p.join("正文/0010 丙.md");
+        write(&at_end, "全部保留");
+        let preview = preview_chapter_split(&p, &at_end, "全部保留".encode_utf16().count(), "丁").unwrap();
+        let result = split_chapter(&p, &preview).unwrap();
+        assert_eq!(read_text(&at_end).unwrap(), "全部保留");
+        assert_eq!(read_text(&result.created.path).unwrap(), "");
+        assert_eq!(result.created.word_count, 0);
+    }
+
+    #[test]
+    fn 拆章_目标重名与预览后外部修改都零写入() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        let source = p.join("正文/0003 甲.md");
+        let target = p.join("正文/0004 乙.md");
+        write(&source, "前后");
+        write(&target, "原第四章");
+
+        let duplicate = preview_chapter_split(&p, &source, 1, "乙").unwrap();
+        assert!(duplicate.target_exists, "重名也要先给出可改标题的预览");
+        let duplicate_error = split_chapter(&p, &duplicate).unwrap_err();
+        assert!(duplicate_error.contains("已存在"), "{duplicate_error}");
+        assert_eq!(read_text(&source).unwrap(), "前后");
+        assert_eq!(read_text(&target).unwrap(), "原第四章");
+
+        let preview = preview_chapter_split(&p, &source, 1, "另一章").unwrap();
+        write(&source, "外部改过");
+        let err = split_chapter(&p, &preview).unwrap_err();
+        assert!(err.contains("外部修改"), "{err}");
+        assert_eq!(read_text(&source).unwrap(), "外部改过");
+        assert!(!preview.target_path.exists());
+    }
+
+    #[test]
+    fn 拆章_不允许在frontmatter内或未编号章执行() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        let numbered = p.join("正文/0001 甲.md");
+        write(&numbered, "---\n状态: 草稿\n---\n正文");
+        let err = preview_chapter_split(&p, &numbered, 4, "乙").unwrap_err();
+        assert!(err.contains("正文位置"), "{err}");
+
+        let unnumbered = p.join("正文/随笔.md");
+        write(&unnumbered, "正文");
+        let err = preview_chapter_split(&p, &unnumbered, 1, "乙").unwrap_err();
+        assert!(err.contains("未编号"), "{err}");
+    }
+
+    #[test]
+    fn 拆章_新章已创建时失败会撤回并恢复原章() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        let source = p.join("正文/0006 甲.md");
+        write(&source, "前半后半");
+        let preview = preview_chapter_split(&p, &source, 2, "乙").unwrap();
+
+        let err = split_chapter_with_hook(&p, &preview, |step| {
+            if step == SplitStep::TargetPublished {
+                Err("注入的写入失败".to_string())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+
+        assert!(err.contains("新章已撤回"), "{err}");
+        assert_eq!(read_text(&source).unwrap(), "前半后半");
+        assert!(!preview.target_path.exists());
+    }
+
+    #[test]
+    fn 拆章_新章发布后原章冲突会撤回新章且保留外部内容() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        let source = p.join("正文/0008 甲.md");
+        write(&source, "前半后半");
+        let preview = preview_chapter_split(&p, &source, 2, "乙").unwrap();
+
+        let err = split_chapter_with_hook(&p, &preview, |step| {
+            if step == SplitStep::TargetPublished {
+                write(&source, "外部在提交途中改动");
+            }
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert!(err.contains("外部修改"), "{err}");
+        assert_eq!(read_text(&source).unwrap(), "外部在提交途中改动");
+        assert!(!preview.target_path.exists());
+    }
+
+    #[test]
+    fn 拆章_回滚前新章被外部改写时不会删除外部内容() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        let source = p.join("正文/0009 甲.md");
+        write(&source, "前半后半");
+        let preview = preview_chapter_split(&p, &source, 2, "乙").unwrap();
+
+        let err = split_chapter_with_hook(&p, &preview, |step| {
+            if step == SplitStep::TargetPublished {
+                write(&preview.target_path, "外部程序改写的新章");
+                Err("迫使回滚".to_string())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+
+        assert!(err.contains("已原样恢复"), "{err}");
+        assert_eq!(read_text(&source).unwrap(), "前半后半");
+        assert_eq!(
+            read_text(&preview.target_path).unwrap(),
+            "外部程序改写的新章"
+        );
+    }
+
+    #[test]
+    fn 拆章_各写入阶段失败都不改正文() {
+        for failed_step in [
+            SplitStep::SourceSnapshot,
+            SplitStep::TargetSnapshot,
+            SplitStep::TargetPublish,
+            SplitStep::SourceReplace,
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let p = project(tmp.path());
+            let source = p.join("正文/0012 甲.md");
+            write(&source, "前半后半");
+            let preview = preview_chapter_split(&p, &source, 2, "乙").unwrap();
+
+            let err = split_chapter_with_hook(&p, &preview, |step| {
+                if step == failed_step {
+                    Err(format!("注入 {step:?} 失败"))
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap_err();
+
+            assert!(err.contains("注入"), "{failed_step:?}: {err}");
+            assert_eq!(read_text(&source).unwrap(), "前半后半");
+            assert!(!preview.target_path.exists(), "{failed_step:?}");
+        }
+    }
+
+    #[test]
+    fn 拆章_空后半章也有强制恢复点() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        let source = p.join("正文/0020 甲.md");
+        write(&source, "全部保留");
+        let preview = preview_chapter_split(
+            &p,
+            &source,
+            "全部保留".encode_utf16().count(),
+            "乙",
+        )
+        .unwrap();
+
+        split_chapter(&p, &preview).unwrap();
+
+        let snapshots = list_chapter_snapshots(&p, &preview.target_path).unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(read_chapter_snapshot(&snapshots[0].path).unwrap(), "");
     }
 
     #[test]

@@ -168,7 +168,22 @@ pub(crate) fn snapshot_with_gap(
     old_bytes: &[u8],
     min_gap: std::time::Duration,
 ) -> Result<(), String> {
-    if String::from_utf8_lossy(old_bytes).trim().is_empty() {
+    snapshot_with_policy(dir, old_bytes, min_gap, false)
+}
+
+/// 显式事务的强制恢复点：即使内容为空也落一份。
+/// 不用于高频自动保存，因此不套“空白不留快照”和时间节流。
+pub(crate) fn snapshot_restore_point(dir: &Path, bytes: &[u8]) -> Result<(), String> {
+    snapshot_with_policy(dir, bytes, std::time::Duration::ZERO, true)
+}
+
+fn snapshot_with_policy(
+    dir: &Path,
+    old_bytes: &[u8],
+    min_gap: std::time::Duration,
+    allow_empty: bool,
+) -> Result<(), String> {
+    if !allow_empty && String::from_utf8_lossy(old_bytes).trim().is_empty() {
         return Ok(());
     }
     if let Some(latest) = snapshot_files(dir).pop() {

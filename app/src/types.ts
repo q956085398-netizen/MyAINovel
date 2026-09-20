@@ -469,6 +469,24 @@ export interface SnapshotEntry {
   wordCount: number;
 }
 
+/** 光标拆章确认前的只读预览；指纹用于阻止预览后的外部覆盖。 */
+export interface ChapterSplitPreview {
+  sourcePath: string;
+  targetPath: string;
+  ordinal: number;
+  title: string;
+  targetExists: boolean;
+  before: string;
+  after: string;
+  fingerprint: string;
+}
+
+export interface ChapterSplitResult {
+  updated: ChapterEntry;
+  created: ChapterEntry;
+  fingerprint: string;
+}
+
 /** 联动侧栏的单元摘要（本章所在单元＋它在排布里的位置）。 */
 export interface UnitBrief {
   name: string;

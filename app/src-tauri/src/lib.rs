@@ -546,6 +546,29 @@ fn rename_chapter(path: String, title: String) -> Result<ChapterEntry, String> {
 }
 
 #[tauri::command]
+fn preview_chapter_split(
+    project: String,
+    source: String,
+    cursor_utf16: usize,
+    title: String,
+) -> Result<chapter::ChapterSplitPreview, String> {
+    chapter::preview_chapter_split(
+        Path::new(&project),
+        Path::new(&source),
+        cursor_utf16,
+        &title,
+    )
+}
+
+#[tauri::command]
+fn split_chapter(
+    project: String,
+    preview: chapter::ChapterSplitPreview,
+) -> Result<chapter::ChapterSplitResult, String> {
+    chapter::split_chapter(Path::new(&project), &preview)
+}
+
+#[tauri::command]
 fn delete_chapter(path: String) -> Result<(), String> {
     chapter::delete_chapter(Path::new(&path))
 }
@@ -967,6 +990,8 @@ pub fn run() {
             scan_chapters,
             create_chapter,
             rename_chapter,
+            preview_chapter_split,
+            split_chapter,
             delete_chapter,
             renumber_chapters,
             save_chapter_md,

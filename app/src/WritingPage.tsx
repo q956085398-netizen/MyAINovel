@@ -16,6 +16,8 @@ import type {
   AiSeed,
   ChapterIntent,
   ChapterEntry,
+  ChapterSplitPreview,
+  ChapterSplitResult,
   ExpectationBoard,
   Foreshadow,
   MdContent,
@@ -179,6 +181,12 @@ function loadPrefs(): { typewriter: boolean; dimming: boolean } {
 /** 新建/重命名/每日目标三个单输入框弹窗共用一个壳。 */
 type ChapterDialog = { kind: "new" | "rename" | "goal"; value: string };
 
+type SplitDialog = {
+  preview: ChapterSplitPreview;
+  title: string;
+  busy: boolean;
+};
+
 interface WritingPageProps {
   project: ProjectEntry;
   libraryPath: string | null;
@@ -228,6 +236,7 @@ export default function WritingPage({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chapters, setChapters] = useState<ChapterEntry[]>([]);
   const [current, setCurrent] = useState<ChapterEntry | null>(null);
+  const [splitDialog, setSplitDialog] = useState<SplitDialog | null>(null);
 
   // 正文在不在场（工单 #56 / T01）：外壳据此退场/召回窄轨；
   // 空项目（还没开章）不算进入正文。
@@ -825,6 +834,46 @@ export default function WritingPage({
     }
   }
 
+  async function buildSplitPreview(title: string, cursorUtf16?: number) {
+    const entry = currentRef.current;
+    const view = viewRef.current;
+    if (!entry || entry.ordinal === null || !view) return;
+    if (dirtyRef.current && !(await saveNow(false))) return;
+    try {
+      const preview = await invoke<ChapterSplitPreview>("preview_chapter_split", {
+        project: project.dir,
+        source: entry.path,
+        cursorUtf16: cursorUtf16 ?? view.state.selection.main.head,
+        title,
+      });
+      setSplitDialog({ preview, title: preview.title, busy: false });
+    } catch (e) {
+      window.alert(`无法预览拆章：${errMsg(e)}`);
+      view.focus();
+    }
+  }
+
+  async function confirmSplit() {
+    if (!splitDialog || splitDialog.title !== splitDialog.preview.title) return;
+    setSplitDialog({ ...splitDialog, busy: true });
+    try {
+      const result = await invoke<ChapterSplitResult>("split_chapter", {
+        project: project.dir,
+        preview: splitDialog.preview,
+      });
+      setSplitDialog(null);
+      const list = await rescan();
+      const created = list.find((chapter) => chapter.path === result.created.path) ?? result.created;
+      await openChapter(created);
+      viewRef.current?.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
+      viewRef.current?.focus();
+      onChanged();
+    } catch (e) {
+      setSplitDialog((dialog) => (dialog ? { ...dialog, busy: false } : dialog));
+      window.alert(`拆章失败：${errMsg(e)}`);
+    }
+  }
+
   async function deleteCurrent() {
     const entry = currentRef.current;
     if (!entry) return;
@@ -1268,6 +1317,13 @@ export default function WritingPage({
                     run: () => void openHistory(),
                   },
                   {
+                    id: "page-split-chapter",
+                    label: "在光标处拆章",
+                    hint: "先预览，再确认",
+                    disabled: !current || current.ordinal === null || conflict,
+                    run: () => void buildSplitPreview("新章"),
+                  },
+                  {
                     id: "page-proof",
                     label: "校对本章",
                     hint: "先落盘再校对",
@@ -1645,6 +1701,88 @@ export default function WritingPage({
               </button>
               <button className="btn primary" onClick={() => submitDialog(dialog)}>
                 确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {splitDialog && (
+        <div
+          className="dialog-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !splitDialog.busy) setSplitDialog(null);
+          }}
+        >
+          <div className="dialog split-chapter-dialog">
+            <h2>在光标处拆章</h2>
+            <label>
+              新章标题（可留空）
+              <input
+                autoFocus
+                value={splitDialog.title}
+                disabled={splitDialog.busy}
+                onChange={(e) =>
+                  setSplitDialog({ ...splitDialog, title: e.target.value, busy: false })
+                }
+              />
+            </label>
+            {splitDialog.title !== splitDialog.preview.title ? (
+              <div className="split-preview-stale">
+                <p className="hint">标题已改变，请先更新预览，确认目标文件不重名。</p>
+                <button
+                  className="btn"
+                  disabled={splitDialog.busy}
+                  onClick={() =>
+                    void buildSplitPreview(
+                      splitDialog.title,
+                      splitDialog.preview.before.length,
+                    )
+                  }
+                >
+                  更新预览
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="split-target">
+                  新章文件：<strong>{splitDialog.preview.targetPath.split(/[\\/]/).pop()}</strong>
+                </p>
+                {splitDialog.preview.targetExists && (
+                  <p className="error-box split-target-error">
+                    这个文件已存在，不会覆盖。请修改新章标题后更新预览。
+                  </p>
+                )}
+                <div className="split-boundaries">
+                  <section>
+                    <h3>原章保留到这里</h3>
+                    <pre>{splitDialog.preview.before.slice(-240) || "（空）"}</pre>
+                  </section>
+                  <section>
+                    <h3>新章从这里开始</h3>
+                    <pre>{splitDialog.preview.after.slice(0, 240) || "（空后半段）"}</pre>
+                  </section>
+                </div>
+                <p className="hint">
+                  确认时会再核对原章版本；外部修改或目标重名都会中止，不会覆盖。
+                  拆分不会自动调整单元或桥段区间，完成后请检查相关规划。
+                </p>
+              </>
+            )}
+            <div className="dialog-actions">
+              <button className="btn" disabled={splitDialog.busy} onClick={() => setSplitDialog(null)}>
+                取消
+              </button>
+              <button
+                className="btn primary"
+                disabled={
+                  splitDialog.busy ||
+                  splitDialog.title !== splitDialog.preview.title ||
+                  splitDialog.preview.targetExists
+                }
+                onClick={() => void confirmSplit()}
+              >
+                {splitDialog.busy ? "正在拆章…" : "确认拆分"}
               </button>
             </div>
           </div>
