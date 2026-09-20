@@ -20,7 +20,7 @@ import {
   type ThemeMode,
   type ThemePalette,
 } from "./settings";
-import { normalizeSettingsTab, type SettingsTab } from "./settingsState";
+import { settingsTabForEntry, type SettingsTab } from "./settingsState";
 import type { AiConfig } from "./types";
 import { errMsg } from "./util";
 
@@ -75,18 +75,24 @@ export default function SettingsPage({
   onChooseFolder,
   onCreateLibrary,
   onBack,
+  requestedTab,
 }: {
   libraryPath: string | null;
   onChooseFolder: () => void;
   onCreateLibrary: () => void;
   onBack: () => void;
+  requestedTab: SettingsTab | null;
 }) {
   const [settings, update] = useSettings();
   const [tab, setTab] = useState<SettingsTab>(() =>
-    normalizeSettingsTab(localStorage.getItem(TAB_KEY)),
+    settingsTabForEntry(localStorage.getItem(TAB_KEY), requestedTab),
   );
   const [aiConfig, setAiConfig] = useState<AiConfig | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (requestedTab) selectTab(requestedTab);
+  }, [requestedTab]);
 
   useEffect(() => {
     if (tab !== "ai" || aiConfig) return;

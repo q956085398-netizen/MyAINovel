@@ -474,34 +474,23 @@ export default function AiSidebar({
         </button>
       </header>
 
-      {provider ? (
-        <div className="ai-session-bar">
-          <select
-            className="ai-session-select"
-            value={current?.id ?? ""}
-            disabled={streaming}
-            onChange={(e) => {
-              if (e.target.value) void selectSession(e.target.value);
-            }}
-          >
-            {!current && <option value="">（新会话）</option>}
-            {sessions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.title}（{s.messageCount} 条）
-              </option>
-            ))}
-          </select>
-          <span className="ai-provider-chip" title={`${provider.baseUrl} · ${provider.model}`}>
-            {provider.name || provider.model}
-          </span>
-        </div>
-      ) : (
-        <div className="ai-session-bar">
-          <button className="btn" onClick={onOpenSettings}>
-            去配置供应商
-          </button>
-        </div>
-      )}
+      <div className="ai-session-bar">
+        <select
+          className="ai-session-select"
+          value={current?.id ?? ""}
+          disabled={streaming}
+          onChange={(e) => {
+            if (e.target.value) void selectSession(e.target.value);
+          }}
+        >
+          {!current && <option value="">（新会话）</option>}
+          {sessions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.title}（{s.messageCount} 条）
+            </option>
+          ))}
+        </select>
+      </div>
 
       {stalePersona && persona && <div className="hint-box">{stalePersona}</div>}
 
