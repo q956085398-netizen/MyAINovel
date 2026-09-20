@@ -10,7 +10,7 @@ import Ideation from "./Ideation";
 import InspirationLibrary from "./InspirationLibrary";
 import RailProjectPanel from "./RailProjectPanel";
 import Writing from "./Writing";
-import SettingsDialog from "./SettingsDialog";
+import SettingsPage from "./SettingsPage";
 import { getSettings, initSettings } from "./settings";
 import type { Glyph } from "./icons";
 import {
@@ -193,6 +193,7 @@ function App() {
   const switchSection = useCallback((s: Section) => {
     localStorage.setItem(SECTION_KEY, s);
     setSection(s);
+    setSettingsOpen(false);
     setProjectPanelOpen(false);
   }, []);
 
@@ -338,9 +339,10 @@ function App() {
             <Icon as={MessageCircle} />
           </button>
           <button
-            className="rail-item"
+            className={`rail-item ${settingsOpen ? "active" : ""}`}
             title="设置"
             aria-label="设置"
+            aria-current={settingsOpen ? "page" : undefined}
             onClick={() => setSettingsOpen(true)}
           >
             <Icon as={Settings} />
@@ -360,7 +362,7 @@ function App() {
         )}
       </aside>
       <main className="main">
-        <div className={`section-wrap ${section === "拆书" ? "" : "hidden"}`}>
+        <div className={`section-wrap ${section === "拆书" && !settingsOpen ? "" : "hidden"}`}>
           {openBook ? (
             <EditorPage
               key={openBook.primaryMd}
@@ -381,7 +383,7 @@ function App() {
             />
           )}
         </div>
-        <div className={`section-wrap ${section === "灵感库" ? "" : "hidden"}`}>
+        <div className={`section-wrap ${section === "灵感库" && !settingsOpen ? "" : "hidden"}`}>
           <InspirationLibrary
             libraryPath={libraryPath}
             onChooseFolder={chooseLibraryFolder}
@@ -391,7 +393,7 @@ function App() {
             onGoIdeation={() => switchSection("构思")}
           />
         </div>
-        <div className={`section-wrap ${section === "构思" ? "" : "hidden"}`}>
+        <div className={`section-wrap ${section === "构思" && !settingsOpen ? "" : "hidden"}`}>
           <Ideation
             libraryPath={libraryPath}
             onChooseFolder={chooseLibraryFolder}
@@ -402,7 +404,7 @@ function App() {
             onAiCommand={handleAiCommand}
           />
         </div>
-        <div className={`section-wrap ${section === "书写" ? "" : "hidden"}`}>
+        <div className={`section-wrap ${section === "书写" && !settingsOpen ? "" : "hidden"}`}>
           <Writing
             libraryPath={libraryPath}
             active={section === "书写"}
@@ -415,6 +417,14 @@ function App() {
             onManuscriptChange={setManuscript}
           />
         </div>
+        {settingsOpen && (
+          <SettingsPage
+            libraryPath={libraryPath}
+            onChooseFolder={chooseLibraryFolder}
+            onCreateLibrary={createLibraryFolder}
+            onBack={() => setSettingsOpen(false)}
+          />
+        )}
       </main>
       <AiSidebar
         open={aiOpen}
@@ -426,15 +436,8 @@ function App() {
         adoptCallout={adoptCallout}
         adoptTrope={adoptTrope}
         replaceSelection={replaceSelection}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
-      {settingsOpen && (
-        <SettingsDialog
-          libraryPath={libraryPath}
-          onChooseFolder={chooseLibraryFolder}
-          onCreateLibrary={createLibraryFolder}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
     </div>
   );
 }

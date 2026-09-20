@@ -1,39 +1,35 @@
 import { useSyncExternalStore } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import {
+  BUILTIN_BACKGROUNDS,
+  normalizeSettings,
+  resolveThemeMode,
+  type AppSettings,
+  type BodyFont,
+  type BuiltinBackground,
+  type EditorBackground,
+  type ProseAlign,
+  type ResolvedTheme,
+  type ThemeMode,
+  type ThemePalette,
+} from "./settingsState";
+
+export {
+  BUILTIN_BACKGROUNDS,
+  type AppSettings,
+  type BodyFont,
+  type BuiltinBackground,
+  type EditorBackground,
+  type ProseAlign,
+  type ResolvedTheme,
+  type ThemeMode,
+  type ThemePalette,
+};
 
 /** 应用设置（工单 #24 起，spec 个性化设置.md）：全部存前端应用状态
  *  （localStorage 单键 gongbi.settings），不进创作目录、Rust 不参与。
  *  默认值＝现状（浅色、素纸、既有排版），升级无感。
  *  组件经 useSettings 订阅；设置变化同时驱动 CSS 变量/根属性等副作用。 */
-
-export type ThemeMode = "light" | "dark" | "system";
-
-/** 内置六套编辑器纹理（§三）；素纸＝默认＝现行米白，等价于没开。 */
-export type BuiltinBackground =
-  | "素纸"
-  | "宣纸"
-  | "羊皮"
-  | "豆沙绿"
-  | "竹青"
-  | "暮山";
-
-export const BUILTIN_BACKGROUNDS: BuiltinBackground[] = [
-  "素纸",
-  "宣纸",
-  "羊皮",
-  "豆沙绿",
-  "竹青",
-  "暮山",
-];
-
-/** 编辑器背景：内置纹理，或自定义本地图片（只记路径、不拷贝——
- *  背景是装修不是数据，与「封面」的纪律相反）。 */
-export type EditorBackground =
-  | { kind: "builtin"; id: BuiltinBackground }
-  | { kind: "image"; path: string };
-
-/** 正文字体（§四）：四选一；「跟随系统」＝不动字体栈。 */
-export type BodyFont = "system" | "宋" | "黑" | "楷";
 
 export const FONT_OPTIONS: { value: BodyFont; label: string }[] = [
   { value: "system", label: "跟随系统" },
@@ -44,8 +40,6 @@ export const FONT_OPTIONS: { value: BodyFont; label: string }[] = [
 
 /** 对齐（§四 v2，工单 #33）：视图层显示效果，不改动 md 内容；
  *  默认两端对齐（中文小说排版习惯）。 */
-export type ProseAlign = "left" | "center" | "right" | "justify";
-
 export const PROSE_ALIGNS: { value: ProseAlign; label: string }[] = [
   { value: "justify", label: "两端" },
   { value: "left", label: "左对齐" },
@@ -71,44 +65,14 @@ export const DEFAULT_AUTOSAVE_SEC = 3;
  *  书 yaml 已有自定义 `章前缀` 键时继续优先生效（Rust 侧同规则回退默认）。 */
 export const DEFAULT_CHAPTER_PREFIX = "第{n}章";
 
-export interface AppSettings {
-  /** 主题三态（§二）：浅｜深｜跟随系统；跟随＝监听系统深浅偏好。 */
-  theme: ThemeMode;
-  /** 编辑器背景（§三）：只铺拆书/书写两个编辑器，沉浸式。 */
-  background: EditorBackground;
-  /** 排版（§四；v2 五项）：两个编辑器共用；字号/行距 null＝未设置＝各编辑器现状。
-   *  对齐与首行缩进（v2）＝视图层显示效果，默认两端对齐＋缩进 2 字符。 */
-  font: BodyFont;
-  fontSize: number | null;
-  lineHeight: number | null;
-  align: ProseAlign;
-  firstLineIndent: number;
-  /** 自动保存间隔（秒）：拆书/书写两编辑器共用，停笔防抖落盘。 */
-  autosaveSec: number;
-  /** 拆书·章前缀（全局缺省）：开下一章/章标题识别用；空值回退默认。 */
-  chapterPrefix: string;
-}
-
 const KEY = "gongbi.settings";
-
-const DEFAULTS: AppSettings = {
-  theme: "light",
-  background: { kind: "builtin", id: "素纸" },
-  font: "system",
-  fontSize: null,
-  lineHeight: null,
-  align: "justify",
-  firstLineIndent: 2,
-  autosaveSec: DEFAULT_AUTOSAVE_SEC,
-  chapterPrefix: DEFAULT_CHAPTER_PREFIX,
-};
 
 function load(): AppSettings {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<AppSettings>) } : { ...DEFAULTS };
+    return normalizeSettings(raw ? JSON.parse(raw) : null);
   } catch {
-    return { ...DEFAULTS };
+    return normalizeSettings(null);
   }
 }
 
@@ -154,17 +118,17 @@ export function chapterPrefixOrDefault(): string {
 
 // --- 主题应用（§二）：根元素挂 data-theme，变量组按主题重定义 ---
 
-export type ResolvedTheme = "light" | "dark";
-
 const systemDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
 
 /** 三态解析：跟随系统时看系统深浅偏好，显式选浅/深则锁死手选。 */
 export function resolvedTheme(mode: ThemeMode = cache.theme): ResolvedTheme {
-  return mode === "system" ? (systemDark() ? "dark" : "light") : mode;
+  return resolveThemeMode(mode, systemDark());
 }
 
 function applyTheme() {
-  document.documentElement.dataset.theme = resolvedTheme();
+  const root = document.documentElement;
+  root.dataset.theme = resolvedTheme();
+  root.dataset.palette = cache.palette;
 }
 
 /** 编辑器背景应用（§三）：根元素挂 data-editor-bg，纹理样式在 App.css；

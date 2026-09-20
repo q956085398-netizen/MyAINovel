@@ -3,19 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AiConfig, AiProvider } from "./types";
 import { errMsg } from "./util";
 
-interface ProviderSettingsDialogProps {
+interface ProviderSettingsFormProps {
   initial: AiConfig;
-  onClose: () => void;
   onSaved: (config: AiConfig) => void;
 }
 
-/** 供应商管理（设计共识 §七）：OpenAI 兼容接口，名称＋Base URL＋Key＋模型。
- *  配置存应用数据目录，不入库文件夹。 */
-export default function ProviderSettingsDialog({
+/** 供应商管理表单：既可嵌进独立设置页，也由兼容弹窗壳复用。 */
+export function ProviderSettingsForm({
   initial,
-  onClose,
   onSaved,
-}: ProviderSettingsDialogProps) {
+}: ProviderSettingsFormProps) {
   const [providers, setProviders] = useState<AiProvider[]>(initial.providers);
   const [activeId, setActiveId] = useState<string | null>(initial.activeProviderId);
   const [saving, setSaving] = useState(false);
@@ -71,6 +68,7 @@ export default function ProviderSettingsDialog({
       };
       await invoke("save_ai_config", { config });
       onSaved(config);
+      window.dispatchEvent(new CustomEvent("gongbi:ai-config-changed", { detail: config }));
     } catch (e) {
       window.alert(`供应商配置保存失败：${errMsg(e)}`);
     } finally {
@@ -79,25 +77,19 @@ export default function ProviderSettingsDialog({
   }
 
   return (
-    <div
-      className="dialog-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="dialog wide">
-        <h2>AI 供应商</h2>
-        <p className="hint">
-          OpenAI 兼容接口（名称＋Base URL＋API Key＋模型）。配置与对话记录存在本机应用数据目录，
-          不会写入库文件夹。
-        </p>
+    <div className="provider-settings-form">
+      <h2>供应商与模型</h2>
+      <p className="hint">
+        OpenAI 兼容接口（名称＋Base URL＋API Key＋模型）。配置与对话记录存在本机应用数据目录，
+        不会写入库文件夹。
+      </p>
 
-        {providers.length === 0 && (
-          <p className="hint">还没有供应商，点下面「新增供应商」开始配置。</p>
-        )}
+      {providers.length === 0 && (
+        <p className="hint">还没有供应商，点下面「新增供应商」开始配置。</p>
+      )}
 
-        {providers.map((p) => (
-          <fieldset className="provider-fieldset" key={p.id}>
+      {providers.map((p) => (
+        <fieldset className="provider-fieldset" key={p.id}>
             <legend className="provider-legend">
               <label className="provider-active">
                 <input
@@ -146,21 +138,17 @@ export default function ProviderSettingsDialog({
             <button className="btn small" onClick={() => removeProvider(p.id)}>
               删除这家
             </button>
-          </fieldset>
-        ))}
+        </fieldset>
+      ))}
 
-        <div className="dialog-actions">
-          <button className="btn" onClick={addProvider}>
-            新增供应商
-          </button>
-          <span className="grow" />
-          <button className="btn" disabled={saving} onClick={onClose}>
-            取消
-          </button>
-          <button className="btn primary" disabled={saving} onClick={() => void save()}>
-            保存
-          </button>
-        </div>
+      <div className="dialog-actions">
+        <button className="btn" onClick={addProvider}>
+          新增供应商
+        </button>
+        <span className="grow" />
+        <button className="btn primary" disabled={saving} onClick={() => void save()}>
+          保存供应商设置
+        </button>
       </div>
     </div>
   );
