@@ -127,3 +127,8 @@ export function resolveThemeMode(mode: ThemeMode, systemPrefersDark: boolean): R
 export function normalizeSettingsTab(value: unknown): SettingsTab {
   return SETTINGS_TABS.has(value as SettingsTab) ? (value as SettingsTab) : "appearance";
 }
+
+/** 专项入口可指定目标页签；普通全局入口沿用上次选择。 */
+export function settingsTabForEntry(saved: unknown, requested: SettingsTab | null): SettingsTab {
+  return requested ?? normalizeSettingsTab(saved);
+}

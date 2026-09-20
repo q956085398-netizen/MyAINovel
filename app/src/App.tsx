@@ -12,6 +12,7 @@ import RailProjectPanel from "./RailProjectPanel";
 import Writing from "./Writing";
 import SettingsPage from "./SettingsPage";
 import { getSettings, initSettings } from "./settings";
+import type { SettingsTab } from "./settingsState";
 import type { Glyph } from "./icons";
 import {
   BookMarked,
@@ -73,6 +74,7 @@ function App() {
   );
   // 设置面板（工单 #24）：侧栏底部齿轮打开；设置存应用状态（localStorage）。
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsRequestedTab, setSettingsRequestedTab] = useState<SettingsTab | null>(null);
   // AI 侧边栏：面板常驻挂载仅隐藏切换，编辑器经 bridge 提供文档上下文与采纳回写。
   const [aiOpen, setAiOpen] = useState(false);
   const [aiSeed, setAiSeed] = useState<AiSeed | null>(null);
@@ -194,6 +196,7 @@ function App() {
     localStorage.setItem(SECTION_KEY, s);
     setSection(s);
     setSettingsOpen(false);
+    setSettingsRequestedTab(null);
     setProjectPanelOpen(false);
   }, []);
 
@@ -343,7 +346,10 @@ function App() {
             title="设置"
             aria-label="设置"
             aria-current={settingsOpen ? "page" : undefined}
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => {
+              setSettingsRequestedTab(null);
+              setSettingsOpen(true);
+            }}
           >
             <Icon as={Settings} />
           </button>
@@ -368,7 +374,7 @@ function App() {
               key={openBook.primaryMd}
               book={openBook}
               libraryPath={libraryPath}
-              active={section === "拆书"}
+              active={section === "拆书" && !settingsOpen}
               onBack={closeBook}
               onAiCommand={handleAiCommand}
               registerBridge={registerBridge}
@@ -407,7 +413,7 @@ function App() {
         <div className={`section-wrap ${section === "书写" && !settingsOpen ? "" : "hidden"}`}>
           <Writing
             libraryPath={libraryPath}
-            active={section === "书写"}
+            active={section === "书写" && !settingsOpen}
             onChooseFolder={chooseLibraryFolder}
             onCreateLibrary={createLibraryFolder}
             jump={writingJump}
@@ -423,6 +429,7 @@ function App() {
             onChooseFolder={chooseLibraryFolder}
             onCreateLibrary={createLibraryFolder}
             onBack={() => setSettingsOpen(false)}
+            requestedTab={settingsRequestedTab}
           />
         )}
       </main>
@@ -436,7 +443,10 @@ function App() {
         adoptCallout={adoptCallout}
         adoptTrope={adoptTrope}
         replaceSelection={replaceSelection}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => {
+          setSettingsRequestedTab("ai");
+          setSettingsOpen(true);
+        }}
       />
     </div>
   );

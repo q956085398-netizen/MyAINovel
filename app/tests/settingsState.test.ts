@@ -5,6 +5,7 @@ import {
   DEFAULT_SETTINGS,
   normalizeSettings,
   normalizeSettingsTab,
+  settingsTabForEntry,
   resolveThemeMode,
 } from "../src/settingsState.ts";
 
@@ -60,4 +61,9 @@ test("设置页只接受四个一级页签，旧值回到外观", () => {
   }
   assert.equal(normalizeSettingsTab("providers"), "appearance");
   assert.equal(normalizeSettingsTab(null), "appearance");
+});
+
+test("AI 侧栏请求设置时直达 AI，不受上次页签影响", () => {
+  assert.equal(settingsTabForEntry("appearance", "ai"), "ai");
+  assert.equal(settingsTabForEntry("library", null), "library");
 });
