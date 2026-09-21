@@ -21,11 +21,13 @@ import ProjectMetaDialog from "./ProjectMetaDialog";
 import RelationshipCanvas from "./RelationshipCanvas";
 import PlanningView from "./PlanningView";
 import BridgeLibrary from "./BridgeLibrary";
+import IdeationHome from "./IdeationHome";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 // 「三线」拆为「期待感」「目标」两页签（工单 #36）：名字自解释，
 // 数据模型不动（三线.yaml 的类别枚举仍是 期待｜目标），只按类别过滤复用看板。
 const TABS = [
+  "首页",
   "大纲",
   "类型圈",
   "矛盾",
@@ -40,13 +42,17 @@ const TABS = [
   "开头",
 ] as const;
 const NAV_GROUPS = [
-  { step: "第一步", label: "定书", tabs: ["大纲", "类型圈", "人物", "世界观", "开头"] },
+  { step: "第一步", label: "定书", tabs: ["首页", "大纲", "类型圈", "人物", "世界观", "开头"] },
   { step: "第二步", label: "生情节", tabs: ["矛盾", "桥段库", "单元", "排布"] },
   { step: "第三步", label: "织张力", tabs: ["伏笔", "期待感", "目标"] },
 ] as const;
 /** 项目页签；跨板块跳转（灵感库关联 → 项目）也用它指路。 */
 export type ProjectTab = (typeof TABS)[number];
 type Tab = ProjectTab;
+
+function tabLabel(tab: Tab): string {
+  return tab === "类型圈" ? "读者遐想（类型圈）" : tab;
+}
 
 const NOTE_TABS: NoteKind[] = ["矛盾", "单元", "人物", "世界观", "开头"];
 
@@ -61,7 +67,7 @@ function isNoteTab(tab: Tab): tab is NoteKind {
 interface ProjectPageProps {
   project: ProjectEntry;
   libraryPath: string | null;
-  /** 打开时落在哪个页签（默认「类型圈」）；仅挂载时生效。 */
+  /** 打开时落在哪个页签（默认「首页」）；仅挂载时生效。 */
   initialTab?: ProjectTab;
   /** 跨板块跳来的人名（灵感库关联 →「《书名》/人名」）：落到人物画布并选中。 */
   initialFocus?: string;
@@ -86,7 +92,7 @@ export default function ProjectPage({
   onOpenChapter,
   onAiCommand,
 }: ProjectPageProps) {
-  const [tab, setTab] = useState<Tab>(initialTab ?? "大纲");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "首页");
   const [meta, setMeta] = useState<ProjectMeta>(emptyProjectMeta());
   const [metaWarning, setMetaWarning] = useState<string | undefined>();
   const [metaOpen, setMetaOpen] = useState(false);
@@ -258,7 +264,7 @@ export default function ProjectPage({
                   className={`nav-item ${tab === t ? "active" : ""}`}
                   onClick={() => setTab(t)}
                 >
-                  {t}
+                  {tabLabel(t)}
                   {t === "矛盾" && project.contradictionCount > 0 && (
                     <span className="nav-badge">{project.contradictionCount}</span>
                   )}
@@ -295,6 +301,13 @@ export default function ProjectPage({
         </nav>
 
         <div className="project-content" key={`${tab}-${reloadKey}`}>
+          {tab === "首页" && (
+            <IdeationHome
+              project={project.dir}
+              onNavigate={(next) => setTab(next)}
+              onOpenMeta={() => setMetaOpen(true)}
+            />
+          )}
           {tab === "大纲" && <PlanningView project={project.dir} unitNames={units.map((unit) => unit.name)} />}
           {tab === "类型圈" && <CircleView project={project.dir} vocab={vocab} />}
           {tab === "桥段库" && (

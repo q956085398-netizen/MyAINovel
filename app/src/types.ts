@@ -113,6 +113,25 @@ export function emptyProjectMeta(): ProjectMeta {
   return { title: null, chapterPrefix: null, plotLines: [], maps: [] };
 }
 
+/** 构思首页只读派生条目（工单 #57）；tab/focus 只负责导航，不复制业务数据。 */
+export interface IdeationOverviewItem {
+  name: string;
+  detail: string | null;
+  tab: string;
+  focus: string | null;
+}
+
+/** 从大纲/主线/人物/项目资料/读者遐想现读得到的首页模型。 */
+export interface IdeationOverview {
+  logline: string | null;
+  readerImagination: string | null;
+  mainlines: IdeationOverviewItem[];
+  characters: IdeationOverviewItem[];
+  maps: IdeationOverviewItem[];
+  pending: IdeationOverviewItem[];
+  unresolved: string[];
+}
+
 /** 构思/大纲.md：自由纸面，首次保存可采用轻模板。 */
 export interface Outline {
   body: string;

@@ -4,6 +4,12 @@ import type { Circle, Vocabulary } from "./types";
 import { errMsg, splitList } from "./util";
 import MarkdownEditor from "./MarkdownEditor";
 import VocabInput from "./VocabInput";
+import {
+  DEFAULT_IMAGINATION_PROMPTS,
+  editPrompt,
+  removePrompt,
+  type IdeationPrompt,
+} from "./ideationGuidance";
 
 interface CircleViewProps {
   project: string;
@@ -14,6 +20,15 @@ interface CircleViewProps {
 /** 类型圈：这本书的读者遐想清单（约 4~6 类），整本书的内容只在圈内。
  *  frontmatter 的类型列表是机器可读的那份，正文按类型逐条写遐想笔记。 */
 export default function CircleView({ project, vocab }: CircleViewProps) {
+  const promptStorageKey = `gongbi:reader-imagination-prompts:${project}`;
+  const [prompts, setPrompts] = useState<IdeationPrompt[]>(() => {
+    try {
+      const saved = localStorage.getItem(promptStorageKey);
+      return saved ? JSON.parse(saved) : DEFAULT_IMAGINATION_PROMPTS.map((item) => ({ ...item }));
+    } catch {
+      return DEFAULT_IMAGINATION_PROMPTS.map((item) => ({ ...item }));
+    }
+  });
   const [typesText, setTypesText] = useState("");
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(true);
@@ -30,7 +45,7 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
         setTypesText(circle.types.join("、"));
         setBody(circle.body);
       } catch (e) {
-        if (!cancelled) setError(`读取类型圈失败：${errMsg(e)}`);
+        if (!cancelled) setError(`读取读者遐想（类型圈）失败：${errMsg(e)}`);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -39,6 +54,10 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
       cancelled = true;
     };
   }, [project]);
+
+  useEffect(() => {
+    localStorage.setItem(promptStorageKey, JSON.stringify(prompts));
+  }, [promptStorageKey, prompts]);
 
   async function save() {
     if (saving) return;
@@ -50,7 +69,7 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
       });
       setDirty(false);
     } catch (e) {
-      window.alert(`类型圈保存失败：${errMsg(e)}`);
+      window.alert(`读者遐想（类型圈）保存失败：${errMsg(e)}`);
     } finally {
       setSaving(false);
     }
@@ -60,10 +79,9 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
     <div className="note-pane">
       <div className="pane-head">
         <div>
-          <h2>类型圈</h2>
+          <h2>读者遐想（类型圈）</h2>
           <p className="hint">
-            这本书的读者遐想清单（约 4~6 类）：全书内容只在圈内、不在圈外。
-            类型挂词表提示（只提示不校验）；正文按类型逐条写「想看到什么」。
+            保留原「类型圈」文件与数据结构，用三个轻量方向帮助继续想：读者期待、题材刻板印象、独特吸引力。提示可跳过，不评价完成度。
           </p>
         </div>
         <button
@@ -80,6 +98,36 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
         <p className="hint">正在读取……</p>
       ) : (
         <>
+          <section className="imagination-guidance">
+            <div className="imagination-guidance-head">
+              <div>
+                <h3>想不到时，可以从这三个方向问自己</h3>
+                <p className="hint">这些只是本机引导，不写进创作目录；可以改写、删掉或全部跳过。</p>
+              </div>
+              {prompts.length > 0 ? (
+                <button className="btn" onClick={() => setPrompts([])}>跳过全部</button>
+              ) : (
+                <button
+                  className="btn"
+                  onClick={() => setPrompts(DEFAULT_IMAGINATION_PROMPTS.map((item) => ({ ...item })))}
+                >
+                  恢复引导
+                </button>
+              )}
+            </div>
+            {prompts.map((prompt) => (
+              <div className="imagination-prompt" key={prompt.id}>
+                <strong>{prompt.title}</strong>
+                <textarea
+                  value={prompt.text}
+                  onChange={(event) => setPrompts((items) => editPrompt(items, prompt.id, event.target.value))}
+                />
+                <button className="btn" onClick={() => setPrompts((items) => removePrompt(items, prompt.id))}>
+                  删除
+                </button>
+              </div>
+            ))}
+          </section>
           <label className="field">
             类型（多个用、隔开）
             <VocabInput

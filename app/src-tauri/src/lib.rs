@@ -7,6 +7,7 @@ mod expectation;
 mod export;
 mod foreshadow;
 mod inspiration;
+mod ideation;
 mod library;
 mod planning;
 mod project;
@@ -249,6 +250,11 @@ fn read_project_meta(project: String) -> Result<ProjectMeta, String> {
 #[tauri::command]
 fn save_project_meta(project: String, meta: ProjectMeta) -> Result<(), String> {
     project::write_project_meta(Path::new(&project), &meta)
+}
+
+#[tauri::command]
+fn read_ideation_overview(project: String) -> Result<ideation::IdeationOverview, String> {
+    ideation::read_ideation_overview(Path::new(&project))
 }
 
 /// 大纲纸面（工单 #41）：自由 Markdown，缺失文件即空状态。
@@ -814,6 +820,7 @@ pub fn run() {
             create_project,
             read_project_meta,
             save_project_meta,
+            read_ideation_overview,
             read_outline,
             save_outline,
             read_mainlines,
