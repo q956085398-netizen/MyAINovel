@@ -1913,6 +1913,127 @@ button.save-chip {
   background: var(--surface);
 }
 
+/* AI 助手预设（设置 → AI）：预设行＝默认单选＋图标＋名称/说明＋动作。 */
+.preset-group-title {
+  margin: var(--sp-5) 0 var(--sp-2);
+  color: var(--ink);
+  font-size: var(--fs-md);
+}
+
+.preset-settings .preset-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  padding: var(--sp-3);
+  margin: 0 0 var(--sp-2);
+}
+
+.preset-default {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--ink-soft);
+  font-size: var(--fs-sub);
+  margin-top: 2px;
+}
+
+.preset-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-ctl);
+  background: var(--surface-2);
+  margin-top: 1px;
+}
+
+.preset-emoji {
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+
+.preset-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.preset-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.preset-badge {
+  font-size: var(--fs-sub);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+
+.preset-badge-default {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.preset-desc {
+  margin: var(--sp-1) 0 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-sub);
+}
+
+.preset-provider {
+  margin: var(--sp-1) 0 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-sub);
+}
+
+.preset-warn {
+  color: var(--accent);
+}
+
+.preset-actions {
+  flex: none;
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* 预设编辑小对话框：两列窄字段并排，图标/颜色与供应商/模型各一行。 */
+.preset-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+}
+
+.preset-color-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.preset-default-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0;
+}
+
+@media (max-width: 760px) {
+  .preset-form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 @media (max-width: 760px) {
   .settings-page {
     padding: var(--sp-5);

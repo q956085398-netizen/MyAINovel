@@ -971,6 +971,36 @@ export interface ChatSessionSummary {
   persona?: ChatPersona | null;
 }
 
+/** 与 Rust 侧 presets.rs::AssistantPreset 对应（工单 T06，docs/spec/AI助手预设.md）。
+ *  内置预设 id 一律 builtin: 前缀；空 icon/color 表示未设置。 */
+export interface AssistantPreset {
+  id: string;
+  name: string;
+  description: string;
+  /** 图标（emoji 等）；空串＝无。 */
+  icon: string;
+  /** 识别色（#rrggbb）；空串＝无。 */
+  color: string;
+  systemPrompt: string;
+  /** null＝跟随全局当前供应商/模型。 */
+  providerOverride?: string | null;
+  modelOverride?: string | null;
+}
+
+/** load_assistant_presets 的返回；内置预设来自代码、永远最新。 */
+export interface AssistantPresetState {
+  builtins: AssistantPreset[];
+  userPresets: AssistantPreset[];
+  defaultPresetId: string;
+  builtinVersion: number;
+}
+
+/** save_assistant_presets 的载荷：整份用户预设表＋默认标记。 */
+export interface AssistantPresetSave {
+  defaultPresetId: string;
+  userPresets: AssistantPreset[];
+}
+
 /** chat_stream 的 onEvent Channel 事件；与 Rust 侧 ai.rs::ChatStreamEvent 对应。 */
 export type ChatStreamEvent =
   | { type: "delta"; text: string }

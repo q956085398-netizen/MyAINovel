@@ -11,6 +11,7 @@ mod library;
 mod map;
 mod pending;
 mod planning;
+mod presets;
 mod project;
 mod proofread;
 mod relationship;
@@ -39,6 +40,7 @@ use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
     ProjectMeta,
 };
+use presets::{PresetSave, PresetState};
 use proofread::{ProofReport, ProofreadOptions};
 use relationship::{Confluence, RelationshipTable, RelationshipView};
 use trope::TropeSpan;
@@ -879,6 +881,18 @@ fn delete_chat_session(app: tauri::AppHandle, id: String) -> Result<(), String> 
     ai::delete_session(&ai::sessions_dir(&app)?, &id)
 }
 
+// --- AI 助手预设（工单 T06，docs/spec/AI助手预设.md）：存应用数据目录 ai/presets.json ---
+
+#[tauri::command]
+fn load_assistant_presets(app: tauri::AppHandle) -> Result<PresetState, String> {
+    presets::load(&presets::presets_path(&app)?)
+}
+
+#[tauri::command]
+fn save_assistant_presets(app: tauri::AppHandle, save: PresetSave) -> Result<PresetState, String> {
+    presets::save(&presets::presets_path(&app)?, &save)
+}
+
 /// 流式对话：增量经 onEvent Channel 回推，前端以 token 配对「停止」。
 #[tauri::command]
 async fn chat_stream(
@@ -1026,6 +1040,8 @@ pub fn run() {
             reveal_path,
             load_ai_config,
             save_ai_config,
+            load_assistant_presets,
+            save_assistant_presets,
             list_chat_sessions,
             load_chat_session,
             save_chat_session,

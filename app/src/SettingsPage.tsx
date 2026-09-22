@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import AssistantPresetSettings from "./AssistantPresetSettings";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 import OptionToggle from "./OptionToggle";
 import { ProviderSettingsForm } from "./ProviderSettingsDialog";
@@ -303,16 +304,22 @@ export default function SettingsPage({
           )}
 
           {tab === "ai" && (
-            <section className="settings-section">
-              {aiConfig && <ProviderSettingsForm initial={aiConfig} onSaved={setAiConfig} />}
-              {!aiConfig && !aiError && <p className="hint">正在读取供应商设置…</p>}
-              {aiError && <div className="error-box">读取供应商设置失败：{aiError}</div>}
-              <div className="settings-note">
-                <h3>上下文与隐私</h3>
-                <p>普通对话只在你主动勾选时携带当前文档；固定 AI 命令只发送命令所需材料。供应商会收到你明确发送的内容。</p>
-                <p className="hint">AI 助手预设将在后续工单中加入本页，不会重新放回对话侧栏。</p>
-              </div>
-            </section>
+            <>
+              <section className="settings-section">
+                {aiConfig && <ProviderSettingsForm initial={aiConfig} onSaved={setAiConfig} />}
+                {!aiConfig && !aiError && <p className="hint">正在读取供应商设置…</p>}
+                {aiError && <div className="error-box">读取供应商设置失败：{aiError}</div>}
+                <div className="settings-note">
+                  <h3>上下文与隐私</h3>
+                  <p>
+                    普通对话发送会话历史与你所选助手预设的系统提示，只在你主动勾选时携带当前文档；
+                    固定 AI 命令只发送命令所需材料；人物对话发送该人物的小传、关系与类型圈。
+                    供应商会收到你明确发送的内容，API Key 不在预览或日志中回显。
+                  </p>
+                </div>
+              </section>
+              <AssistantPresetSettings aiConfig={aiConfig} />
+            </>
           )}
 
           {tab === "library" && (

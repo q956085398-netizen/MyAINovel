@@ -10,6 +10,7 @@
     "test:content-surface": "node --test tests/contentSurface.test.ts",
     "test:editor-header": "node --test tests/editorHeader.test.ts",
     "test:settings": "node --test tests/settingsState.test.ts",
+    "test:presets": "node --test tests/presets.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },
