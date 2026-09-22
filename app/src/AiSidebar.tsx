@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Icon, ICON_SIZE_DENSE, X } from "./icons";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import {
-  DEFAULT_SYSTEM_PROMPT,
   buildCommandMessages,
   buildRequestMessages,
   formatCalloutText,
@@ -10,10 +9,22 @@ import {
   isReportKind,
   parseTropeSuggestion,
 } from "./ai";
+import PresetGlyph from "./PresetGlyph";
+import {
+  allPresetsOf,
+  copyAsNewSession,
+  presetSnapshot,
+  resolveDraftPreset,
+  resolveSessionTarget,
+  resolveSystemPrompt,
+  sessionPresetView,
+} from "./sessionPreset";
 import type {
   AiCommandKind,
   AiConfig,
   AiSeed,
+  AssistantPreset,
+  AssistantPresetState,
   ChatMessage,
   ChatPersona,
   ChatSession,
@@ -88,6 +99,12 @@ export default function AiSidebar({
   const [stalePersona, setStalePersona] = useState<string | null>(null);
   /** 防种子被重复消费（React 严格模式效应会跑两遍）。 */
   const seedRef = useRef<AiSeed | null>(null);
+  /** 助手预设表（工单 T07）：新建会话的卡片与胶囊从这里取；读不到退通用助手。 */
+  const [presetState, setPresetState] = useState<AssistantPresetState | null>(null);
+  /** 新会话草稿点选的预设 id；null＝未点选，用设置里的默认。 */
+  const [draftPresetId, setDraftPresetId] = useState<string | null>(null);
+  /** 「换预设＝复制为新会话」小对话框。 */
+  const [switchOpen, setSwitchOpen] = useState(false);
 
   function updateSession(
     fn: (prev: ChatSession | null) => ChatSession | null,
@@ -113,6 +130,15 @@ export default function AiSidebar({
     }
   }
 
+  async function loadPresets() {
+    try {
+      setPresetState(await invoke<AssistantPresetState>("load_assistant_presets"));
+    } catch {
+      // 预设表读不到不挡对话：默认解析会退通用助手基线
+      setPresetState(null);
+    }
+  }
+
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -128,12 +154,23 @@ export default function AiSidebar({
       if (config) setConfig(config);
       else void loadConfig();
     };
+    // 预设管理保存后广播（T06）：侧栏的卡片与胶囊即时换新。
+    const onPresetsChanged = (event: Event) => {
+      const state = (event as CustomEvent<AssistantPresetState>).detail;
+      if (state) setPresetState(state);
+      else void loadPresets();
+    };
     window.addEventListener("gongbi:ai-config-changed", onConfigChanged);
+    window.addEventListener("gongbi:ai-presets-changed", onPresetsChanged);
     void (async () => {
       await loadConfig();
+      await loadPresets();
       await refreshSessions();
     })();
-    return () => window.removeEventListener("gongbi:ai-config-changed", onConfigChanged);
+    return () => {
+      window.removeEventListener("gongbi:ai-config-changed", onConfigChanged);
+      window.removeEventListener("gongbi:ai-presets-changed", onPresetsChanged);
+    };
   }, []);
 
   useEffect(() => {
@@ -165,7 +202,13 @@ export default function AiSidebar({
   async function send(userText: string, meta?: MessageMeta | null, system?: string) {
     const text = userText.trim();
     if (!text || streamingRef.current) return;
-    if (!provider) {
+    // 请求通道按会话的预设快照解析（工单 T07）：覆盖命中时可以顶掉还没
+    // 激活的全局；旧会话/人物会话没有快照，跟随全局当前选择。
+    const origin = currentRef.current;
+    const newSnapshot = presetSnapshot(resolveDraftPreset(draftPresetId, presetState));
+    const sessionPreset = origin ? origin.preset ?? null : newSnapshot;
+    const target = resolveSessionTarget(sessionPreset, config);
+    if (!target.provider) {
       setError("先在「设置」里配置并选择供应商。");
       onOpenSettings();
       return;
@@ -173,13 +216,14 @@ export default function AiSidebar({
 
     const now = nowSec();
     const base =
-      currentRef.current ??
-      {
+      origin ?? {
         id: crypto.randomUUID(),
         title: oneLinePreview(text, 20),
         createdAt: now,
         updatedAt: now,
         messages: [] as ChatMessage[],
+        // 新会话创建那一刻定格预设快照：之后预设怎么改都不影响这个会话。
+        preset: newSnapshot,
       };
     const withUser: ChatSession = {
       ...base,
@@ -200,15 +244,21 @@ export default function AiSidebar({
     }
 
     const docForRequest = docAttached ? getDoc() : null;
-    // 人格会话的首条 system 消息＝人格底座：请求时顶掉默认系统提示，
-    // 也不在历史里重复出现（spec §三）；普通会话没有 system 消息。
+    // 三条路径的系统提示在这里收口（工单 T07 隔离纪律）：固定命令 > 人物
+    // 底座 > 会话预设快照 > 通用助手基线；命令与人物对话不吃普通预设。
+    // 人格底座＝会话首条 system 消息：请求时顶掉预设提示，也不在历史里
+    // 重复出现（spec §三）；普通会话没有 system 消息。
     const personaBase = withUser.messages.find((m) => m.role === "system") ?? null;
     const history = personaBase
       ? withUser.messages.filter((m) => m.role !== "system")
       : withUser.messages;
     const reqMessages = buildRequestMessages(
       history,
-      system ?? personaBase?.content ?? DEFAULT_SYSTEM_PROMPT,
+      resolveSystemPrompt({
+        commandSystem: system ?? null,
+        personaBase: personaBase?.content ?? null,
+        sessionPreset: withUser.preset ?? null,
+      }),
       docForRequest,
     );
     const token = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
@@ -234,9 +284,9 @@ export default function AiSidebar({
     try {
       await invoke("chat_stream", {
         req: {
-          baseUrl: provider.baseUrl,
-          apiKey: provider.apiKey,
-          model: provider.model,
+          baseUrl: target.provider.baseUrl,
+          apiKey: target.provider.apiKey,
+          model: target.model,
           messages: reqMessages,
         },
         token,
@@ -283,6 +333,8 @@ export default function AiSidebar({
         updatedAt: now,
         messages: [{ role: "system", content: system, meta: { kind: "人物对话" } }],
         persona: seed.persona,
+        // 人物对话不绑助手预设（spec §一）：人格底座就是全部。
+        preset: null,
       };
       updateSession(() => session);
       resetAdopted();
@@ -387,6 +439,29 @@ export default function AiSidebar({
     }
   }
 
+  /** 换预设＝复制为新会话（工单 T07，spec §四）：新 id、新时间、换成目标
+   *  预设的快照，可见消息可选带上；原会话原封不动地留在列表里。 */
+  function createSwitchedSession(target: AssistantPreset, includeVisible: boolean) {
+    const origin = currentRef.current;
+    if (!origin || streamingRef.current) return;
+    const session = copyAsNewSession(
+      origin,
+      target,
+      includeVisible,
+      crypto.randomUUID(),
+      nowSec(),
+    );
+    updateSession(() => session);
+    resetAdopted();
+    setPicked(new Set());
+    setSwitchOpen(false);
+    void invoke("save_chat_session", { session })
+      .then(() => refreshSessions())
+      .catch(() => {
+        // 新会话落盘失败不丢界面：下一条消息发出时会再存
+      });
+  }
+
   /** 人物对话的勾选（spec §六）：一段对话＝一条或多条消息，说话人标记
    *  （我＝作者，AI 那条记人物名）在采纳对话框里预填。 */
   function togglePick(i: number) {
@@ -399,6 +474,10 @@ export default function AiSidebar({
   }
 
   const persona = current?.persona ?? null;
+  // 会话胶囊（工单 T07）：普通会话显示创建时绑定的预设快照，人物会话不显示。
+  const presetView = sessionPresetView(current?.preset, presetState);
+  const allPresets = allPresetsOf(presetState);
+  const draftPreset = resolveDraftPreset(draftPresetId, presetState);
   const pickedEntries: ChatExcerptEntry[] = persona
     ? [...picked]
         .sort((a, b) => a - b)
@@ -451,12 +530,14 @@ export default function AiSidebar({
         <button
           className="btn small"
           disabled={streaming}
-          title={current ? "开一个新会话" : "已在空会话"}
+          title={current ? "开一个新会话（先选助手预设）" : "已在空会话"}
           onClick={() => {
             updateSession(() => null);
             resetAdopted();
             setPicked(new Set());
             setStalePersona(null);
+            // 每个新会话都从设置里的默认助手起步（工单 T07）。
+            setDraftPresetId(null);
           }}
         >
           新会话
@@ -490,11 +571,62 @@ export default function AiSidebar({
             </option>
           ))}
         </select>
+        {current && !persona && (
+          <>
+            <span
+              className={`ai-preset-chip${presetView?.deleted ? " stale" : ""}`}
+              title={
+                presetView
+                  ? presetView.deleted
+                    ? `「${presetView.name}」已从设置里删除，这个会话按创建时的快照继续`
+                    : `这个会话创建时绑定的助手：${presetView.name}（换助手＝另开新会话）`
+                  : "旧会话未绑定预设：按通用助手继续"
+              }
+            >
+              <span
+                className="ai-preset-dot"
+                style={{ background: presetView?.color || "var(--accent)" }}
+              />
+              {presetView ? presetView.name : "通用助手"}
+              {presetView?.deleted ? "·已删" : ""}
+            </span>
+            <button
+              className="link-like"
+              disabled={streaming}
+              title="不在原会话里换人格：另开新会话，可选带上现在的对话"
+              onClick={() => setSwitchOpen(true)}
+            >
+              换预设
+            </button>
+          </>
+        )}
       </div>
 
       {stalePersona && persona && <div className="hint-box">{stalePersona}</div>}
 
       <div className="ai-messages" ref={messagesRef}>
+        {!current && (
+          <div className="ai-preset-pick">
+            <p className="ai-preset-pick-title">
+              新会话用哪个助手？
+              {!presetState && <span className="hint">（预设表读取失败，先按通用助手开聊）</span>}
+            </p>
+            {allPresets.length > 0 && (
+              <div className="ai-preset-cards">
+                {allPresets.map((p) => (
+                  <PresetCard
+                    key={p.id}
+                    preset={p}
+                    selected={p.id === draftPreset.id}
+                    suffix={p.id === presetState?.defaultPresetId ? "（默认）" : undefined}
+                    onClick={() => setDraftPresetId(p.id)}
+                  />
+                ))}
+              </div>
+            )}
+            <p className="hint">发出第一条消息时创建会话，并固定这个助手；之后换助手＝另开新会话。</p>
+          </div>
+        )}
         {!current || current.messages.length === 0 ? (
           <div className="ai-empty">
             <p>和 AI 聊拆书、找灵感、构思剧情。各板块的「AI 命令」：</p>
@@ -634,7 +766,116 @@ export default function AiSidebar({
           onClose={() => setAdoptOpen(null)}
         />
       )}
+
+      {switchOpen && current && !persona && (
+        <PresetSwitchDialog
+          presets={allPresets}
+          preselectId={draftPreset.id}
+          fromName={presetView?.name ?? "通用助手"}
+          messageCount={current.messages.filter((m) => m.role !== "system").length}
+          onClose={() => setSwitchOpen(false)}
+          onCreate={createSwitchedSession}
+        />
+      )}
     </aside>
+  );
+}
+
+/** 预设卡片（新会话选择与换预设对话框共用）：图标＋名字，选中描边。 */
+function PresetCard({
+  preset,
+  selected,
+  suffix,
+  onClick,
+}: {
+  preset: AssistantPreset;
+  selected: boolean;
+  /** 名字后的标记（如「（默认）」），换预设对话框里不显示。 */
+  suffix?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`ai-preset-card${selected ? " selected" : ""}`}
+      title={preset.description || preset.name}
+      onClick={onClick}
+    >
+      <PresetGlyph preset={preset} />
+      <span className="ai-preset-card-name">
+        {preset.name}
+        {suffix}
+      </span>
+    </button>
+  );
+}
+
+/** 「换预设＝复制为新会话」小对话框（工单 T07，spec §四）：选目标预设＋
+ *  是否带上现在的可见对话；确认后另开新会话，不在原会话里混人格。 */
+function PresetSwitchDialog({
+  presets,
+  preselectId,
+  fromName,
+  messageCount,
+  onClose,
+  onCreate,
+}: {
+  presets: AssistantPreset[];
+  preselectId: string;
+  fromName: string;
+  messageCount: number;
+  onClose: () => void;
+  onCreate: (target: AssistantPreset, includeVisible: boolean) => void;
+}) {
+  const [pickedId, setPickedId] = useState(preselectId);
+  const [copyVisible, setCopyVisible] = useState(true);
+  const selected = presets.find((p) => p.id === pickedId) ?? null;
+  return (
+    <div
+      className="dialog-overlay"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="dialog">
+        <h3>换个助手，开新会话</h3>
+        <p className="hint">
+          「{fromName}」的会话保持不变；新会话从下面选的助手开始。
+        </p>
+        {presets.length === 0 ? (
+          <p className="hint">预设表读取失败：先去「设置 → AI」看看预设管理。</p>
+        ) : (
+          <div className="ai-preset-cards in-dialog">
+            {presets.map((p) => (
+              <PresetCard
+                key={p.id}
+                preset={p}
+                selected={p.id === pickedId}
+                onClick={() => setPickedId(p.id)}
+              />
+            ))}
+          </div>
+        )}
+        <label className="ai-preset-copy">
+          <input
+            type="checkbox"
+            checked={copyVisible}
+            onChange={(e) => setCopyVisible(e.target.checked)}
+          />
+          带上现在的 {messageCount} 条对话（AI 只看得到带进新会话的内容）
+        </label>
+        <div className="dialog-actions">
+          <button className="btn" onClick={onClose}>
+            取消
+          </button>
+          <button
+            className="btn primary"
+            disabled={!selected}
+            onClick={() => selected && onCreate(selected, copyVisible)}
+          >
+            创建新会话
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

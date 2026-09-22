@@ -6,7 +6,9 @@ import type {
   TropeSuggestion,
   Vocabulary,
 } from "./types";
-import { AI_CHAPTER_COMPANION } from "./types";
+// 值导入必须带 .ts 扩展名：node --test 的纯逻辑模块（sessionPreset.ts）
+// 会链到本文件，Node 的 ESM 解析不认无扩展名说明符（tsc 已开 allowImportingTsExtensions）。
+import { AI_CHAPTER_COMPANION } from "./types.ts";
 
 /** 普通对话的默认系统提示（ADR 0003：只做梳理、建议、提炼、激发灵感这类助手活）。
  *  逐字基线是内置预设「通用助手」（presets.rs，有全文测试锁定）；旧会话没有

@@ -73,6 +73,24 @@ pub struct ChatPersona {
     pub person: String,
 }
 
+/// 普通对话创建时绑定的助手预设快照（工单 T07，docs/spec/AI助手预设.md §四）：
+/// 创建那一刻定格，之后预设改名、改提示、改覆盖乃至删除都不再影响这个会话。
+/// 字段与 presets.rs::AssistantPreset 一一对应（去掉不入行为的 description）。
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPreset {
+    pub id: String,
+    pub name: String,
+    /// 图标（emoji 等）；空串＝无。
+    pub icon: String,
+    /// 识别色（#rrggbb）；空串＝无。
+    pub color: String,
+    pub system_prompt: String,
+    /// null＝跟随全局当前供应商/模型。
+    pub provider_override: Option<String>,
+    pub model_override: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatSession {
@@ -85,6 +103,10 @@ pub struct ChatSession {
     /// 人物对话标签（普通 AI 会话为 None；旧会话文件缺此键＝None）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persona: Option<ChatPersona>,
+    /// 普通会话的助手预设快照（人物对话与旧会话文件缺此键＝None，
+    /// 旧会话按通用助手基线继续）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<ChatPreset>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -553,6 +575,7 @@ mod tests {
                 meta: Some(json!({"kind":"小结","startLine":3})),
             }],
             persona: None,
+            preset: None,
         };
         save_session(dir.path(), &s).unwrap();
         let loaded = load_session(dir.path(), "s1").unwrap();
@@ -582,6 +605,7 @@ mod tests {
             updated_at: 0,
             messages: vec![],
             persona: None,
+            preset: None,
         };
         assert!(save_session(dir.path(), &s).is_err());
         assert!(load_session(dir.path(), "../evil").is_err());
@@ -619,6 +643,7 @@ mod tests {
                 project: "《大魏读书人》".into(),
                 person: "张三".into(),
             }),
+            preset: None,
         };
         save_session(dir.path(), &s).unwrap();
         assert_eq!(
@@ -641,10 +666,53 @@ mod tests {
             updated_at: 0,
             messages: vec![],
             persona: None,
+            preset: None,
         };
         save_session(dir.path(), &plain).unwrap();
         let text = std::fs::read_to_string(dir.path().join("plain.json")).unwrap();
         assert!(!text.contains("persona"), "{text}");
+    }
+
+    #[test]
+    fn session_preset_snapshot_round_trip_and_legacy() {
+        let dir = tempfile::tempdir().unwrap();
+        // 旧会话文件（没有 preset 键）读回来是 None，按通用助手基线继续。
+        std::fs::write(
+            dir.path().join("legacy.json"),
+            r#"{"id":"legacy","title":"旧会话","createdAt":1,"updatedAt":2,"messages":[]}"#,
+        )
+        .unwrap();
+        assert!(load_session(dir.path(), "legacy").unwrap().preset.is_none());
+
+        // 普通会话的预设快照：camelCase 往返，覆盖与模型空串/None 两态都保真。
+        let snapshot = ChatPreset {
+            id: "u-1".into(),
+            name: "我的军师".into(),
+            icon: "🧠".into(),
+            color: "#ae432e".into(),
+            system_prompt: "你是军师。".into(),
+            provider_override: Some("p-b".into()),
+            model_override: None,
+        };
+        let s = ChatSession {
+            id: "snap".into(),
+            title: "聊聊".into(),
+            created_at: 1,
+            updated_at: 5,
+            messages: vec![],
+            persona: None,
+            preset: Some(snapshot.clone()),
+        };
+        save_session(dir.path(), &s).unwrap();
+        assert_eq!(load_session(dir.path(), "snap").unwrap().preset, Some(snapshot));
+
+        // 无预设会话存盘不落 preset 键，文件形状与旧会话完全一致。
+        let mut bare = s.clone();
+        bare.id = "bare".into();
+        bare.preset = None;
+        save_session(dir.path(), &bare).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("bare.json")).unwrap();
+        assert!(!text.contains("preset"), "{text}");
     }
 
     #[test]

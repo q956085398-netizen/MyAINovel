@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BookOpen, Icon, MessageCircle, PenLine, Sparkles, ICON_SIZE_DENSE } from "./icons";
+import PresetGlyph from "./PresetGlyph";
 import {
   GENERAL_PRESET_ID,
   copyDraft,
@@ -15,14 +15,6 @@ import type {
   AssistantPresetState,
 } from "./types";
 import { errMsg } from "./util";
-
-/** 内置预设的固定图标；个人预设显示自己填的 emoji，没填就退通用图标。 */
-const BUILTIN_ICONS: Record<string, typeof MessageCircle> = {
-  "builtin:general": MessageCircle,
-  "builtin:analyst": BookOpen,
-  "builtin:ideator": Sparkles,
-  "builtin:editor": PenLine,
-};
 
 /** 预设管理区（工单 T06，docs/spec/AI助手预设.md §五.2）：设置 → AI 的
  *  「AI 助手预设」节。内置只读可复制；个人预设增删改、设默认；删除默认
@@ -113,15 +105,6 @@ export default function AssistantPresetSettings({ aiConfig }: { aiConfig: AiConf
     setDeleting(null);
   }
 
-  const presetIcon = (preset: AssistantPreset) => {
-    if (BUILTIN_ICONS[preset.id]) {
-      return <Icon as={BUILTIN_ICONS[preset.id]} size={ICON_SIZE_DENSE} />;
-    }
-    return preset.icon ? <span className="preset-emoji">{preset.icon}</span> : (
-      <Icon as={MessageCircle} size={ICON_SIZE_DENSE} />
-    );
-  };
-
   const presetRow = (preset: AssistantPreset, builtin: boolean) => {
     const isDefault = state?.defaultPresetId === preset.id;
     const override = resolveProviderOverride(preset, aiConfig);
@@ -138,7 +121,7 @@ export default function AssistantPresetSettings({ aiConfig }: { aiConfig: AiConf
           默认
         </label>
         <span className="preset-icon" style={preset.color ? { color: preset.color } : undefined}>
-          {presetIcon(preset)}
+          <PresetGlyph preset={preset} />
         </span>
         <div className="preset-body">
           <p className="preset-title">

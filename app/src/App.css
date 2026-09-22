@@ -2301,6 +2301,97 @@ button.save-chip {
   gap: var(--sp-1);
 }
 
+/* AI 侧栏的助手预设绑定（工单 T07，docs/spec/AI助手预设.md §四、§五.1） */
+.ai-preset-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sub);
+  color: var(--ink-soft);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 2px 10px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-preset-chip .ai-preset-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+}
+
+.ai-preset-chip.stale {
+  color: var(--warn-ink);
+  border-color: var(--warn-line);
+}
+
+.ai-preset-pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0 var(--sp-3);
+  border-bottom: 1px dashed var(--line);
+}
+
+.ai-preset-pick-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: var(--fs-ui);
+}
+
+.ai-preset-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+}
+
+.ai-preset-card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  font: inherit;
+  font-size: var(--fs-ui);
+  text-align: left;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+  min-width: 0;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.ai-preset-card:hover {
+  border-color: var(--accent);
+}
+
+.ai-preset-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ai-preset-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-preset-copy {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-ui);
+  color: var(--ink-soft);
+  margin-top: var(--sp-2);
+}
+
 .ai-msg.user {
   align-items: flex-end;
 }
