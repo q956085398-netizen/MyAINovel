@@ -109,7 +109,7 @@ export default function NoteList({
           {onAiCommand && (
             <button
               className="btn"
-              title="AI 分拣这一池矛盾：能长成单元的、重复的、偏离类型圈的（只出报告，不改文件）"
+              title="AI 分拣这一池矛盾：能长成单元的、重复的、偏离读者遐想（类型圈）的（只出报告，不改文件）"
               onClick={onAiCommand}
             >
               AI 矛盾梳理
@@ -193,7 +193,7 @@ export default function NoteList({
                 {kind === "人物" && onChat && (
                   <button
                     className="btn small"
-                    title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋类型圈当人格底座）"
+                    title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋读者遐想（类型圈）当人格底座）"
                     onClick={() => onChat(note.name)}
                   >
                     跟 TA 聊

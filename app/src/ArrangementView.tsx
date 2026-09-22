@@ -167,7 +167,7 @@ export default function ArrangementView({
             <button
               className="btn"
               disabled={saving}
-              title="AI 读类型圈与排布给节奏建议（只出报告，不改 排布.yaml；有改动先保存）"
+              title="AI 读读者遐想（类型圈）与排布给节奏建议（只出报告，不改 排布.yaml；有改动先保存）"
               onClick={() => void runAiCheck()}
             >
               AI 排布体检

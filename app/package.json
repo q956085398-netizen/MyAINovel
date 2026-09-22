@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:ideation": "node --experimental-strip-types --test tests/ideationGuidance.test.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.0",
