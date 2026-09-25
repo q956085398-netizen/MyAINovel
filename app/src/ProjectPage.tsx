@@ -319,6 +319,8 @@ export default function ProjectPage({
             <BridgeLibrary
               project={project.dir}
               units={units}
+              unitOrder={arrangement.map((item) => item.unit)}
+              vocab={vocab}
               onChanged={refreshAll}
             />
           )}

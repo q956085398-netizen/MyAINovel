@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { NoteDraft, NoteEntry, NoteKind, Vocabulary } from "./types";
+import type { ArrangementItem, Bridge, NoteDraft, NoteEntry, NoteKind, Vocabulary } from "./types";
 import { emptyNoteDraft } from "./types";
 import { errMsg, oneLinePreview } from "./util";
 import NoteDialog from "./NoteDialog";
 import GeoUpgradeDialog from "./GeoUpgradeDialog";
 import PendingZone from "./PendingZone";
 import { usePendingToggle } from "./pendingToggle";
+import { BridgeCard, BridgeDialog } from "./BridgeLibrary";
 
 interface NoteListProps {
   project: string;
@@ -32,7 +33,7 @@ const KIND_HEADINGS: Record<NoteKind, string> = {
 
 const KIND_HINTS: Record<NoteKind, string> = {
   矛盾: "构思期尚模糊的剧情种子：一句话核心＋类型，展开后提为单元（矛盾留档、状态改「已成单元」）。",
-  单元: "矛盾展开后的形态：约 4~5 个桥段的完整故事，桥段清单写在正文（自由文本）。",
+  单元: "矛盾展开后的形态：约 4~5 个桥段；已安排桥段在下方按人工次序展示，旧正文仍保留。",
   人物: "一人一文件、文件名即人名；小传写在这里，关系连在「画布」视图（类型/方向/秘密）。",
   世界观: "设定词条：类别（力量体系/地理/势力/其他）；地图＝「地理」类词条，排布按名引用。",
   开头: "开篇构思的多版本形态：每版一文件，标「备选/选定」；多份「选定」应用会提醒你。",
@@ -101,6 +102,8 @@ export default function NoteList({
   onChat,
 }: NoteListProps) {
   const [notes, setNotes] = useState<NoteEntry[]>([]);
+  const [bridges, setBridges] = useState<Bridge[]>([]);
+  const [unitOrder, setUnitOrder] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ draft: NoteDraft; prevPath: string | null } | null>(
@@ -108,12 +111,22 @@ export default function NoteList({
   );
   const [promoting, setPromoting] = useState<string | null>(null);
   const [upgrading, setUpgrading] = useState<NoteEntry | null>(null);
+  const [editingBridge, setEditingBridge] = useState<Bridge | null>(null);
 
   const scan = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setNotes(await invoke<NoteEntry[]>("scan_notes", { project, kind }));
+      const entries = await invoke<NoteEntry[]>("scan_notes", { project, kind });
+      setNotes(entries);
+      if (kind === "单元") {
+        const [bridgeEntries, order] = await Promise.all([
+          invoke<Bridge[]>("scan_bridges", { project }),
+          invoke<ArrangementItem[]>("read_arrangement", { project }),
+        ]);
+        setBridges(bridgeEntries);
+        setUnitOrder(order.map((item) => item.unit));
+      }
     } catch (e) {
       setNotes([]);
       setError(`读取${kind}失败：${errMsg(e)}`);
@@ -157,8 +170,47 @@ export default function NoteList({
     }
   }
 
-  const polishing = notes.filter((n) => n.pending);
-  const normal = notes.filter((n) => !n.pending);
+  async function changeBridge(command: "move_bridge" | "unarrange_bridge", bridge: Bridge, direction?: -1 | 1) {
+    try {
+      await invoke(command, { project, path: bridge.path, direction });
+      await scan();
+      onChanged();
+    } catch (e) {
+      window.alert(`调整桥段失败：${errMsg(e)}`);
+    }
+  }
+
+  function unitBridges(note: NoteEntry) {
+    if (kind !== "单元") return null;
+    const arranged = bridges.filter((bridge) => bridge.unit === note.name);
+    if (arranged.length === 0) return null;
+    return <section className="unit-bridges" aria-label={`${note.name}的桥段`}>
+      <h4>桥段安排</h4>
+      {arranged.map((bridge) => <BridgeCard
+        key={bridge.path}
+        bridge={bridge}
+        units={notes}
+        allBridges={bridges}
+        onEdit={() => setEditingBridge(bridge)}
+        onMove={(direction) => void changeBridge("move_bridge", bridge, direction)}
+        onUnarrange={() => void changeBridge("unarrange_bridge", bridge)}
+      />)}
+    </section>;
+  }
+
+  function unitNumber(note: NoteEntry) {
+    if (kind !== "单元") return null;
+    const position = unitOrder.indexOf(note.name);
+    return position < 0 ? null : <span className="tag">第 {position + 1} 单元</span>;
+  }
+
+  const orderedNotes = kind === "单元" ? [...notes].sort((a, b) => {
+    const left = unitOrder.indexOf(a.name);
+    const right = unitOrder.indexOf(b.name);
+    return (left < 0 ? Infinity : left) - (right < 0 ? Infinity : right);
+  }) : notes;
+  const polishing = orderedNotes.filter((n) => n.pending);
+  const normal = orderedNotes.filter((n) => !n.pending);
 
   const selectedStatus =
     kind === "开头" && notes.filter((n) => n.status === "选定").length > 1
@@ -196,7 +248,7 @@ export default function NoteList({
         count={polishing.length}
         hint="还在发酵；整理完成后回到下面的原位置。"
       >
-        <div className="card-list">
+        <div className={`card-list ${kind === "单元" ? "unit-flow" : ""}`}>
           {polishing.map((note) => (
             <article key={note.path} className="card-item is-pending">
               <div className="card-title-row">
@@ -207,10 +259,12 @@ export default function NoteList({
                 >
                   {note.name}
                 </button>
+                {unitNumber(note)}
                 <NoteBadges kind={kind} note={note} />
               </div>
               <NoteCoreLines kind={kind} note={note} />
               {note.body && <div className="card-body">{note.body}</div>}
+              {unitBridges(note)}
               <div className="card-actions">
                 <button
                   className="btn primary small"
@@ -245,7 +299,7 @@ export default function NoteList({
         </div>
       )}
 
-      <div className="card-list">
+      <div className={`card-list ${kind === "单元" ? "unit-flow" : ""}`}>
         {normal.map((note) => (
           <div key={note.path} className="card-item">
             <div className="card-title-row">
@@ -256,15 +310,17 @@ export default function NoteList({
               >
                 {note.name}
               </button>
+              {unitNumber(note)}
               <NoteBadges kind={kind} note={note} />
             </div>
 
             <NoteCoreLines kind={kind} note={note} />
-            {note.body && (
+            {note.body && (kind === "单元" ? <div className="card-body">{note.body}</div> : (
               <p className="card-preview" title={note.body}>
                 {oneLinePreview(note.body, 120)}
               </p>
-            )}
+            ))}
+            {unitBridges(note)}
             <div className="card-actions">
               <button
                 className="btn small"
@@ -327,6 +383,14 @@ export default function NoteList({
           }}
         />
       )}
+      {editingBridge && <BridgeDialog
+        project={project}
+        initial={editingBridge}
+        prevPath={editingBridge.path}
+        vocab={vocab}
+        onClose={() => setEditingBridge(null)}
+        onSaved={() => { setEditingBridge(null); void scan(); onChanged(); }}
+      />}
       {upgrading && (
         <GeoUpgradeDialog
           project={project}

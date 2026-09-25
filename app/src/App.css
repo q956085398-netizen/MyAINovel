@@ -2700,8 +2700,21 @@ button.save-chip {
 
 .bridge-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: var(--sp-4);
+}
+
+.unit-flow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--sp-4);
+}
+
+@media (max-width: 1050px) {
+  .bridge-cards,
+  .unit-flow { grid-template-columns: minmax(0, 1fr); }
 }
 
 .bridge-card {
@@ -2716,6 +2729,7 @@ button.save-chip {
   box-shadow: var(--sh-1);
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
     box-shadow var(--dur) var(--ease);
+  min-width: 0;
 }
 
 .bridge-card:hover {
@@ -2739,6 +2753,8 @@ button.save-chip {
   align-items: flex-start;
 }
 
+.bridge-card-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+
 .memo-mark {
   display: inline-block;
   padding: 1px var(--sp-2);
@@ -2755,20 +2771,37 @@ button.save-chip {
   font-weight: 600;
 }
 
-.bridge-summary {
-  display: -webkit-box;
+.bridge-body {
   margin: 0;
-  overflow: hidden;
   color: var(--ink);
-  line-height: 1.65;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.bridge-meta {
+.bridge-fields {
   color: var(--ink-soft);
   font-size: var(--fs-sub);
 }
+
+.bridge-fields p { margin: 0 0 var(--sp-1); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.bridge-pairs { display: grid; gap: var(--sp-2); }
+.bridge-pairs p { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0; }
+.bridge-pairs p span:first-child { color: var(--accent); }
+
+.unit-bridges { display: grid; gap: var(--sp-3); margin-top: var(--sp-4); }
+.unit-bridges h4 { margin: 0; font-size: var(--fs-ui); color: var(--ink-soft); }
+.unit-bridges .bridge-card { box-shadow: none; background: var(--surface-2); }
+
+.bridge-pair-editor { margin: 0 0 var(--sp-4); padding: var(--sp-3); border: var(--line-w) solid var(--line); border-radius: var(--r-card); }
+.bridge-pair-editor legend { color: var(--ink); font-weight: 600; }
+.bridge-pair-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: var(--sp-2); align-items: end; }
+.bridge-pair-row label { min-width: 0; }
+.bridge-pair-actions { display: flex; gap: var(--sp-1); margin-bottom: var(--sp-4); }
+.bridge-prompt-toggle { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.bridge-prompt-fields { padding: var(--sp-3); margin-bottom: var(--sp-4); background: var(--surface-2); border-radius: var(--r-card); }
+@media (max-width: 800px) { .bridge-pair-row { grid-template-columns: minmax(0, 1fr); } }
 
 .bridge-card .hint,
 .bridge-card .soft-warning {
