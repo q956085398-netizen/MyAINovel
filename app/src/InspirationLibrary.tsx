@@ -32,6 +32,22 @@ import {
 
 const INSPIRATION_SURFACE = "inspiration";
 
+function chapterLink(link: string): { project: string; fileName: string } | null {
+  if (!link.startsWith("章:")) return null;
+  const segments = link.slice(2).split("/");
+  if (segments.length !== 2) return null;
+  try {
+    return { project: decodeURIComponent(segments[0]), fileName: decodeURIComponent(segments[1]) };
+  } catch {
+    return null;
+  }
+}
+
+function linkLabel(link: string): string {
+  const chapter = chapterLink(link);
+  return chapter ? `${chapter.project} / ${chapter.fileName}` : link;
+}
+
 function formatCount(n: number): string {
   return n.toLocaleString("zh-Hans-CN");
 }
@@ -179,7 +195,7 @@ function InspirationCardItem({
               title="打开关联的卡片或拆书稿"
               onClick={() => void onOpenLink(link)}
             >
-              <SearchHighlight text={link} query={searchQuery} />
+              <SearchHighlight text={linkLabel(link)} query={searchQuery} />
             </button>
           ))}
         </p>
@@ -201,6 +217,7 @@ interface InspirationLibraryProps {
   onOpenBook: (book: BookEntry) => void;
   /** 「关联」里的项目去向（《书名》/名字）→ 打开该项目的页签；给出人名则落到画布。 */
   onOpenProject: (project: ProjectEntry, tab?: ProjectTab, focus?: string) => void;
+  onOpenChapter: (project: ProjectEntry, path: string) => void;
   /** 转生时没有项目可去：切到「构思」板块新建。 */
   onGoIdeation: () => void;
 }
@@ -213,6 +230,7 @@ export default function InspirationLibrary({
   onCreateLibrary,
   onOpenBook,
   onOpenProject,
+  onOpenChapter,
   onGoIdeation,
 }: InspirationLibraryProps) {
   const [cards, setCards] = useState<InspirationCard[]>([]);
@@ -283,6 +301,21 @@ export default function InspirationLibrary({
   async function openLink(text: string) {
     if (!libraryPath) return;
     const t = text.trim();
+    if (t.startsWith("章:")) {
+      try {
+        const linked = await invoke<{ project: ProjectEntry; chapter: { path: string } } | null>(
+          "resolve_chapter_inspiration_link", { root: libraryPath, link: t },
+        );
+        if (linked) {
+          onOpenChapter(linked.project, linked.chapter.path);
+          return;
+        }
+        window.alert(`关联的章节「${linkLabel(t)}」已失效，便笺仍保留。`);
+      } catch (e) {
+        window.alert(`查找章节关联失败：${errMsg(e)}`);
+      }
+      return;
+    }
     const card = cards.find((c) => c.title === t);
     if (card) {
       setEditing({ draft: card, prevPath: card.path });

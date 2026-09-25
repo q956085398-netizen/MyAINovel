@@ -482,6 +482,13 @@ export interface ChapterEntry {
   hanCount: number;
 }
 
+/** 章节总览只读资料；不含正文。 */
+export interface ChapterCard {
+  chapter: ChapterEntry;
+  summary: string | null;
+  intent: string | null;
+}
+
 /** 保存前的历史版本（`.gongbi/历史/<章>/<时间戳>.md`）。 */
 export interface SnapshotEntry {
   path: string;
