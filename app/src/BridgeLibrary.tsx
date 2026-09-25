@@ -186,7 +186,11 @@ export function BridgeCard({
   const warnings = rangeWarnings(bridge, allBridges, units, siblings, index);
 
   return (
-    <article className="bridge-card">
+    <article className={`bridge-card ${onEdit ? "is-editable" : ""}`} onClick={(event) => {
+      if (!onEdit || (event.target as HTMLElement).closest("button, input, select, textarea, a")) return;
+      if (window.getSelection()?.toString()) return;
+      onEdit();
+    }}>
       <div className="bridge-card-head">
         <div>
           <span className="memo-mark">桥段</span>
@@ -292,6 +296,11 @@ export function BridgeDialog({
   const [draft, setDraft] = useState<BridgeDraft>({ ...initial });
   const [busy, setBusy] = useState(false);
   const [showPrompts, setShowPrompts] = useState(Boolean(initial.priorDesire || initial.progressionTrigger || initial.payoffImage));
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) onClose(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
   const set = <K extends keyof BridgeDraft>(key: K, value: BridgeDraft[K]) => setDraft((current) => ({ ...current, [key]: value }));
   const number = (raw: string) => {
     const value = Number.parseInt(raw.trim(), 10);
@@ -315,9 +324,9 @@ export function BridgeDialog({
   }
 
   return (
-    <div className="dialog-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="dialog-overlay bridge-drawer-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="dialog wide bridge-dialog">
-        <h2>{prevPath ? "编辑桥段" : "新建桥段草案"}</h2>
+        <div className="bridge-drawer-head"><h2>{prevPath ? "编辑桥段" : "新建桥段草案"}</h2><button className="btn small" onClick={onClose}>关闭</button></div>
         <label>桥段名<input autoFocus value={draft.name} onChange={(e) => set("name", e.target.value)} placeholder="如：夜探旧宅" /></label>
         <fieldset className="bridge-pair-editor">
           <legend>类型 → 解法 <span className="hint">可留空；词表只提供提示</span></legend>

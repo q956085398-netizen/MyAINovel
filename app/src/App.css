@@ -2753,6 +2753,8 @@ button.save-chip {
   align-items: flex-start;
 }
 
+.bridge-card.is-editable { cursor: pointer; }
+
 .bridge-card-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
 
 .memo-mark {
@@ -3439,6 +3441,19 @@ button.save-chip {
   color: var(--ink-soft);
   line-height: 1.6;
 }
+
+.bridge-drawer-overlay { justify-content: flex-end; }
+.bridge-drawer-overlay .bridge-dialog {
+  width: min(720px, 100vw);
+  max-width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: var(--r-dialog) 0 0 var(--r-dialog);
+}
+.bridge-drawer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-4); }
+@media (max-width: 700px) { .bridge-drawer-overlay .bridge-dialog { border-radius: 0; } }
+
+.unit-attrs p { margin: 0 0 var(--sp-1); white-space: pre-wrap; }
 
 .field-label {
   display: block;

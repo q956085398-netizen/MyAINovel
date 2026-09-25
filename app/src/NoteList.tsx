@@ -8,6 +8,7 @@ import GeoUpgradeDialog from "./GeoUpgradeDialog";
 import PendingZone from "./PendingZone";
 import { usePendingToggle } from "./pendingToggle";
 import { BridgeCard, BridgeDialog } from "./BridgeLibrary";
+import { CONTENT_SURFACE_STORAGE_KEY, readCollapsedCardPaths, serializeCollapsedCardPaths } from "./contentSurfaceState";
 
 interface NoteListProps {
   project: string;
@@ -112,6 +113,9 @@ export default function NoteList({
   const [promoting, setPromoting] = useState<string | null>(null);
   const [upgrading, setUpgrading] = useState<NoteEntry | null>(null);
   const [editingBridge, setEditingBridge] = useState<Bridge | null>(null);
+  const [collapsedUnits, setCollapsedUnits] = useState(() => readCollapsedCardPaths(
+    window.localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY), "units",
+  ));
 
   const scan = useCallback(async () => {
     setLoading(true);
@@ -204,6 +208,31 @@ export default function NoteList({
     return position < 0 ? null : <span className="tag">第 {position + 1} 单元</span>;
   }
 
+  function unitDetails(note: NoteEntry) {
+    if (kind !== "单元") return null;
+    return <div className="unit-attrs">
+      {note.emotionGoal && <p>情绪目标：{note.emotionGoal}</p>}
+      {(note.startChapter || note.endChapter) && <p>章节区间：{note.startChapter ?? "？"} ~ {note.endChapter ?? "？"}</p>}
+    </div>;
+  }
+
+  function toggleUnit(note: NoteEntry) {
+    const next = new Set(collapsedUnits);
+    if (next.has(note.path)) next.delete(note.path); else next.add(note.path);
+    window.localStorage.setItem(CONTENT_SURFACE_STORAGE_KEY, serializeCollapsedCardPaths(
+      window.localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY), "units", next,
+    ));
+    setCollapsedUnits(next);
+  }
+
+  function unitCollapseButton(note: NoteEntry) {
+    if (kind !== "单元") return null;
+    const collapsed = collapsedUnits.has(note.path);
+    return <button className="btn small" aria-expanded={!collapsed} onClick={() => toggleUnit(note)}>
+      {collapsed ? "展开" : "收起"}
+    </button>;
+  }
+
   const orderedNotes = kind === "单元" ? [...notes].sort((a, b) => {
     const left = unitOrder.indexOf(a.name);
     const right = unitOrder.indexOf(b.name);
@@ -261,10 +290,14 @@ export default function NoteList({
                 </button>
                 {unitNumber(note)}
                 <NoteBadges kind={kind} note={note} />
+                {unitCollapseButton(note)}
               </div>
+              {(kind !== "单元" || !collapsedUnits.has(note.path)) && <>
               <NoteCoreLines kind={kind} note={note} />
+              {unitDetails(note)}
               {note.body && <div className="card-body">{note.body}</div>}
               {unitBridges(note)}
+              </>}
               <div className="card-actions">
                 <button
                   className="btn primary small"
@@ -312,15 +345,19 @@ export default function NoteList({
               </button>
               {unitNumber(note)}
               <NoteBadges kind={kind} note={note} />
+              {unitCollapseButton(note)}
             </div>
 
+            {(kind !== "单元" || !collapsedUnits.has(note.path)) && <>
             <NoteCoreLines kind={kind} note={note} />
+            {unitDetails(note)}
             {note.body && (kind === "单元" ? <div className="card-body">{note.body}</div> : (
               <p className="card-preview" title={note.body}>
                 {oneLinePreview(note.body, 120)}
               </p>
             ))}
             {unitBridges(note)}
+            </>}
             <div className="card-actions">
               <button
                 className="btn small"
