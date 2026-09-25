@@ -13,13 +13,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
+use crate::book_file::snapshot_dir as snapshot_dir_under;
 use crate::book_file::{
     billed_word_count, content_fingerprint, file_stem_of, han_word_count, has_md_extension,
-    is_hidden, read_text, scalar_to_string, snapshot_existing_file, snapshot_files,
+    is_hidden, map_scalar, read_text, scalar_to_string, snapshot_existing_file, snapshot_files,
     snapshot_restore_point, split_frontmatter, strip_bom, write_screenshot, write_text_atomic,
     SaveResult,
 };
-use crate::book_file::snapshot_dir as snapshot_dir_under;
 
 pub const ATTACHMENT_DIR: &str = "附件";
 pub const DEFAULT_DAILY_GOAL: u32 = 2000;
@@ -42,6 +42,15 @@ pub struct ChapterEntry {
     pub word_count: u64,
     /// 纯汉字数（不含标点）。
     pub han_count: u64,
+}
+
+/// 总览只读资料，不传整章正文；可选摘要来自章节 frontmatter 的「摘要」。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterCard {
+    pub chapter: ChapterEntry,
+    pub summary: Option<String>,
+    pub intent: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -226,6 +235,62 @@ pub fn scan_chapters(project: &Path) -> Result<Vec<ChapterEntry>, String> {
     Ok(out)
 }
 
+pub fn scan_chapter_cards(project: &Path) -> Result<Vec<ChapterCard>, String> {
+    let units =
+        crate::project::scan_notes(project, crate::project::NoteKind::Unit).unwrap_or_default();
+    let bridges = crate::planning::scan_bridges(project).unwrap_or_default();
+    Ok(scan_chapters(project)?
+        .into_iter()
+        .map(|chapter| {
+            let summary = read_text(&chapter.path)
+                .ok()
+                .and_then(|raw| split_frontmatter(strip_bom(&raw)).map(|(yaml, _)| yaml))
+                .and_then(|yaml| serde_yaml::from_str::<Value>(&yaml).ok())
+                .and_then(|value| match value {
+                    Value::Mapping(map) => map_scalar(&map, "摘要"),
+                    _ => None,
+                });
+            let intent = chapter.ordinal.and_then(|ordinal| {
+                let unit = units.iter().find(|unit| {
+                    (unit.start_chapter.is_some() || unit.end_chapter.is_some())
+                        && unit.start_chapter.is_none_or(|start| ordinal >= start)
+                        && unit.end_chapter.is_none_or(|end| ordinal <= end)
+                })?;
+                let bridge = bridges.iter().find(|bridge| {
+                    bridge.unit.as_deref() == Some(unit.name.as_str())
+                        && matches!((bridge.start_chapter, bridge.end_chapter),
+                            (Some(start), Some(end)) if start <= ordinal && ordinal <= end)
+                });
+                if let Some(bridge) = bridge {
+                    let detail = bridge
+                        .emotion_curve
+                        .as_ref()
+                        .or(bridge.key_turn.as_ref())
+                        .or(bridge.expectation_hook.as_ref());
+                    return Some(detail.map_or_else(
+                        || bridge.name.clone(),
+                        |text| format!("{} · {text}", bridge.name),
+                    ));
+                }
+                Some(
+                    unit.emotion_goal
+                        .as_ref()
+                        .or(unit.core.as_ref())
+                        .map_or_else(
+                            || unit.name.clone(),
+                            |text| format!("{} · {text}", unit.name),
+                        ),
+                )
+            });
+            ChapterCard {
+                chapter,
+                summary,
+                intent,
+            }
+        })
+        .collect())
+}
+
 // ---------- 新建 / 重命名 / 删除 / 重编号 ----------
 
 /// 新建章：序＝现有合规序数最大值＋1（中间有洞也不撞号）。
@@ -292,7 +357,11 @@ fn byte_index_at_utf16(content: &str, offset: usize) -> Option<usize> {
 
 fn body_start_byte(content: &str) -> Result<usize, String> {
     let stripped = strip_bom(content);
-    if stripped.lines().next().is_some_and(|line| line.trim() == "---") {
+    if stripped
+        .lines()
+        .next()
+        .is_some_and(|line| line.trim() == "---")
+    {
         if split_frontmatter(stripped).is_none() {
             return Err("章节 frontmatter 未闭合，请先修复后再拆章".to_string());
         }
@@ -404,8 +473,10 @@ where
     {
         return Err("拆章路径不属于当前项目正文目录".to_string());
     }
-    let expected_target = chapters_dir(project)
-        .join(chapter_file_name(preview.ordinal, &sanitize_title(&preview.title)));
+    let expected_target = chapters_dir(project).join(chapter_file_name(
+        preview.ordinal,
+        &sanitize_title(&preview.title),
+    ));
     if preview.target_path != expected_target {
         return Err("拆章目标文件名与预览不一致".to_string());
     }
@@ -419,14 +490,17 @@ where
         return Err("拆章预览内容与原章不一致，请重新预览".to_string());
     }
     if preview.target_path.exists() {
-        return Err(format!("{} 已存在，不会覆盖", preview.target_path.display()));
+        return Err(format!(
+            "{} 已存在，不会覆盖",
+            preview.target_path.display()
+        ));
     }
 
     // 恢复点是提交闸，不是事后尽力而为：任一快照无法完成时，
     // 两份正文都还没开始改动。空内容按全局快照纪律不落空文件。
     hook(SplitStep::SourceSnapshot)?;
     snapshot_restore_point(&snapshot_dir(project, &preview.source_path), &old)
-    .map_err(|e| format!("无法建立原章恢复点，已取消拆章：{e}"))?;
+        .map_err(|e| format!("无法建立原章恢复点，已取消拆章：{e}"))?;
     hook(SplitStep::TargetSnapshot)?;
     snapshot_restore_point(
         &snapshot_dir(project, &preview.target_path),
@@ -442,10 +516,9 @@ where
     let target_fingerprint = content_fingerprint(preview.after.as_bytes()).to_string();
     let rollback_target = |reason: String| -> Result<ChapterSplitResult, String> {
         let id = SPLIT_PUBLISH_ID.fetch_add(1, Ordering::Relaxed);
-        let quarantine = preview.target_path.with_file_name(format!(
-            ".拆章撤回-{}-{id}.md",
-            std::process::id()
-        ));
+        let quarantine = preview
+            .target_path
+            .with_file_name(format!(".拆章撤回-{}-{id}.md", std::process::id()));
         if let Err(e) = fs::rename(&preview.target_path, &quarantine) {
             return Err(format!("{reason}；无法撤回新章：{e}"));
         }
@@ -454,9 +527,7 @@ where
             .unwrap_or(false);
         if !owned {
             return match rename_new_atomic(&quarantine, &preview.target_path) {
-                Ok(()) => Err(format!(
-                    "{reason}；新章在撤回前已被外部修改，已原样恢复"
-                )),
+                Ok(()) => Err(format!("{reason}；新章在撤回前已被外部修改，已原样恢复")),
                 Err(restore) => Err(format!(
                     "{reason}；外部修改内容已保留在 {}，恢复原名失败：{restore}",
                     quarantine.display()
@@ -491,9 +562,7 @@ where
     ) {
         Ok(SaveResult::Saved { .. }) => {}
         Ok(SaveResult::Conflict) => {
-            return rollback_target(
-                "原章在预览后已被外部修改，请重新加载并再次预览".to_string(),
-            );
+            return rollback_target("原章在预览后已被外部修改，请重新加载并再次预览".to_string());
         }
         Err(e) => return rollback_target(format!("无法替换原章：{e}")),
     }
@@ -629,7 +698,10 @@ pub fn save_chapter_md(
 }
 
 /// 当前章的历史版本列表（时间倒序）。
-pub fn list_chapter_snapshots(project: &Path, chapter: &Path) -> Result<Vec<SnapshotEntry>, String> {
+pub fn list_chapter_snapshots(
+    project: &Path,
+    chapter: &Path,
+) -> Result<Vec<SnapshotEntry>, String> {
     let dir = snapshot_dir(project, chapter);
     let mut out: Vec<SnapshotEntry> = Vec::new();
     for path in snapshot_files(&dir) {
@@ -785,6 +857,38 @@ mod tests {
     }
 
     #[test]
+    fn 章节卡只带摘要和章节资料_不复制正文() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        write(
+            &p.join("正文/0002 雨夜.md"),
+            "---\n状态: 完稿\n摘要: 主角收到密信\n---\n\n这一整章的正文不应进卡片。",
+        );
+        write(&p.join("正文/随手记.md"), "未编号内容");
+        write(
+            &p.join("构思/单元/初入京城.md"),
+            "---\n起章: 1\n止章: 5\n情绪目标: 初见京城的震撼\n---\n单元正文",
+        );
+        write(
+            &p.join("构思/桥段/密信.md"),
+            "---\n所属单元: 初入京城\n起章: 2\n止章: 3\n情绪曲线: 从恐惧转为决心\n---\n桥段正文",
+        );
+
+        let cards = scan_chapter_cards(&p).unwrap();
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].chapter.ordinal, Some(2));
+        assert_eq!(cards[0].chapter.status, STATUS_DONE);
+        assert_eq!(cards[0].summary.as_deref(), Some("主角收到密信"));
+        assert_eq!(cards[0].intent.as_deref(), Some("密信 · 从恐惧转为决心"));
+        assert_eq!(cards[1].chapter.ordinal, None);
+        assert_eq!(cards[1].summary, None);
+        assert_eq!(cards[1].intent, None);
+        assert!(!serde_json::to_string(&cards)
+            .unwrap()
+            .contains("这一整章的正文"));
+    }
+
+    #[test]
     fn 扫描_空标题与四位填充都认() {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
@@ -894,7 +998,9 @@ mod tests {
         let p = project(tmp.path());
         let chapter = p.join("正文/0001 甲.md");
         write(&chapter, "第一版");
-        let base = crate::book_file::read_book_md(&chapter).unwrap().fingerprint;
+        let base = crate::book_file::read_book_md(&chapter)
+            .unwrap()
+            .fingerprint;
 
         let first = save_chapter_md(&p, &chapter, "第二版", Some(&base), false).unwrap();
         let fingerprint = match first {
@@ -908,7 +1014,8 @@ mod tests {
 
         // 盘上被外部改成第三版：带旧指纹保存判冲突，不写盘
         write(&chapter, "第三版");
-        let conflicted = save_chapter_md(&p, &chapter, "第四版", Some(&fingerprint), false).unwrap();
+        let conflicted =
+            save_chapter_md(&p, &chapter, "第四版", Some(&fingerprint), false).unwrap();
         assert_eq!(conflicted, SaveResult::Conflict);
         assert_eq!(read_text(&chapter).unwrap(), "第三版");
 
@@ -952,7 +1059,8 @@ mod tests {
 
         let at_end = p.join("正文/0010 丙.md");
         write(&at_end, "全部保留");
-        let preview = preview_chapter_split(&p, &at_end, "全部保留".encode_utf16().count(), "丁").unwrap();
+        let preview =
+            preview_chapter_split(&p, &at_end, "全部保留".encode_utf16().count(), "丁").unwrap();
         let result = split_chapter(&p, &preview).unwrap();
         assert_eq!(read_text(&at_end).unwrap(), "全部保留");
         assert_eq!(read_text(&result.created.path).unwrap(), "");
@@ -1102,13 +1210,8 @@ mod tests {
         let p = project(tmp.path());
         let source = p.join("正文/0020 甲.md");
         write(&source, "全部保留");
-        let preview = preview_chapter_split(
-            &p,
-            &source,
-            "全部保留".encode_utf16().count(),
-            "乙",
-        )
-        .unwrap();
+        let preview =
+            preview_chapter_split(&p, &source, "全部保留".encode_utf16().count(), "乙").unwrap();
 
         split_chapter(&p, &preview).unwrap();
 

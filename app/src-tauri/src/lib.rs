@@ -24,23 +24,23 @@ use std::path::{Path, PathBuf};
 
 use ai::{AiConfig, AiState, ChatSession, ChatSessionSummary, ChatStreamEvent, ChatStreamReq};
 use book_file::{BookMeta, ChapterAnchor, MdContent, SaveResult};
-use chapter::{ChapterEntry, SnapshotEntry, UnitBrief, WritingStats};
+use chapter::{ChapterCard, ChapterEntry, SnapshotEntry, UnitBrief, WritingStats};
 use expectation::{Expectation, ExpectationBoard};
 use export::{ChapterRange, ExportReport, ExportTemplate};
 use foreshadow::{Foreshadow, ForeshadowView};
-use inspiration::{CardDraft, ImportEntry, InspirationCard};
+use inspiration::{CardDraft, ImportEntry, InspirationCard, LinkedChapter};
 use library::BookEntry;
 use map::{
     GeoUpgradePreview, GeoUpgradeTarget, MapDraft, MapEntry, MapStructure, MapTransition,
     MapWorkspace, RegionDraft, RegionEntry,
 };
-use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, Outline};
 use pending::PendingLine;
+use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, Outline};
+use presets::{PresetSave, PresetState};
 use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
     ProjectMeta,
 };
-use presets::{PresetSave, PresetState};
 use proofread::{ProofReport, ProofreadOptions};
 use relationship::{Confluence, RelationshipTable, RelationshipView};
 use trope::TropeSpan;
@@ -98,7 +98,9 @@ fn grant_asset_scope(app: tauri::AppHandle, path: String) -> Result<(), String> 
             .allow_directory(&target, true)
             .map_err(|e| format!("无法授权目录访问：{e}"))
     } else {
-        scope.allow_file(&target).map_err(|e| format!("无法授权文件访问：{e}"))
+        scope
+            .allow_file(&target)
+            .map_err(|e| format!("无法授权文件访问：{e}"))
     }
 }
 
@@ -205,6 +207,29 @@ fn capture_inspiration(root: String, body: String) -> Result<InspirationCard, St
 }
 
 #[tauri::command]
+fn capture_chapter_inspiration(
+    root: String,
+    project: String,
+    chapter: String,
+    body: String,
+) -> Result<InspirationCard, String> {
+    inspiration::save_linked_quick_capture(
+        Path::new(&root),
+        Path::new(&project),
+        Path::new(&chapter),
+        &body,
+    )
+}
+
+#[tauri::command]
+fn resolve_chapter_inspiration_link(
+    root: String,
+    link: String,
+) -> Result<Option<LinkedChapter>, String> {
+    inspiration::resolve_chapter_link(Path::new(&root), &link)
+}
+
+#[tauri::command]
 fn delete_inspiration_card(path: String) -> Result<(), String> {
     inspiration::delete_card(Path::new(&path))
 }
@@ -281,7 +306,11 @@ fn save_map(
     draft: MapDraft,
     prev_path: Option<String>,
 ) -> Result<MapEntry, String> {
-    map::save_map(Path::new(&project), &draft, prev_path.as_deref().map(Path::new))
+    map::save_map(
+        Path::new(&project),
+        &draft,
+        prev_path.as_deref().map(Path::new),
+    )
 }
 
 #[tauri::command]
@@ -290,7 +319,11 @@ fn save_region(
     draft: RegionDraft,
     prev_path: Option<String>,
 ) -> Result<RegionEntry, String> {
-    map::save_region(Path::new(&project), &draft, prev_path.as_deref().map(Path::new))
+    map::save_region(
+        Path::new(&project),
+        &draft,
+        prev_path.as_deref().map(Path::new),
+    )
 }
 
 #[tauri::command]
@@ -452,7 +485,10 @@ fn save_arrangement(project: String, items: Vec<ArrangementItem>) -> Result<(), 
 
 /// 排布体检（只提示不拦截）：对当前列表（可含未保存改动）现算。
 #[tauri::command]
-fn check_arrangement(project: String, items: Vec<ArrangementItem>) -> Result<ArrangementCheck, String> {
+fn check_arrangement(
+    project: String,
+    items: Vec<ArrangementItem>,
+) -> Result<ArrangementCheck, String> {
     project::check_project_arrangement(Path::new(&project), &items)
 }
 
@@ -469,11 +505,7 @@ fn transmute_story_card(
     card_path: String,
     project: String,
 ) -> Result<NoteEntry, String> {
-    project::transmute_story_card(
-        Path::new(&root),
-        Path::new(&card_path),
-        Path::new(&project),
-    )
+    project::transmute_story_card(Path::new(&root), Path::new(&card_path), Path::new(&project))
 }
 
 /// 角色卡转生书内人物：建人物、卡片「关联」记去向（工单 #8）。
@@ -483,11 +515,7 @@ fn transmute_character_card(
     card_path: String,
     project: String,
 ) -> Result<NoteEntry, String> {
-    project::transmute_character_card(
-        Path::new(&root),
-        Path::new(&card_path),
-        Path::new(&project),
-    )
+    project::transmute_character_card(Path::new(&root), Path::new(&card_path), Path::new(&project))
 }
 
 // --- 人物关系画布（工单 #8，docs/spec/人物关系画布.md）：构思/人物关系.yaml ---
@@ -523,11 +551,7 @@ fn promote_characters(
     names: Vec<String>,
     name: Option<String>,
 ) -> Result<NoteEntry, String> {
-    relationship::promote_characters_to_contradiction(
-        Path::new(&project),
-        &names,
-        name.as_deref(),
-    )
+    relationship::promote_characters_to_contradiction(Path::new(&project), &names, name.as_deref())
 }
 
 // --- 书写板块（工单 #5，docs/spec/书写编辑器.md）：正文一章一文件 ---
@@ -535,6 +559,11 @@ fn promote_characters(
 #[tauri::command]
 fn scan_chapters(project: String) -> Result<Vec<ChapterEntry>, String> {
     chapter::scan_chapters(Path::new(&project))
+}
+
+#[tauri::command]
+fn scan_chapter_cards(project: String) -> Result<Vec<ChapterCard>, String> {
+    chapter::scan_chapter_cards(Path::new(&project))
 }
 
 #[tauri::command]
@@ -609,7 +638,11 @@ fn read_chapter_snapshot(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn save_chapter_paste_image(project: String, ext: String, bytes: Vec<u8>) -> Result<String, String> {
+fn save_chapter_paste_image(
+    project: String,
+    ext: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
     chapter::save_chapter_paste_image(Path::new(&project), &ext, &bytes)
 }
 
@@ -959,6 +992,8 @@ pub fn run() {
             scan_inspirations,
             save_inspiration_card,
             capture_inspiration,
+            capture_chapter_inspiration,
+            resolve_chapter_inspiration_link,
             delete_inspiration_card,
             set_content_pending,
             import_inspiration_preview,
@@ -1002,6 +1037,7 @@ pub fn run() {
             character_confluence,
             promote_characters,
             scan_chapters,
+            scan_chapter_cards,
             create_chapter,
             rename_chapter,
             preview_chapter_split,

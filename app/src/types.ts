@@ -461,6 +461,13 @@ export interface ChapterEntry {
   hanCount: number;
 }
 
+/** 章节总览只读资料；不含正文。 */
+export interface ChapterCard {
+  chapter: ChapterEntry;
+  summary: string | null;
+  intent: string | null;
+}
+
 /** 保存前的历史版本（`.gongbi/历史/<章>/<时间戳>.md`）。 */
 export interface SnapshotEntry {
   path: string;
@@ -960,6 +967,8 @@ export interface ChatSession {
   messages: ChatMessage[];
   /** 人物对话标签；普通会话没有。 */
   persona?: ChatPersona | null;
+  /** 创建普通会话时定格的助手预设。 */
+  preset?: ChatPreset | null;
 }
 
 /** 与 Rust 侧 ai.rs::ChatSessionSummary 对应。 */
@@ -967,6 +976,10 @@ export interface ChatSessionSummary {
   id: string;
   title: string;
   updatedAt: number;
+  messageCount: number;
+  persona?: ChatPersona | null;
+}
+
 /** 与 Rust 侧 ai.rs::ChatPreset 对应（工单 T07，docs/spec/AI助手预设.md §四）：
  *  普通会话创建时定格的助手预设快照——预设事后改名、改提示、改覆盖乃至
  *  删除都不影响已绑定的会话。人物对话与旧会话没有这个字段。 */
@@ -983,18 +996,12 @@ export interface ChatPreset {
   modelOverride?: string | null;
 }
 
-  messageCount: number;
-  persona?: ChatPersona | null;
-}
-
 /** 与 Rust 侧 presets.rs::AssistantPreset 对应（工单 T06，docs/spec/AI助手预设.md）。
  *  内置预设 id 一律 builtin: 前缀；空 icon/color 表示未设置。 */
 export interface AssistantPreset {
   id: string;
   name: string;
   description: string;
-  /** 普通会话的助手预设快照（工单 T07）；人物对话与旧会话没有。 */
-  preset?: ChatPreset | null;
   /** 图标（emoji 等）；空串＝无。 */
   icon: string;
   /** 识别色（#rrggbb）；空串＝无。 */

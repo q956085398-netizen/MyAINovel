@@ -16,6 +16,7 @@ import type {
   AiSeed,
   ChapterIntent,
   ChapterEntry,
+  ChapterCard,
   ChapterSplitPreview,
   ChapterSplitResult,
   ExpectationBoard,
@@ -236,6 +237,11 @@ export default function WritingPage({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chapters, setChapters] = useState<ChapterEntry[]>([]);
   const [current, setCurrent] = useState<ChapterEntry | null>(null);
+  const [overview, setOverview] = useState<{ cards: ChapterCard[]; loading: boolean; error: string | null } | null>(null);
+  const [quickNoteOpen, setQuickNoteOpen] = useState(false);
+  const [quickNoteText, setQuickNoteText] = useState("");
+  const [quickNoteBusy, setQuickNoteBusy] = useState(false);
+  const [quickNoteError, setQuickNoteError] = useState<string | null>(null);
   const [splitDialog, setSplitDialog] = useState<SplitDialog | null>(null);
 
   // 正文在不在场（工单 #56 / T01）：外壳据此退场/召回窄轨；
@@ -432,6 +438,38 @@ export default function WritingPage({
     const list = await invoke<ChapterEntry[]>("scan_chapters", { project: project.dir });
     setChapters(list);
     return list;
+  }
+
+  async function openOverview() {
+    setOverview({ cards: [], loading: true, error: null });
+    try {
+      const cards = await invoke<ChapterCard[]>("scan_chapter_cards", { project: project.dir });
+      setOverview((open) => open && { cards, loading: false, error: null });
+    } catch (e) {
+      setOverview((open) => open && { cards: [], loading: false, error: `读取章节总览失败：${errMsg(e)}` });
+    }
+  }
+
+  async function saveQuickNote() {
+    const chapter = currentRef.current;
+    if (!libraryPath || !chapter || !quickNoteText.trim() || quickNoteBusy) return;
+    setQuickNoteBusy(true);
+    setQuickNoteError(null);
+    try {
+      await invoke("capture_chapter_inspiration", {
+        root: libraryPath,
+        project: project.dir,
+        chapter: chapter.path,
+        body: quickNoteText,
+      });
+      setQuickNoteText("");
+      setQuickNoteOpen(false);
+      viewRef.current?.focus();
+    } catch (e) {
+      setQuickNoteError(`便笺保存失败：${errMsg(e)}。正文和便笺草稿都还在。`);
+    } finally {
+      setQuickNoteBusy(false);
+    }
   }
 
   async function loadIntent(entry: ChapterEntry) {
@@ -1142,11 +1180,34 @@ export default function WritingPage({
   useEffect(() => {
     if (!immersive) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setImmersive(false);
+      if (e.key === "Escape" && !quickNoteOpen && !overview) setImmersive(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [immersive]);
+  }, [immersive, quickNoteOpen, overview]);
+
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "n" && currentRef.current && libraryPath) {
+        e.preventDefault();
+        if (!overview) {
+          setQuickNoteError(null);
+          setQuickNoteOpen(true);
+        }
+      } else if (e.key === "Escape" && quickNoteOpen && !quickNoteBusy) {
+        e.preventDefault();
+        setQuickNoteOpen(false);
+        viewRef.current?.focus();
+      } else if (e.key === "Escape" && overview) {
+        e.preventDefault();
+        setOverview(null);
+        viewRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, libraryPath, overview, quickNoteOpen, quickNoteBusy]);
 
   // 切出书写板块：立即落盘；切回来：焦点还给编辑器（板块常驻挂载，不卸载），
   // 并重读伏笔与三线（构思侧看板可能刚改过状态/删过条目）。
@@ -1317,6 +1378,16 @@ export default function WritingPage({
                     run: () => void openHistory(),
                   },
                   {
+                    id: "page-quick-note",
+                    label: "灵感速记",
+                    hint: "Ctrl+Alt+N，关联本章",
+                    disabled: !current || !libraryPath,
+                    run: () => {
+                      setQuickNoteError(null);
+                      setQuickNoteOpen(true);
+                    },
+                  },
+                  {
                     id: "page-split-chapter",
                     label: "在光标处拆章",
                     hint: "先预览，再确认",
@@ -1376,6 +1447,9 @@ export default function WritingPage({
           <aside className="chapter-list">
           <div className="chapter-list-head">
             <span className="toolbar-label">章节</span>
+            <button className="btn small" title="只读章节卡，可按章跳转" onClick={() => void openOverview()}>
+              总览
+            </button>
             <button
               className="btn small"
               disabled={!ready}
@@ -1783,6 +1857,65 @@ export default function WritingPage({
                 onClick={() => void confirmSplit()}
               >
                 {splitDialog.busy ? "正在拆章…" : "确认拆分"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {overview && (
+        <div className="dialog-overlay" onClick={(e) => {
+          if (e.target === e.currentTarget) { setOverview(null); viewRef.current?.focus(); }
+        }}>
+          <div className="dialog chapter-overview-dialog" role="dialog" aria-modal="true" aria-labelledby="chapter-overview-title">
+            <div className="chapter-overview-head">
+              <div>
+                <h2 id="chapter-overview-title">章节总览</h2>
+                <p className="hint">浏览本章意图，点卡片回到正文。这里不编辑章节。</p>
+              </div>
+              <button className="btn" onClick={() => { setOverview(null); viewRef.current?.focus(); }}>关闭</button>
+            </div>
+            {overview.loading && <p className="hint">正在读取章节…</p>}
+            {overview.error && <div className="error-box">{overview.error}</div>}
+            {!overview.loading && !overview.error && overview.cards.length === 0 && <p className="hint">还没有章节。</p>}
+            <div className="chapter-card-grid">
+              {overview.cards.map((card) => (
+                <button
+                  key={card.chapter.path}
+                  className={`chapter-overview-card ${current?.path === card.chapter.path ? "is-current" : ""}`}
+                  onClick={() => void openChapter(card.chapter).then((opened) => {
+                    if (opened) { setOverview(null); viewRef.current?.focus(); }
+                  })}
+                >
+                  <span className="chapter-card-kicker">{card.chapter.ordinal === null ? "未编号" : `第 ${card.chapter.ordinal} 章`}</span>
+                  <strong>{card.chapter.title || "未命名章节"}</strong>
+                  <span className="chapter-card-meta">{card.chapter.status} · {formatCount(card.chapter.wordCount)} 字</span>
+                  <span className="chapter-card-intent">
+                    {card.summary ? `摘要 · ${card.summary}` : card.intent ? `本章意图 · ${card.intent}` : "尚无摘要或本章意图"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {quickNoteOpen && current && (
+        <div className="dialog-overlay" onClick={(e) => {
+          if (e.target === e.currentTarget && !quickNoteBusy) { setQuickNoteOpen(false); viewRef.current?.focus(); }
+        }}>
+          <div className="dialog quick-note-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-note-title">
+            <h2 id="quick-note-title">灵感速记</h2>
+            <p className="hint">保存到灵感库待打磨区 · 关联 {project.title} / {chapterLabel(current, prefix)}</p>
+            <label>
+              先记下来，标题和归类以后再补
+              <textarea autoFocus value={quickNoteText} disabled={quickNoteBusy} onChange={(e) => setQuickNoteText(e.target.value)} placeholder="写下刚想到的内容…" />
+            </label>
+            {quickNoteError && <div className="error-box" role="alert">{quickNoteError}</div>}
+            <div className="dialog-actions">
+              <button className="btn" disabled={quickNoteBusy} onClick={() => { setQuickNoteOpen(false); viewRef.current?.focus(); }}>稍后再写</button>
+              <button className="btn primary" disabled={quickNoteBusy || !quickNoteText.trim()} onClick={() => void saveQuickNote()}>
+                {quickNoteBusy ? "正在保存…" : "保存便笺"}
               </button>
             </div>
           </div>

@@ -2186,6 +2186,99 @@ button.save-chip {
   gap: var(--sp-3);
 }
 
+/* 章节卡总览：沿正文顺序阅读，不在卡片里复制或编辑正文。 */
+.chapter-overview-dialog {
+  width: min(920px, 94vw);
+}
+
+.chapter-overview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  margin-bottom: var(--sp-5);
+}
+
+.chapter-overview-head .hint {
+  margin-bottom: 0;
+}
+
+.chapter-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: var(--sp-4);
+}
+
+.chapter-overview-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  min-height: 170px;
+  width: 100%;
+  padding: var(--sp-5);
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--sh-1);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+.chapter-overview-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent-line);
+  box-shadow: var(--sh-2);
+}
+
+.chapter-overview-card:focus-visible {
+  outline: var(--rail-subtle) solid var(--accent);
+  outline-offset: var(--sp-1);
+}
+
+.chapter-overview-card.is-current {
+  border-color: var(--accent);
+}
+
+.chapter-card-kicker {
+  color: var(--accent);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+}
+
+.chapter-overview-card strong {
+  font-size: var(--fs-lg);
+  line-height: 1.35;
+}
+
+.chapter-card-meta {
+  color: var(--ink-soft);
+  font-size: var(--fs-ui);
+}
+
+.chapter-card-intent {
+  color: var(--ink-soft);
+  font-size: var(--fs-ui);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.quick-note-dialog textarea {
+  min-height: 160px;
+  line-height: 1.7;
+}
+
+@media (max-width: 600px) {
+  .chapter-overview-head {
+    flex-direction: column;
+  }
+}
+
 /* ---------- 空态与提示 ---------- */
 
 .empty-state {

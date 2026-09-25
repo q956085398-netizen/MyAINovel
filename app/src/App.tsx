@@ -218,6 +218,14 @@ function App() {
     [switchSection],
   );
 
+  const openChapterFromInspiration = useCallback(
+    (project: ProjectEntry, path: string) => {
+      setWritingJump({ projectDir: project.dir, locate: { ordinal: null, path, quote: "" } });
+      switchSection("书写");
+    },
+    [switchSection],
+  );
+
   const consumeIdeationJump = useCallback(() => setIdeationJump(null), []);
 
   /** 伏笔看板点章：切到书写板块，打开该章并选中引文。 */
@@ -395,7 +403,8 @@ function App() {
             onChooseFolder={chooseLibraryFolder}
             onCreateLibrary={createLibraryFolder}
             onOpenBook={openBookFromInspiration}
-            onOpenProject={openProjectFromInspiration}
+              onOpenProject={openProjectFromInspiration}
+              onOpenChapter={openChapterFromInspiration}
             onGoIdeation={() => switchSection("构思")}
           />
         </div>
