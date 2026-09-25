@@ -47,6 +47,7 @@ import { autosaveIntervalMs } from "./settings";
 import { registerFlushSaver } from "./saveFlush";
 import {
   chapterLabel,
+  chapterHead,
   chapterStats,
   countBilled,
   readChapterStatus,
@@ -1189,7 +1190,10 @@ export default function WritingPage({
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "n" && currentRef.current && libraryPath) {
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        if (!quickNoteOpen) void openOverview();
+      } else if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "n" && currentRef.current && libraryPath) {
         e.preventDefault();
         if (!overview) {
           setQuickNoteError(null);
@@ -1345,9 +1349,12 @@ export default function WritingPage({
         />
         <div className="page-actions">
           {immersive ? (
-            <button className="btn" onClick={() => setImmersive(false)}>
-              退出沉浸（Esc）
-            </button>
+            <>
+              <button className="btn" onClick={() => void openOverview()}>章节总览</button>
+              <button className="btn" onClick={() => setImmersive(false)}>
+                退出沉浸（Esc）
+              </button>
+            </>
           ) : (
             <>
               {/* 选区上下文：AI 润色只在有效选区时出现（spec §五）。 */}
@@ -1371,6 +1378,12 @@ export default function WritingPage({
                 label="页面"
                 onReturnFocus={() => viewRef.current?.focus()}
                 items={[
+                  {
+                    id: "page-chapter-overview",
+                    label: "章节总览",
+                    hint: "Ctrl+Alt+O，只读浏览",
+                    run: () => void openOverview(),
+                  },
                   {
                     id: "page-history",
                     label: "历史版本",
@@ -1887,7 +1900,7 @@ export default function WritingPage({
                     if (opened) { setOverview(null); viewRef.current?.focus(); }
                   })}
                 >
-                  <span className="chapter-card-kicker">{card.chapter.ordinal === null ? "未编号" : `第 ${card.chapter.ordinal} 章`}</span>
+                  <span className="chapter-card-kicker">{card.chapter.ordinal === null ? "未编号" : chapterHead(card.chapter.ordinal, prefix)}</span>
                   <strong>{card.chapter.title || "未命名章节"}</strong>
                   <span className="chapter-card-meta">{card.chapter.status} · {formatCount(card.chapter.wordCount)} 字</span>
                   <span className="chapter-card-intent">

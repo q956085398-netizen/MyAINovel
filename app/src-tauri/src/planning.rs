@@ -444,25 +444,33 @@ pub fn find_chapter_intent(project: &Path, ordinal: u32) -> Result<ChapterIntent
         .filter(|bridge| bridge.unit.as_deref() == Some(unit_brief.name.as_str()))
         .collect::<Vec<_>>();
     let mut warnings = chapter_intent_warnings(unit_brief, &bridges);
-    let mut matches = bridges
-        .into_iter()
-        .filter(|bridge| {
-            matches!(
-                (bridge.start_chapter, bridge.end_chapter),
-                (Some(start), Some(end)) if start <= end && start <= ordinal && ordinal <= end
-            )
-        })
-        .collect::<Vec<_>>();
-    matches.sort_by(compare_bridge_order);
+    let matches = bridges_for_chapter(&bridges, &unit_brief.name, ordinal);
     if matches.len() > 1 {
         warnings.push("多个桥段覆盖本章，按桥段次序显示最靠前的一项。".into());
     }
 
     Ok(ChapterIntent {
         unit,
-        bridge: matches.into_iter().next(),
+        bridge: matches.first().map(|bridge| (*bridge).clone()),
         warnings,
     })
+}
+
+/// 章节卡与书写侧栏共用的桥段选择规则：同章重叠时按人工次序取首项。
+pub(crate) fn bridges_for_chapter<'a>(
+    bridges: &'a [Bridge],
+    unit_name: &str,
+    ordinal: u32,
+) -> Vec<&'a Bridge> {
+    let mut matches = bridges.iter().filter(|bridge| {
+        bridge.unit.as_deref() == Some(unit_name)
+            && matches!(
+                (bridge.start_chapter, bridge.end_chapter),
+                (Some(start), Some(end)) if start <= end && start <= ordinal && ordinal <= end
+            )
+    }).collect::<Vec<_>>();
+    matches.sort_by(|left, right| compare_bridge_order(left, right));
+    matches
 }
 
 fn chapter_intent_warnings(unit: &crate::chapter::UnitBrief, bridges: &[Bridge]) -> Vec<String> {

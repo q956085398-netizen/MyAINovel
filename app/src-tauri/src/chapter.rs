@@ -251,16 +251,9 @@ pub fn scan_chapter_cards(project: &Path) -> Result<Vec<ChapterCard>, String> {
                     _ => None,
                 });
             let intent = chapter.ordinal.and_then(|ordinal| {
-                let unit = units.iter().find(|unit| {
-                    (unit.start_chapter.is_some() || unit.end_chapter.is_some())
-                        && unit.start_chapter.is_none_or(|start| ordinal >= start)
-                        && unit.end_chapter.is_none_or(|end| ordinal <= end)
-                })?;
-                let bridge = bridges.iter().find(|bridge| {
-                    bridge.unit.as_deref() == Some(unit.name.as_str())
-                        && matches!((bridge.start_chapter, bridge.end_chapter),
-                            (Some(start), Some(end)) if start <= ordinal && ordinal <= end)
-                });
+                let unit = unit_for_chapter(&units, ordinal)?;
+                let bridge = crate::planning::bridges_for_chapter(&bridges, &unit.name, ordinal)
+                    .into_iter().next();
                 if let Some(bridge) = bridge {
                     let detail = bridge
                         .emotion_curve
@@ -272,15 +265,7 @@ pub fn scan_chapter_cards(project: &Path) -> Result<Vec<ChapterCard>, String> {
                         |text| format!("{} · {text}", bridge.name),
                     ));
                 }
-                Some(
-                    unit.emotion_goal
-                        .as_ref()
-                        .or(unit.core.as_ref())
-                        .map_or_else(
-                            || unit.name.clone(),
-                            |text| format!("{} · {text}", unit.name),
-                        ),
-                )
+                None
             });
             ChapterCard {
                 chapter,
@@ -744,11 +729,7 @@ pub fn save_chapter_paste_image(project: &Path, ext: &str, bytes: &[u8]) -> Resu
 /// 排布.yaml 里的位次与属性。区间只提示不校验（重叠时取先扫到的）。
 pub fn find_unit_for_chapter(project: &Path, ordinal: u32) -> Result<Option<UnitBrief>, String> {
     let units = crate::project::scan_notes(project, crate::project::NoteKind::Unit)?;
-    let Some(unit) = units.into_iter().find(|u| {
-        let after_start = u.start_chapter.is_none_or(|s| ordinal >= s);
-        let before_end = u.end_chapter.is_none_or(|e| ordinal <= e);
-        (u.start_chapter.is_some() || u.end_chapter.is_some()) && after_start && before_end
-    }) else {
+    let Some(unit) = unit_for_chapter(&units, ordinal) else {
         return Ok(None);
     };
     let arrangement = crate::project::read_arrangement(project).unwrap_or_default();
@@ -770,6 +751,17 @@ pub fn find_unit_for_chapter(project: &Path, ordinal: u32) -> Result<Option<Unit
         upgrade_battle: item.and_then(|a| a.upgrade_battle.clone()),
         pace: item.and_then(|a| a.pace.clone()),
     }))
+}
+
+fn unit_for_chapter(
+    units: &[crate::project::NoteEntry],
+    ordinal: u32,
+) -> Option<&crate::project::NoteEntry> {
+    units.iter().find(|unit| {
+        (unit.start_chapter.is_some() || unit.end_chapter.is_some())
+            && unit.start_chapter.is_none_or(|start| ordinal >= start)
+            && unit.end_chapter.is_none_or(|end| ordinal <= end)
+    })
 }
 
 // ---------- 每日写作统计（应用状态，不进创作目录） ----------
@@ -865,24 +857,28 @@ mod tests {
             "---\n状态: 完稿\n摘要: 主角收到密信\n---\n\n这一整章的正文不应进卡片。",
         );
         write(&p.join("正文/随手记.md"), "未编号内容");
+        write(&p.join("正文/0004 尚未安排.md"), "这一章还没有桥段");
         write(
             &p.join("构思/单元/初入京城.md"),
             "---\n起章: 1\n止章: 5\n情绪目标: 初见京城的震撼\n---\n单元正文",
         );
         write(
             &p.join("构思/桥段/密信.md"),
-            "---\n所属单元: 初入京城\n起章: 2\n止章: 3\n情绪曲线: 从恐惧转为决心\n---\n桥段正文",
+            "---\n所属单元: 初入京城\n顺序: 1\n起章: 2\n止章: 3\n情绪曲线: 从恐惧转为决心\n---\n桥段正文",
         );
+        write(&p.join("构思/桥段/甲桥段.md"), "---\n所属单元: 初入京城\n顺序: 9\n起章: 2\n止章: 3\n---\n另一个重叠桥段");
 
         let cards = scan_chapter_cards(&p).unwrap();
-        assert_eq!(cards.len(), 2);
+        assert_eq!(cards.len(), 3);
         assert_eq!(cards[0].chapter.ordinal, Some(2));
         assert_eq!(cards[0].chapter.status, STATUS_DONE);
         assert_eq!(cards[0].summary.as_deref(), Some("主角收到密信"));
         assert_eq!(cards[0].intent.as_deref(), Some("密信 · 从恐惧转为决心"));
-        assert_eq!(cards[1].chapter.ordinal, None);
-        assert_eq!(cards[1].summary, None);
-        assert_eq!(cards[1].intent, None);
+        assert_eq!(cards[1].chapter.ordinal, Some(4));
+        assert_eq!(cards[1].intent, None, "只有单元而无桥段时没有本章意图");
+        assert_eq!(cards[2].chapter.ordinal, None);
+        assert_eq!(cards[2].summary, None);
+        assert_eq!(cards[2].intent, None);
         assert!(!serde_json::to_string(&cards)
             .unwrap()
             .contains("这一整章的正文"));
