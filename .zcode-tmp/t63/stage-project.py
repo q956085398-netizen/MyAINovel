@@ -1,0 +1,16 @@
+import pathlib, subprocess, difflib
+root=pathlib.Path.cwd(); path='app/src/ProjectPage.tsx'
+original=subprocess.check_output(['git','show','HEAD:'+path]).decode('utf-8').replace('\r\n','\n')
+base=original.replace('import BridgeLibrary from "./BridgeLibrary";','import BridgeLibrary from "./BridgeLibrary";\nimport PowerSystemHome from "./PowerSystemHome";',1)
+base=base.replace('const TABS = [\n','const TABS = [\n  "首页",\n',1)
+base=base.replace('const NAV_GROUPS = [\n','const NAV_GROUPS = [\n  { step: "", label: "", tabs: ["首页"] },\n',1)
+base=base.replace('  const [meta, setMeta]', '  const [powerSystemView, setPowerSystemView] = useState(false);\n  const [meta, setMeta]',1)
+base=base.replace('                  onClick={() => setTab(t)}','                  onClick={() => {\n                    setPowerSystemView(false);\n                    setTab(t);\n                  }}',1)
+current=(root/path).read_text(encoding='utf-8')
+start=current.index('          {tab === "首页" && (\n            <PowerSystemHome')
+end=current.index('          {tab === "首页" && (\n            <IdeationHome',start)
+base=base.replace('        <div className="project-content" key={`${tab}-${reloadKey}`}>\n','        <div className="project-content" key={`${tab}-${reloadKey}`}>\n'+current[start:end],1)
+base=base.replace('              kind={tab}\n','              kind={tab}\n              worldviewCategory={tab === "世界观" && powerSystemView ? "力量体系" : undefined}\n',1)
+(root/'.zcode-tmp/t63/ProjectPage.staged.tsx').write_text(base,encoding='utf-8')
+patch=''.join(difflib.unified_diff(original.splitlines(True),base.splitlines(True),fromfile='a/'+path,tofile='b/'+path))
+(root/'.zcode-tmp/t63/ProjectPage.stage.patch').write_text(patch,encoding='utf-8')

@@ -453,15 +453,20 @@ pub fn set_region_containment(
     }
     let mut table = read_map_structure(project)?;
     let stale = prev_region.map(str::trim).filter(|s| !s.is_empty() && *s != region);
+    let mut preserved_extra = None;
     table.contains.retain(|row| {
         let name = row.region.trim();
-        name != region && Some(name) != stale
+        let replaced = name == region || Some(name) == stale;
+        if replaced && preserved_extra.is_none() {
+            preserved_extra = Some(row.extra.clone());
+        }
+        !replaced
     });
     if let Some(map_name) = map_name.map(str::trim).filter(|s| !s.is_empty()) {
         table.contains.push(MapContainment {
             map: map_name.to_string(),
             region: region.to_string(),
-            extra: Mapping::new(),
+            extra: preserved_extra.unwrap_or_default(),
         });
     }
     save_map_structure(project, &table)
@@ -982,12 +987,23 @@ mod tests {
 
         // 归属唯一：先归人间再改仙界，包含表里只有一行；改名时旧名行跟着对账。
         set_region_containment(&project, None, "京城", Some("人间")).unwrap();
+        let mut seeded = read_map_structure(&project).unwrap();
+        seeded.contains[0].extra.insert(
+            serde_yaml::Value::String("备注".into()),
+            serde_yaml::Value::String("手写包含说明".into()),
+        );
+        save_map_structure(&project, &seeded).unwrap();
         let table = read_map_structure(&project).unwrap();
         assert_eq!(table.contains.len(), 1);
         set_region_containment(&project, Some("京城"), "京城", Some("仙界")).unwrap();
         let table = read_map_structure(&project).unwrap();
         assert_eq!(table.contains.len(), 1, "换地图＝替换包含行，不是叠加");
         assert_eq!(table.contains[0].map, "仙界");
+        assert_eq!(
+            table.contains[0].extra.get(serde_yaml::Value::String("备注".into())),
+            Some(&serde_yaml::Value::String("手写包含说明".into())),
+            "换归属只改受管字段，包含行的未知键必须保留",
+        );
         set_region_containment(&project, Some("京城"), "皇城", Some("仙界")).unwrap();
         let table = read_map_structure(&project).unwrap();
         assert_eq!(table.contains.len(), 1, "改名对账：旧名行替换成新名，不留两行");

@@ -101,12 +101,12 @@ export default function MapDialog({
 
   return (
     <div
-      className="dialog-overlay"
+      className="dialog-overlay detail-panel-overlay"
       onClick={(e) => {
         if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
-      <div className="dialog wide">
+      <div className="dialog wide detail-panel">
         <h2>{prevPath ? "编辑地图" : "新建地图"}</h2>
         <label>
           地图名（标题即文件名）

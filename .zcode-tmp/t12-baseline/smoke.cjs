@@ -1,0 +1,27 @@
+const {chromium}=require('C:/Users/q9560/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+(async()=>{
+ const browser=await chromium.launch({headless:true,channel:'msedge'});
+ const page=await browser.newPage({viewport:{width:1366,height:768}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:5178/t12-smoke.html');
+ await page.getByText('正文末尾仍然可见',{exact:false}).waitFor();
+ await page.getByText('山门 · 成员 · 守门人 · 前任 · 秘密 · 未公开离开',{exact:false}).waitFor();
+ await page.getByText('形象图无法显示：',{exact:false}).first().waitFor();
+ const card=page.locator('article').filter({has:page.getByRole('button',{name:'阿风',exact:true})});
+ await card.getByRole('button',{name:'人物关系',exact:true}).click();await page.getByText('关系焦点：阿风',{exact:true}).waitFor();
+ await page.screenshot({path:'.zcode-tmp/t12-baseline/people.png',fullPage:true});
+ await card.getByRole('button',{name:'编辑',exact:true}).click();
+ await page.getByRole('textbox',{name:'年龄或年龄感（可选）',exact:true}).fill('三十岁');
+ await page.getByRole('textbox',{name:'当前目标（可选）',exact:true}).fill('重返山门');
+ await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByText('重返山门',{exact:false}).waitFor();
+ await card.getByRole('button',{name:'待打磨',exact:true}).click();await card.getByRole('button',{name:'整理完成',exact:true}).waitFor();
+ await card.getByRole('button',{name:'整理完成',exact:true}).click();
+ await page.getByRole('button',{name:'新建人物',exact:true}).click();await page.getByRole('textbox',{name:'人名',exact:true}).fill('只有名字');await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByRole('button',{name:'只有名字',exact:true}).waitFor();
+ await page.getByRole('button',{name:'测试组织',exact:true}).click();await page.getByText('组织正文末尾',{exact:false}).waitFor();
+ await page.getByRole('button',{name:'组织关系',exact:true}).click();await page.getByText('人物的组织关系',{exact:true}).waitFor();
+ await page.screenshot({path:'.zcode-tmp/t12-baseline/organizations.png',fullPage:true});
+ await page.setViewportSize({width:1024,height:768});if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('横向溢出');
+ await page.getByRole('button',{name:'测试人物',exact:true}).click();await page.getByRole('button',{name:'阿风',exact:true}).waitFor();
+ if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('人物横向溢出');
+ await page.screenshot({path:'.zcode-tmp/t12-baseline/narrow.png',fullPage:true});
+ if(errors.length)throw Error(errors.join('\n'));console.log('完整档案、多组织摘要、失效图片、编辑保存、空字段、新建、待打磨恢复、关系入口、组织正文与1024px布局通过。');await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});

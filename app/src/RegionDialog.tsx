@@ -6,6 +6,7 @@ import { errMsg, splitList } from "./util";
 import { dirName } from "./editorRender";
 import MarkdownEditor from "./MarkdownEditor";
 import VocabInput from "./VocabInput";
+import { saveRegionFlow } from "./regionSaveFlow";
 
 interface RegionDialogProps {
   project: string;
@@ -54,6 +55,7 @@ export default function RegionDialog({
   const [erasText, setErasText] = useState(initial.eras.join("、"));
   const [body, setBody] = useState(initial.body);
   const [busy, setBusy] = useState(false);
+  const [savedPath, setSavedPath] = useState(prevPath);
 
   function changeOwner(next: string) {
     setOwner(next);
@@ -82,45 +84,41 @@ export default function RegionDialog({
       return;
     }
     setBusy(true);
+    let archiveSaved = false;
     try {
-      const entry = await invoke<RegionEntry>("save_region", { project, draft, prevPath });
-      // 档案与归属分开保存：档案先落盘；改名或换图时对账结构表的包含行。
-      if (draft.name !== (prevName ?? "") || owner !== (ownerMap ?? "")) {
-        try {
-          await invoke("set_region_containment", {
-            project,
-            prevRegion: prevName,
-            region: entry.name,
-            mapName: owner || null,
-          });
-        } catch (e) {
-          window.alert(
-            `档案已保存，但所属地图更新失败：${errMsg(e)}\n结构表读取或校验出了问题，请先处理再重试保存。`,
-          );
-          return;
-        }
-      }
+      const entry = await saveRegionFlow(
+        invoke,
+        { project, draft, prevPath: savedPath, prevName, owner, ownerMap },
+        (saved) => {
+          archiveSaved = true;
+          setSavedPath(saved.path);
+        },
+      );
       onSaved(entry);
     } catch (e) {
-      window.alert(`地域保存失败：${errMsg(e)}`);
+      window.alert(
+        archiveSaved
+          ? `档案已保存，但所属地图更新失败：${errMsg(e)}\n结构表读取或校验出了问题，请先处理再重试保存。`
+          : `地域保存失败：${errMsg(e)}`,
+      );
     } finally {
       setBusy(false);
     }
   }
 
   async function remove() {
-    if (!prevPath || busy) return;
+    if (!savedPath || busy) return;
     if (
       !window.confirm(
-        `确定删除地域「${name.trim() || initial.name}」？\n${prevPath}\n` +
+        `确定删除地域「${name.trim() || initial.name}」？\n${savedPath}\n` +
           "删除的是档案文件；归属与相邻关系不会自动清理（照常显示缺省节点）。",
       )
     )
       return;
     setBusy(true);
     try {
-      await invoke("delete_map_place", { path: prevPath });
-      onDeleted(prevPath);
+      await invoke("delete_map_place", { path: savedPath });
+      onDeleted(savedPath);
     } catch (e) {
       window.alert(`删除失败：${errMsg(e)}`);
       setBusy(false);
@@ -129,12 +127,12 @@ export default function RegionDialog({
 
   return (
     <div
-      className="dialog-overlay"
+      className="dialog-overlay detail-panel-overlay"
       onClick={(e) => {
         if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
-      <div className="dialog wide">
+      <div className="dialog wide detail-panel">
         <h2>{prevPath ? "编辑地域" : "新建地域"}</h2>
         <label>
           地域名（标题即文件名）
@@ -266,7 +264,7 @@ export default function RegionDialog({
             value={body}
             onChange={setBody}
             height="200px"
-            resolveDir={prevPath ? dirName(prevPath) : undefined}
+            resolveDir={savedPath ? dirName(savedPath) : undefined}
           />
         </label>
         <p className="hint">
@@ -274,7 +272,7 @@ export default function RegionDialog({
           里手补的字段不会丢。
         </p>
         <div className="dialog-actions">
-          {prevPath && (
+          {savedPath && (
             <button className="btn danger" disabled={busy} onClick={() => void remove()}>
               删除
             </button>

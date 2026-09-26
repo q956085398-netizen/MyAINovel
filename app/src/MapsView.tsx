@@ -12,7 +12,6 @@ import type {
   NoteDraft,
   NoteEntry,
   RegionDraft,
-  RegionEntry,
 } from "./types";
 import { emptyMapDraft, emptyNoteDraft, emptyRegionDraft } from "./types";
 import { errMsg } from "./util";
@@ -28,6 +27,7 @@ import PendingZone from "./PendingZone";
 import RegionDialog from "./RegionDialog";
 import TransitionDialog from "./TransitionDialog";
 import { usePendingToggle } from "./pendingToggle";
+import { regionDetailRows } from "./contentDetailRows";
 
 /** 地图页的四个副页签（spec 地图与地域 §四）：全貌管整体、地域管局部、
  *  转场管地图间承接、历史管时代引用；只有一层副页签。 */
@@ -79,20 +79,6 @@ function mapFieldRows(map: MapEntry | MapDraft): [string, string | null][] {
     ["组织", listText(map.organizations)],
     ["单元", listText(map.units)],
     ["主线里程碑", listText(map.milestones)],
-  ];
-}
-
-function regionFieldRows(region: RegionEntry | RegionDraft): [string, string | null][] {
-  return [
-    ["剧情功能", region.plotRole ?? null],
-    ["当地主线", region.localMainline ?? null],
-    ["秘密", region.secret ?? null],
-    ["人物", listText(region.people)],
-    ["组织", listText(region.organizations)],
-    ["矛盾", listText(region.contradictions)],
-    ["单元", listText(region.units)],
-    ["伏笔", listText(region.foreshadows)],
-    ["时代", listText(region.eras)],
   ];
 }
 
@@ -437,7 +423,12 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
               hint="还在发酵的地方设定；整理完成后回到下面的原位置。"
             >
               <div className="card-list">
-                {pendingRegions.map((region) => (
+                {pendingRegions.map((region) => {
+                  const owner = regionOwner.get(region.name) ?? null;
+                  const connections = (structure?.regionRelations ?? []).filter(
+                    (rel) => rel.from === region.name || rel.to === region.name,
+                  );
+                  return (
                   <article key={region.path} id={contentCardDomId(region.path)} tabIndex={-1} className="card-item is-pending">
                     <div className="card-title-row">
                       <button
@@ -456,7 +447,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                       </button>
                       {region.scale && <span className="card-cat">{region.scale}</span>}
                     </div>
-                    {fieldLines(regionFieldRows(region))}
+                    {fieldLines(regionDetailRows(region, owner, connections))}
                     {region.body && <div className="card-body">{region.body}</div>}
                     <div className="card-actions">
                       <button
@@ -482,7 +473,8 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                       </button>
                     </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
             </PendingZone>
 
@@ -538,20 +530,11 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
                       </button>
                     }
                   >
-                    {fieldLines([
-                      ...regionFieldRows(region),
-                      ["展开为", region.expandsTo ? mapRef(region.expandsTo) : null],
-                    ])}
-                    {connections.length > 0 && (
-                      <p className="field-line">
-                        <span className="field-label">地域连接</span>
-                        {connections
-                          .map(
-                            (rel) =>
-                              `${rel.kind}：${rel.from === region.name ? rel.to : rel.from}`,
-                          )
-                          .join("；")}
-                      </p>
+                    {fieldLines(
+                      regionDetailRows(region, owner ?? null, connections).map(([label, value]) => [
+                        label,
+                        label === "所属地图" || label === "展开为" ? mapRef(value) : value,
+                      ]),
                     )}
                     {region.body && <div className="card-body">{region.body}</div>}
                   </ContentSurface>

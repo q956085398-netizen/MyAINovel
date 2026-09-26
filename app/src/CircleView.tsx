@@ -4,6 +4,10 @@ import type { Circle, Vocabulary } from "./types";
 import { errMsg, splitList } from "./util";
 import MarkdownEditor from "./MarkdownEditor";
 import VocabInput from "./VocabInput";
+import {
+  normalizeReaderPrompts,
+  type ReaderPrompt,
+} from "./ideationGuidance";
 
 interface CircleViewProps {
   project: string;
@@ -20,6 +24,23 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const promptKey = `gongbi.reader-prompts.${project}`;
+  const promptHiddenKey = `${promptKey}.hidden`;
+  const [prompts, setPrompts] = useState<ReaderPrompt[]>(() => {
+    try {
+      return normalizeReaderPrompts(JSON.parse(localStorage.getItem(promptKey) ?? "null"));
+    } catch {
+      return normalizeReaderPrompts(null);
+    }
+  });
+  const [promptsHidden, setPromptsHidden] = useState(
+    () => localStorage.getItem(promptHiddenKey) === "1",
+  );
+
+  function savePrompts(next: ReaderPrompt[]) {
+    localStorage.setItem(promptKey, JSON.stringify(next));
+    setPrompts(next);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -30,7 +51,7 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
         setTypesText(circle.types.join("、"));
         setBody(circle.body);
       } catch (e) {
-        if (!cancelled) setError(`读取类型圈失败：${errMsg(e)}`);
+        if (!cancelled) setError(`读取读者遐想失败：${errMsg(e)}`);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -50,7 +71,7 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
       });
       setDirty(false);
     } catch (e) {
-      window.alert(`类型圈保存失败：${errMsg(e)}`);
+      window.alert(`读者遐想保存失败：${errMsg(e)}`);
     } finally {
       setSaving(false);
     }
@@ -60,7 +81,7 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
     <div className="note-pane">
       <div className="pane-head">
         <div>
-          <h2>类型圈</h2>
+          <h2>读者遐想（类型圈）</h2>
           <p className="hint">
             这本书的读者遐想清单（约 4~6 类）：全书内容只在圈内、不在圈外。
             类型挂词表提示（只提示不校验）；正文按类型逐条写「想看到什么」。
@@ -80,6 +101,46 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
         <p className="hint">正在读取……</p>
       ) : (
         <>
+          {!promptsHidden && prompts.length > 0 && (
+            <div className="reader-prompt-guide">
+              <div className="reader-prompt-head">
+                <div>
+                  <strong>可删的思考提示</strong>
+                  <p className="hint">改写成适合这本书的问题，也可以移除或暂时跳过。</p>
+                </div>
+                <button
+                  className="link-like"
+                  onClick={() => {
+                    localStorage.setItem(promptHiddenKey, "1");
+                    setPromptsHidden(true);
+                  }}
+                >
+                  暂时跳过
+                </button>
+              </div>
+              {prompts.map((prompt, index) => (
+                <div className="reader-prompt-row" key={prompt.id}>
+                  <span>{prompt.label}</span>
+                  <textarea
+                    value={prompt.text}
+                    rows={2}
+                    onChange={(event) => {
+                      const next = prompts.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, text: event.target.value } : item,
+                      );
+                      savePrompts(next);
+                    }}
+                  />
+                  <button
+                    className="link-like danger"
+                    onClick={() => savePrompts(prompts.filter((item) => item.id !== prompt.id))}
+                  >
+                    移除
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <label className="field">
             类型（多个用、隔开）
             <VocabInput

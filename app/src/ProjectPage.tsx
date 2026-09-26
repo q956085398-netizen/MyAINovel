@@ -26,6 +26,7 @@ import SocialView from "./SocialView";
 import PlanningView from "./PlanningView";
 import BridgeLibrary from "./BridgeLibrary";
 import PowerSystemHome from "./PowerSystemHome";
+import IdeationHome from "./IdeationHome";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 // 「三线」拆为「期待感」「目标」两页签（工单 #36）：名字自解释，
@@ -33,7 +34,7 @@ import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 const TABS = [
   "首页",
   "大纲",
-  "类型圈",
+  "读者遐想（类型圈）",
   "矛盾",
   "桥段库",
   "单元",
@@ -48,7 +49,7 @@ const TABS = [
 ] as const;
 const NAV_GROUPS = [
   { step: "", label: "", tabs: ["首页"] },
-  { step: "第一步", label: "定书", tabs: ["大纲", "类型圈", "人物", "世界观", "地图", "开头"] },
+  { step: "第一步", label: "定书", tabs: ["大纲", "读者遐想（类型圈）", "人物", "世界观", "地图", "开头"] },
   { step: "第二步", label: "生情节", tabs: ["矛盾", "桥段库", "单元", "排布"] },
   { step: "第三步", label: "织张力", tabs: ["伏笔", "期待感", "目标"] },
 ] as const;
@@ -69,7 +70,7 @@ function isNoteTab(tab: Tab): tab is NoteKind {
 interface ProjectPageProps {
   project: ProjectEntry;
   libraryPath: string | null;
-  /** 打开时落在哪个页签（默认「类型圈」）；仅挂载时生效。 */
+  /** 打开时落在哪个页签（默认构思首页）；仅挂载时生效。 */
   initialTab?: ProjectTab;
   /** 跨板块跳来的人名（灵感库关联 →「《书名》/人名」）：落到人物画布并选中。 */
   initialFocus?: string;
@@ -82,7 +83,7 @@ interface ProjectPageProps {
   onAiCommand: (seed: AiSeed) => void;
 }
 
-/** 构思项目页（工单 #4 的文件布局）：类型圈 / 矛盾池 / 单元 / 伏笔 / 排布 /
+/** 构思项目页：轻量首页 / 读者遐想（类型圈）/ 矛盾池 / 单元 / 伏笔 / 排布 /
  *  人物（名单｜画布）/ 世界观 / 开头。正文由「书写」板块承接（工单 #5）。 */
 export default function ProjectPage({
   project,
@@ -95,7 +96,7 @@ export default function ProjectPage({
   onAiCommand,
 }: ProjectPageProps) {
   const searchDestination = useSearchDestination();
-  const [tab, setTab] = useState<Tab>(initialTab ?? "大纲");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "首页");
   const [worldviewCategory, setWorldviewCategory] = useState("");
   const [meta, setMeta] = useState<ProjectMeta>(emptyProjectMeta());
   const [metaWarning, setMetaWarning] = useState<string | undefined>();
@@ -274,7 +275,7 @@ export default function ProjectPage({
           {NAV_GROUPS.map((group) => (
             <div className="project-nav-group" key={group.label}>
               <p className="project-nav-label">
-                <span>{group.step}</span>
+                {group.step && <span>{group.step}</span>}
                 {group.label}
               </p>
               {group.tabs.map((t) => (
@@ -329,8 +330,16 @@ export default function ProjectPage({
               setTab("世界观");
             }} />
           )}
+          {tab === "首页" && (
+            <IdeationHome
+              project={project.dir}
+              onOpen={(target) => {
+                if ((TABS as readonly string[]).includes(target)) setTab(target as Tab);
+              }}
+            />
+          )}
           {tab === "大纲" && <PlanningView project={project.dir} unitNames={units.map((unit) => unit.name)} />}
-          {tab === "类型圈" && <CircleView project={project.dir} vocab={vocab} />}
+          {tab === "读者遐想（类型圈）" && <CircleView project={project.dir} vocab={vocab} />}
           {tab === "地图" && <MapsView project={project.dir} onChanged={refreshAll} />}
           {tab === "桥段库" && (
             <BridgeLibrary

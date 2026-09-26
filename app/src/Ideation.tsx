@@ -216,7 +216,7 @@ export default function Ideation({
         <div className="empty-state">
           <p>还没有构思项目。</p>
           <p className="hint">
-            新建一个项目（一本书），从「类型圈」开始：先想清楚读者要看什么，
+            新建一个项目（一本书），从「读者遐想（类型圈）」开始：先想清楚读者要看什么，
             <br />
             再把矛盾丢进矛盾池，展开成单元，排布成大纲。
           </p>

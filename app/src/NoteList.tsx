@@ -9,6 +9,7 @@ import CharacterArchive from "./CharacterArchive";
 import GeoUpgradeDialog from "./GeoUpgradeDialog";
 import PendingZone from "./PendingZone";
 import { usePendingToggle } from "./pendingToggle";
+import { noteDetailRows } from "./contentDetailRows";
 import { createPowerSystemDraft, POWER_SYSTEM_CATEGORY } from "./powerSystem";
 
 interface NoteListProps {
@@ -68,30 +69,20 @@ function NoteBadges({ kind, note }: { kind: NoteKind; note: NoteEntry }) {
   );
 }
 
-/** 一句话核心／来源等字段行；便笺与紧凑卡共用。 */
+/** 已填写字段行；便笺与紧凑卡共用同一份完整字段投影。 */
 function NoteCoreLines({ kind, note }: { kind: NoteKind; note: NoteEntry }) {
-  if (!note.core && !(kind === "矛盾" && (note.source || note.links.length > 0))) {
-    return null;
-  }
   return (
     <>
-      {note.core && (
-        <p className="card-core" title={kind === "单元" ? "核心矛盾" : "一句话核心"}>
-          {kind === "单元" ? "核心矛盾" : "一句话核心"}：{note.core}
-        </p>
-      )}
-      {kind === "矛盾" && note.source && (
-        <p className="card-meta">
-          <span className="card-source" title="来源">
-            来源：{note.source}
+      {noteDetailRows(kind, note).map(([label, value]) => (
+        <p
+          key={label}
+          className={label === "核心矛盾" || label === "一句话核心" ? "card-core" : "card-meta"}
+        >
+          <span className="card-source" title={label}>
+            {label}：{value}
           </span>
-          {note.links.map((l) => (
-            <span key={l} className="card-source">
-              {l}
-            </span>
-          ))}
         </p>
-      )}
+      ))}
     </>
   );
 }
@@ -206,7 +197,7 @@ export default function NoteList({
           {onAiCommand && (
             <button
               className="btn"
-              title="AI 分拣这一池矛盾：能长成单元的、重复的、偏离类型圈的（只出报告，不改文件）"
+              title="AI 分拣这一池矛盾：能长成单元的、重复的、偏离读者遐想（类型圈）的（只出报告，不改文件）"
               onClick={onAiCommand}
             >
               AI 矛盾梳理

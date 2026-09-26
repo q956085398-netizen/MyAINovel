@@ -1,0 +1,429 @@
+warning: constant `FALLBACK_COLOR` is never used
+  --> src\relationship.rs:44:11
+   |
+44 | pub const FALLBACK_COLOR: &str = "#7f8c8d";
+   |           ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: linker stdout: 正在创建库 C:\Users\q9560\Documents\GitHub\MyAINovel\app\src-tauri\target\debug\deps\app_lib.dll.lib 和对象 C:\Users\q9560\Documents\GitHub\MyAINovel\app\src-tauri\target\debug\deps\app_lib.dll.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: function `指纹_ipc_走_camelCase_与标签形态` should have a snake case name
+    --> src\book_file.rs:1070:8
+     |
+1070 |     fn 指纹_ipc_走_camelCase_与标签形态() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `指纹_ipc_走_camel_case_与标签形态`
+     |
+     = note: `#[warn(non_snake_case)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: function `元数据_ipc_走_camelCase` should have a snake case name
+    --> src\book_file.rs:1239:8
+     |
+1239 |     fn 元数据_ipc_走_camelCase() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `元数据_ipc_走_camel_case`
+
+warning: function `导出_ipc_走_camelCase_与前端字段对齐` should have a snake case name
+   --> src\export.rs:910:8
+    |
+910 |     fn 导出_ipc_走_camelCase_与前端字段对齐() {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `导出_ipc_走_camel_case_与前端字段对齐`
+
+warning: function `卡片_ipc_走_camelCase` should have a snake case name
+   --> src\inspiration.rs:627:8
+    |
+627 |     fn 卡片_ipc_走_camelCase() {
+    |        ^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `卡片_ipc_走_camel_case`
+
+warning: function `大写扩展名_MD_也识别` should have a snake case name
+   --> src\library.rs:530:8
+    |
+530 |     fn 大写扩展名_MD_也识别() {
+    |        ^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `大写扩展名_md_也识别`
+
+warning: function `项目_ipc_走_camelCase_与中文类别` should have a snake case name
+    --> src\project.rs:1303:8
+     |
+1303 |     fn 项目_ipc_走_camelCase_与中文类别() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `项目_ipc_走_camel_case_与中文类别`
+
+warning: function `校对_ipc_走_camelCase_与前端字段对齐` should have a snake case name
+    --> src\proofread.rs:1163:8
+     |
+1163 |     fn 校对_ipc_走_camelCase_与前端字段对齐() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `校对_ipc_走_camel_case_与前端字段对齐`
+
+warning: function `桥段_ipc_走_camelCase` should have a snake case name
+   --> src\trope.rs:193:8
+    |
+193 |     fn 桥段_ipc_走_camelCase() {
+    |        ^^^^^^^^^^^^^^^^^^^^^ help: convert the identifier to snake case: `桥段_ipc_走_camel_case`
+
+warning: `app` (lib) generated 2 warnings
+warning: `app` (lib test) generated 9 warnings (1 duplicate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.63s
+     Running unittests src\lib.rs (target\debug\deps\app_lib-6add55d6e1ff9449.exe)
+
+running 346 tests
+test ai::tests::completions_url_joins ... ok
+test ai::tests::cancel_flag_lifecycle ... ok
+test ai::tests::extract_delta_and_finish_reason ... ok
+test ai::tests::sse_basic_events_and_done ... ok
+test ai::tests::sse_chunk_split_inside_multibyte_char ... ok
+test ai::tests::sse_crlf_comment_and_multiline_data ... ok
+test ai::tests::sse_finish_flushes_event_without_trailing_newline ... ok
+test ai::tests::request_body_shape ... ok
+test ai::tests::config_round_trip_and_default_on_missing ... ok
+test ai::tests::list_sessions_skips_broken_files ... ok
+test ai::tests::session_id_rejects_path_escape ... ok
+test ai_context::tests::单行折叠压掉换行与多余空白 ... ok
+test ai::tests::persona_tag_round_trip_and_legacy_sessions ... ok
+test ai_context::tests::截断按字符不按字节 ... ok
+test ai::tests::session_preset_snapshot_round_trip_and_legacy ... ok
+test ai::tests::session_round_trip_list_delete ... ok
+test ai_context::tests::ai陪看本章_没有匹配桥段时仍可用并说明上下文缺失 ... ok
+test ai_context::tests::ai陪看本章_显式正文快照优先于随后变化的盘面 ... ok
+test ai_context::tests::ai陪看本章_只有单元时仍携带可用的单元情绪目标 ... ok
+test ai_context::tests::ai陪看本章_只携带正文与可用的本章意图 ... ok
+test ai_context::tests::人物关系梳理_少于两人报错_表坏了报错 ... ok
+test ai_context::tests::排布体检_空排布与空类型圈给显式占位 ... ok
+test ai_context::tests::人物关系梳理_材料含小传_相关边_类型圈与矛盾标题 ... ok
+test ai_context::tests::人物对话_人物缺失_人数不对_表坏了都报错 ... ok
+test ai_context::tests::ai陪看本章_携带完整长正文 ... ok
+test ai_context::tests::人物关系梳理_选中小传缺失与空关系不静默 ... ok
+test ai_context::tests::人物对话_材料含小传全文_他的边与类型圈 ... ok
+test ai_context::tests::未知命令报错 ... ok
+test book_file::tests::下一章_bom_首行章号也参与续号 ... ok
+test book_file::tests::下一章_中文数字_按行数续号 ... ok
+test book_file::tests::下一章_全角数字_按数值续号 ... ok
+test book_file::tests::下一章_空文档_从第1章开始 ... ok
+test book_file::tests::下一章_空模板_回退默认 ... ok
+test book_file::tests::下一章_模板无占位符_原样返回 ... ok
+test book_file::tests::下一章_自定义模板 ... ok
+test book_file::tests::下一章_默认模板_阿拉伯续号 ... ok
+test book_file::tests::下一章_自定义模板_按模板自身续号 ... ok
+test ai_context::tests::排布体检_引用失效与未排布单元进机检 ... ok
+test book_file::tests::书档块生成_只落非空项 ... ok
+test book_file::tests::书档插顶_正文为空与有正文 ... ok
+test book_file::tests::书档解析_折叠标记与首块判定 ... ok
+test book_file::tests::书档解析_空值不算_多块取首块 ... ok
+test book_file::tests::书档解析_键名行_含自由行与半角冒号 ... ok
+test ai_context::tests::人物对话_孤岛占位_另一端缺档只提示 ... ok
+test ai_context::tests::排布体检_单元核心缺失给占位不静默 ... ok
+test ai_context::tests::矛盾梳理_空池与无单元给显式占位 ... ok
+test ai_context::tests::人物对话_小传超上限截断_空小传给占位 ... ok
+test ai_context::tests::本章体检_没有这一章或没给章序都报错 ... ok
+test book_file::tests::元数据_ipc_走_camelCase ... ok
+test ai_context::tests::排布体检_材料含次序_核心与机检 ... ok
+test ai_context::tests::引文失配在材料里明说 ... ok
+test book_file::tests::保存_文件被外部删除_判冲突 ... ok
+test ai_context::tests::本章体检_空章与无区间无伏笔给显式占位 ... ok
+test book_file::tests::保存_外部改过_判冲突不写盘 ... ok
+test book_file::tests::指纹_ipc_走_camelCase_与标签形态 ... ok
+test book_file::tests::章号文案_缺省前缀_自定义模板_无占位符 ... ok
+test book_file::tests::章锚点_bom_不遮挡首行 ... ok
+test book_file::tests::保存_载入时不存在 ... ok
+test book_file::tests::章锚点_无占位符模板_按字面前缀 ... ok
+test book_file::tests::章锚点_空文档_返回空 ... ok
+test book_file::tests::章锚点_混合标题_按序数编号并记行号 ... ok
+test book_file::tests::章锚点_自定义模板_兼容第x章式标题 ... ok
+test ai_context::tests::本章体检_未收的线超期在前_超上限只列前三十 ... ok
+test ai_context::tests::矛盾梳理_核心缺失取正文摘_并列已有单元 ... ok
+test book_file::tests::保存_force_跳过对账直接覆盖 ... ok
+test ai_context::tests::本章体检_材料含本章_所属单元_伏笔三线与正文 ... ok
+test book_file::tests::元数据_损坏_yaml_报错不静默 ... ok
+test book_file::tests::元数据_缺省为空_写入后往返 ... ok
+test book_file::tests::保存_散文件书_快照落库根按书名分目录 ... ok
+test book_file::tests::保存_首次覆盖留快照_落书内隐藏目录 ... ok
+test ai_context::tests::线索表损坏时显式报错不降级 ... ok
+test book_file::tests::元数据_清空字段_移除键 ... ok
+test book_file::tests::元数据_保留未知键与数字标量 ... ok
+test chapter::tests::字数_与前端同口径的边界 ... ok
+test chapter::tests::字数_排除frontmatter_计费含标点_汉字不含 ... ok
+test chapter::tests::字数_未闭合frontmatter整块不算 ... ok
+test book_file::tests::保存_指纹相符_落盘并返回新指纹 ... ok
+test book_file::tests::读写正文_往返一致 ... ok
+test book_file::tests::迁移_md已有书档_只删键不搬值 ... ok
+test ai_context::tests::本章体检_正文超上限截断并注明 ... ok
+test book_file::tests::迁移_yaml解析失败_报错不写盘 ... ok
+test chapter::tests::扫描_空标题与四位填充都认 ... ok
+test book_file::tests::迁移_空值不搬_但键仍清 ... ok
+test book_file::tests::迁移_无yaml或无四键_不写盘 ... ok
+test book_file::tests::附件_散文件_按书名分目录 ... ok
+test book_file::tests::迁移_散文件书_同样插顶 ... ok
+test chapter::tests::扫描_按章序排序_未编号排最后 ... ok
+test chapter::tests::单元区间_反查本章所属单元与排布位次 ... ok
+test book_file::tests::迁移_四键非空_搬值删键_保留桥段未知键章前缀 ... ok
+test chapter::tests::状态_frontmatter缺省草稿_完稿认得出 ... ok
+test book_file::tests::附件_一书一文件夹_落书内附件目录 ... ok
+test chapter::tests::拆章_不允许在frontmatter内或未编号章执行 ... ok
+test chapter::tests::每日统计_缺文件取默认_往返一致 ... ok
+test chapter::tests::拆章预览_章中分开并保留中文边界 ... ok
+test chapter::tests::保存_指纹闸拦外部修改_force覆盖_首次覆盖留快照 ... ok
+test chapter::tests::拆章_目标重名与预览后外部修改都零写入 ... ok
+test cover::tests::找封面_约定文件名_多扩展名按次序取一 ... ok
+test cover::tests::找封面_大写扩展名也认 ... ok
+test chapter::tests::新建章_取最大序加一_标题可空 ... ok
+test chapter::tests::重命名_保序改标题_同序撞名报错 ... ok
+test cover::tests::找封面_附件里的截图不误认 ... ok
+test chapter::tests::粘贴图片_落项目附件_回相对链接 ... ok
+test chapter::tests::拆章_新章发布后原章冲突会撤回新章且保留外部内容 ... ok
+test chapter::tests::拆章_新章已创建时失败会撤回并恢复原章 ... ok
+test chapter::tests::重编号_目标名互相占位也能收敛 ... ok
+test chapter::tests::拆章_回滚前新章被外部改写时不会删除外部内容 ... ok
+test cover::tests::设封面_非法扩展名报错 ... ok
+test cover::tests::设封面_拷贝内容_目录懒创建 ... ok
+test export::tests::导出_ipc_走_camelCase_与前端字段对齐 ... ok
+test chapter::tests::拆章_空后半章也有强制恢复点 ... ok
+test cover::tests::设封面_替换删旧_附件内至多一个封面 ... ok
+test export::tests::书名_取项目yaml_缺省文件夹名 ... ok
+test expectation::tests::看板_轴长含已删章的锚点_缺章文件算失配 ... ok
+test expectation::tests::新建待埋_类别档位_重名报错_未知值报错 ... ok
+test chapter::tests::重编号_补空洞_跳过未编号文件 ... ok
+test export::tests::清洗_frontmatter未闭合不吞内容 ... ok
+test export::tests::清洗_md格式只去frontmatter ... ok
+test expectation::tests::兑现_阶段部分兑现_终结已兑现_弃用不覆盖_重复不追加 ... ok
+test export::tests::导出_范围内没有章节报错 ... ok
+test export::tests::清洗_分隔线与打码星号不被吃掉 ... ok
+test export::tests::清洗_空行压缩与段首缩进 ... ok
+test export::tests::清洗_去frontmatter与标记_保留正文 ... ok
+test export::tests::模板_缺文件给默认_往返一致 ... ok
+test export::tests::清洗_落单标记保留_成对才去 ... ok
+test export::tests::清洗_词边界单星号去标记 ... ok
+test expectation::tests::读写_默认值_未知键丢弃_损坏报错 ... ok
+test export::tests::导出_字数越界与空章只提示不拦截 ... ok
+test export::tests::导出_同名不覆盖_续号 ... ok
+test export::tests::导出_全书_标题行与范围报告 ... ok
+test export::tests::导出_标题模板与关闭标题行 ... ok
+test chapter::tests::拆章_章首章尾与空后半段都可提交 ... ok
+test foreshadow::tests::回收_未知类型与未知伏笔报错 ... ok
+test expectation::tests::标注_新建已埋_同名追加_已有类别档位不被覆盖 ... ok
+test foreshadow::tests::标注_空名或空引文报错_不落盘 ... ok
+test export::tests::导出_区间与单章_文件名与内容只含选中章 ... ok
+test export::tests::预览_截断加提示_不落盘 ... ok
+test foreshadow::tests::待埋_新建重名报错_空名报错 ... ok
+test foreshadow::tests::看板_缺章文件算失配 ... ok
+test chapter::tests::拆章_各写入阶段失败都不改正文 ... ok
+test expectation::tests::状态与元数据_任切_未知报错_删除 ... ok
+test foreshadow::tests::读写_往返_未知键丢弃_损坏报错 ... ok
+test global_search::tests::大小写折叠改变字符数时仍返回原文命中 ... ok
+test ideation::tests::构思首页从大纲现读作品一句话和尚未解决且不写副本 ... ok
+test foreshadow::tests::标注_新建与同名追加_待埋升已埋 ... ok
+test inspiration::tests::卡片_ipc_走_camelCase ... ok
+test inspiration::tests::导入_各类别名命中_其余落未分类 ... ok
+test expectation::tests::看板_未推进按最近锚点_超期按档位_失配 ... ok
+test inspiration::tests::导入_标题分节_标签行与话题归类 ... ok
+test inspiration::tests::保存_同名卡片_续号不覆盖 ... ok
+test inspiration::tests::保存_不改标题_原地更新_旧文件不动 ... ok
+test foreshadow::tests::状态_五态任切_未知状态报错_删除 ... ok
+test ideation::tests::构思首页汇总读者遐想主线人物地图与待打磨内容 ... ok
+test inspiration::tests::保存_非法标题_净化与报错 ... ok
+test foreshadow::tests::回收_阶段部分收_终结已收_弃用不覆盖 ... ok
+test inspiration::tests::保存_新建_中文键落盘并往返 ... ok
+test inspiration::tests::删除_移除文件 ... ok
+test global_search::tests::线索按条目定位_灵感拆书参与_损坏文件告警_搜索不写文件 ... ok
+test foreshadow::tests::看板_超期与失配_按状态算未收章数 ... ok
+test inspiration::tests::扫描_无灵感库目录_返回空_库根无效报错 ... ok
+test inspiration::tests::保存_编辑改标题换类别_旧文件删除_未知键保留 ... ok
+test inspiration::tests::扫描_散文件与未知目录_归未分类 ... ok
+test inspiration::tests::类别_ipc_序列化为中文 ... ok
+test inspiration::tests::扫描_损坏frontmatter_整文入正文 ... ok
+test inspiration::tests::扫描_隐藏文件跳过 ... ok
+test inspiration::tests::灵感速记_未分类_首句为临时标题并完整保留多行 ... ok
+test inspiration::tests::导入_确认落盘_续号去重 ... ok
+test inspiration::tests::灵感速记_首句跨换行仍取完整一句 ... ok
+test inspiration::tests::灵感速记_空白内容不落盘 ... ok
+test library::tests::bom_不遮挡首行章前缀 ... ok
+test inspiration::tests::待打磨_旧内容与手写false_按普通内容 ... ok
+test library::tests::大写扩展名_MD_也识别 ... ok
+test library::tests::一书一文件夹_识别_主文件取_拆书_md_读其_yaml ... ok
+test library::tests::封面_一书一文件夹_落书内附件 ... ok
+test inspiration::tests::待打磨_无frontmatter与损坏头_正文保全 ... ok
+test inspiration::tests::待打磨_进入退出_键落盘_未知键与正文不动_类别路径不动 ... ok
+test library::tests::封面_多扩展名并存_按_png_优先 ... ok
+test library::tests::封面_散文件书_落库根附件_按书名分目录 ... ok
+test inspiration::tests::待打磨_便笺中编辑_保存合并保留状态_权威文件同一内容 ... ok
+test library::tests::列表取数_md书档优先_yaml残键过渡_两者皆无为空 ... ok
+test library::tests::封面_无封面为空_删文件即撤 ... ok
+test library::tests::扫描与搜索_库根拆书模板_不算书 ... ok
+test library::tests::列表取数_迁移后与纸面一致_扫描不写盘 ... ok
+test library::tests::拆书模板_首次打开_落默认模板_已有_不覆盖 ... ok
+test library::tests::文件夹内多个_md_合并统计 ... ok
+test library::tests::封面_端到端_新建库_新建书_设封面_扫描识别 ... ok
+test library::tests::损坏_yaml_该书降级为缺省_不拖垮扫描 ... ok
+test library::tests::章前缀判定 ... ok
+test library::tests::新建库_空文件夹判定_隐藏项也算非空 ... ok
+test library::tests::根目录不存在_报错而非空列表 ... ok
+test library::tests::新建书_书名清洗_去书名号与空白_非法字符替换 ... ok
+test library::tests::新建书_套用自编模板_书名替换_含多次出现_其余占位符原样 ... ok
+test library::tests::新建书_一书一文件夹_模板初始稿_懒生成 ... ok
+test library::tests::无_md_的文件夹_不算书 ... ok
+test library::tests::散文件布局_根目录_md_即书_携带_yaml_侧数据 ... ok
+test library::tests::新建书_同名报错_不自动续号 ... ok
+test library::tests::空目录_返回空 ... ok
+test library::tests::混合布局_两种并存 ... ok
+test library::tests::灵感库目录_不算书 ... ok
+test library::tests::隐藏目录与文件_跳过 ... ok
+test library::tests::新建书_模板读写失败_回退空稿_不阻断 ... ok
+test library::tests::项目目录_不算书 ... ok
+test pending::tests::空项目_返回空表 ... ok
+test map::tests::地图结构_自定义地域关系仍可读写_损坏文件拒绝覆盖 ... ok
+test map::tests::排布地图引用_同时兼容旧项目清单与新地图实体 ... ok
+test map::tests::地图结构_合法非键值表与行内未知键均不应被静默覆盖 ... ok
+test pending::tests::线表坏了_错误上抛不吞 ... ok
+test planning::tests::主线里程碑按人工次序保存且保留未知字段 ... ok
+test map::tests::地图档案_完整字段往返_未知键保留_改名移动_待打磨派生 ... ok
+test planning::tests::保存大纲纸面使用轻模板且允许自由改写 ... ok
+test map::tests::转场窄写_只动转场节_外部改动的包含行不丢 ... ok
+test planning::tests::保存非空主线图时总会确定一条主线 ... ok
+test map::tests::地理词条升级为地图_预览不落盘_确认后保留未知键与可恢复备份 ... ok
+test planning::tests::外部新增主线时拒绝静默覆盖 ... ok
+test planning::tests::本章意图_缺少规划时保持空提示 ... ok
+test planning::tests::大纲纸面外部改动时拒绝静默覆盖 ... ok
+test planning::tests::安排桥段只接受既有单元 ... ok
+test map::tests::地图地域与转场_各自落在对应实体与结构字段 ... ok
+test presets::tests::内置预设字段齐全且提示非空_不携带覆盖 ... ok
+test global_search::tests::全局搜索区分同名实体与项目_字段正文及未编号章节均可定位 ... ok
+test planning::tests::缺失大纲纸面是空状态且不创建文件 ... ok
+test planning::tests::读入外部主线图时总会高亮唯一主线 ... ok
+test presets::tests::保存会修剪字段并把空覆盖归为跟随全局 ... ok
+test planning::tests::本章意图_命中所属单元与覆盖桥段 ... ok
+test presets::tests::没有文件时给初始态_四内置_默认通用助手 ... ok
+test presets::tests::用户预设字段底线_名称提示必填_颜色格式_内置不可覆盖 ... ok
+test presets::tests::默认唯一且必须存在_删除默认必须先换默认 ... ok
+test presets::tests::旧配置兼容_缺键多键与空默认都能读 ... ok
+test project::tests::体检_2比1口径 ... ok
+test project::tests::体检_比例_连续节奏_失效引用_未排布单元 ... ok
+test map::tests::地域档案_完整字段往返_含展开为与归属唯一 ... ok
+test presets::tests::内置升级_旧版本文件读入时推进且用户数据保留_悬空默认回通用 ... ok
+test presets::tests::读态容错_重复id保留首个_空白默认作罢_坏文件拒绝覆盖 ... ok
+test presets::tests::用户预设增改删与设默认整表往返 ... ok
+test planning::tests::本章意图_异常区间只返回提示且仍按次序取桥段 ... ok
+test planning::tests::新桥段草案待安排_安排追加末尾_取消后回归待安排 ... ok
+test project::tests::人物编辑版本过期不覆盖外部改动 ... ok
+test project::tests::扫描_无项目目录_返回空_库根无效报错 ... ok
+test project::tests::力量体系提示删改留空后可重开且旧世界观未知字段保留 ... ok
+test project::tests::封面_项目内附件_扫描识别_删文件即撤 ... ok
+test project::tests::排布_ipc_extra_往返 ... ok
+test project::tests::排布_空单元报错不落盘 ... ok
+test project::tests::人物完整档案与旧人物新组织混合重开 ... ok
+test planning::tests::单元内桥段可手动换序且保留未知字段 ... ok
+test project::tests::体检命令_从盘上读定义 ... ok
+test project::tests::单元_起章止章_落整数键_其他类别不写 ... ok
+test project::tests::排布_缺文件空列表_损坏报错_缺单元报错 ... ok
+test project::tests::排布_保存读合写_盘上未知键与手写值不丢 ... ok
+test project::tests::待打磨_五类笔记与手写值_各归各的键 ... ok
+test project::tests::扫描_直接子文件夹即项目_懒生成缺省书名 ... ok
+test project::tests::排布_读写_保序_未知键保留 ... ok
+test project::tests::待打磨_笔记_进入浏览退出_排序恢复_无副本 ... ok
+test project::tests::故事卡转生_非故事卡与项目外一律拒绝 ... ok
+test project::tests::项目_ipc_走_camelCase_与中文类别 ... ok
+test pending::tests::超期伏笔与超期期待线_按未推进章数降序 ... ok
+test project::tests::笔记_清空字段_移除键_正文空时不留空frontmatter ... ok
+test pending::tests::已收伏笔_不算待办 ... ok
+test project::tests::故事卡转生_无项目yaml书名兜底_重转不重复记关联 ... ok
+test proofread::tests::专有名词表以规范名映射多个误写 ... ok
+test proofread::tests::四项规则可独立关闭且不再运行敏感词和的地得 ... ok
+test project::tests::笔记_非法名报错_删除文件 ... ok
+test proofread::tests::成对标点允许跨行开合 ... ok
+test proofread::tests::成对标点报告缺失和多余闭合 ... ok
+test proofread::tests::敏感词_最长匹配_嵌套不重复报 ... ok
+test proofread::tests::校对_ipc_走_camelCase_与前端字段对齐 ... ok
+test proofread::tests::片段_前后各十二字带省略号 ... ok
+test proofread::tests::的地得_动词加补语报得_名词短语不报 ... ok
+test proofread::tests::的地得_状语加动词报地_名词不报 ... ok
+test proofread::tests::的地得_行尾单字动词报_接名词不报 ... ok
+test project::tests::全流程_建项目到排布体检 ... ok
+test project::tests::新建_加书名号_只建项目文件夹_重名报错 ... ok
+test project::tests::矛盾提为单元_预填字段_状态改已成单元_矛盾留档 ... ok
+test project::tests::笔记_编辑改名_移动文件_未知键保留_同名续号 ... ok
+test proofread::tests::重复字词报告连续重复但不把省略号当重复 ... ok
+test project::tests::类型圈_读写_未知键保留 ... ok
+test proofread::tests::错词_内置种子命中并给建议 ... ok
+test proofread::tests::markdown_frontmatter_代码与链接目标不参与校对 ... ok
+test project::tests::故事卡转生_预填字段_卡片关联记去向_未知键保留 ... ok
+test proofread::tests::空库根_没有用户词表且不碰工作目录 ... ok
+test project::tests::项目yaml_往返_未知键保留_清空移除键 ... ok
+test project::tests::项目yaml_损坏_读取报错_情节线形态错误报错 ... ok
+test proofread::tests::当前章路径可只扫未编号章 ... ok
+test relationship::tests::交集_去重去空白保序 ... ok
+test project::tests::项目yaml_情节线_保序与行内未知键 ... ok
+test project::tests::笔记_五类字段各写各的键 ... ok
+test proofread::tests::词库_只读取用户错词且忽略旧敏感词文件 ... ok
+test proofread::tests::错词_同一行多次出现给不同occurrence ... ok
+test proofread::tests::范围_区间只扫选中章_全书扫未编号章 ... ok
+test relationship::tests::写_顶层未知键保留_条目内未知键丢弃 ... ok
+test relationship::tests::交汇_边与共同单元_单人报错 ... ok
+test relationship::tests::提为矛盾_表坏了显式报错 ... ok
+test pending::tests::超过多条_全量带回不截断 ... ok
+test relationship::tests::写读_往返_方向与秘密只写必要的键 ... ok
+test relationship::tests::提为矛盾_名字缺省串人名 ... ok
+test relationship::tests::写_图例重名与两端同人报错_空色按位置补 ... ok
+test relationship::tests::读_文件不存在给缺省图例与空边表 ... ok
+test search::tests::yaml_侧_也参与搜索 ... ok
+test relationship::tests::读_认不出的方向按无向 ... ok
+test relationship::tests::视图_表坏了降级并告警 ... ok
+test search::tests::一书一文件夹_所有_md_都参与搜索 ... ok
+test relationship::tests::写_读不懂的文件拒绝覆盖 ... ok
+test search::tests::空白查询_与无命中_返回空 ... ok
+test relationship::tests::提为矛盾_预填人名与边_同名报错_单人报错 ... ok
+test search::tests::大小写不敏感 ... ok
+test search::tests::跨书命中_散文件与一书一文件夹_都带书名行号 ... ok
+test search::tests::命中达上限_停止扫描 ... ok
+test search::tests::灵感库目录_不参与全文搜索 ... ok
+test relationship::tests::读_损坏或不合法显式报错 ... ok
+test relationship::tests::视图_失效引用与图例外的类型只提示 ... ok
+test search::tests::长行_片段截断带省略号_不超上限 ... ok
+test search::tests::大小写不匹配的长行_片段仍包含命中词 ... ok
+test search::tests::项目目录_不参与全文搜索 ... ok
+test relationship::tests::端到端_临时库全流程冒烟 ... ok
+test thread::tests::匹配_精确_去空白_不中为失配 ... ok
+test trope::tests::校验_起止倒置_起为零_类型为空_都报错 ... ok
+test trope::tests::桥段_ipc_走_camelCase ... ok
+test thread::tests::读写_锚点与兑现往返 ... ok
+test relationship::tests::视图_存回不丢失效引用与图例外类型 ... ok
+test trope::tests::读写_往返一致 ... ok
+test thread::tests::读_空文件空表_顶层非列表报错 ... ok
+test social::tests::损坏旧结构和损坏人物_拒绝升级且原文件完整 ... ok
+test trope::tests::合并_书级键与未知键保留 ... ok
+test trope::tests::读取_损坏_yaml_报错不静默 ... ok
+test social::tests::预览后外部修改或目标碰撞_不改变旧项目 ... ok
+test trope::tests::清空_移除键_其余保留 ... ok
+test trope::tests::读写_无解法_不落键 ... ok
+test social::tests::过期画布删除最后一条关系_不得清空外部新增关系 ... ok
+test trope::tests::读写_解法空串_归一为无 ... ok
+test trope::tests::读取_多条_保序 ... ok
+test trope::tests::读取_条目缺起_报错带序号 ... ok
+test trope::tests::读取_桥段非列表_报错 ... ok
+test vocabulary::tests::删掉类型键_按空词表对待_不回填种子 ... ok
+test vocabulary::tests::损坏词表_报错且不覆盖 ... ok
+test vocabulary::tests::词表键形态错误_报错 ... ok
+test vocabulary::tests::词表条目非字符串_报错 ... ok
+test social::tests::组织编辑保留未知键_冲突与损坏拒绝覆盖_删除留关系 ... ok
+test social::tests::旧项目预览不落盘_确认后多组织关系可重开 ... ok
+test vocabulary::tests::已有词表_文件序在前_已用词按次数降序追加去重 ... ok
+test social::tests::发布失败自动恢复_可以再次升级 ... ok
+test vocabulary::tests::项目目录_不参与聚合 ... ok
+test vocabulary::tests::灵感库目录_不参与聚合 ... ok
+test vocabulary::tests::损坏书yaml_聚合降级为空_不报错 ... ok
+test vocabulary::tests::首次使用_落盘种子_空库无已用词 ... ok
+test social::tests::升级与旧画布窄写_保留图例布局及每条关系手补键 ... ok
+test social::tests::中断后重开_显式恢复_外部修改不会被撤回覆盖 ... ok
+test book_file::tests::快照_同内容不重复_空白不留_节流_超上限删最旧 ... ok
+test global_search::tests::跳过导出缓存附件_全文预览拒绝非创作文件_空查询与上限 ... ok
+
+test result: ok. 346 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.19s
+
+     Running unittests src\main.rs (target\debug\deps\app-e9f0f3f36b1115c4.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests app_lib
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

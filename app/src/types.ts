@@ -95,6 +95,23 @@ export interface ProjectEntry {
   coverDir: string;
 }
 
+/** 构思首页：全部字段从权威项目文件现读派生，不保存摘要副本。 */
+export interface IdeationOverviewItem {
+  tab: string;
+  name: string;
+  summary: string | null;
+}
+
+export interface IdeationOverview {
+  premise: string | null;
+  mainline: string | null;
+  readerImaginations: string[];
+  characters: IdeationOverviewItem[];
+  maps: IdeationOverviewItem[];
+  pending: IdeationOverviewItem[];
+  unresolved: string[];
+}
+
 /** 与 Rust 侧 pending::PendingLine 对应（工单 #56 / T01）：
  *  窄轨「当前项目」面板的真实待办——超期的伏笔与期待/目标线，现扫派生。 */
 export interface PendingLine {
@@ -958,23 +975,6 @@ export interface ChatPersona {
   person: string;
 }
 
-/** 与 Rust 侧 ai.rs::ChatSession 对应；id 由前端 crypto.randomUUID() 生成。 */
-export interface ChatSession {
-  id: string;
-  title: string;
-  /** Unix 秒。 */
-  createdAt: number;
-  updatedAt: number;
-  messages: ChatMessage[];
-  /** 人物对话标签；普通会话没有。 */
-  persona?: ChatPersona | null;
-}
-
-/** 与 Rust 侧 ai.rs::ChatSessionSummary 对应。 */
-export interface ChatSessionSummary {
-  id: string;
-  title: string;
-  updatedAt: number;
 /** 与 Rust 侧 ai.rs::ChatPreset 对应（工单 T07，docs/spec/AI助手预设.md §四）：
  *  普通会话创建时定格的助手预设快照——预设事后改名、改提示、改覆盖乃至
  *  删除都不影响已绑定的会话。人物对话与旧会话没有这个字段。 */
@@ -991,6 +991,25 @@ export interface ChatPreset {
   modelOverride?: string | null;
 }
 
+/** 与 Rust 侧 ai.rs::ChatSession 对应；id 由前端 crypto.randomUUID() 生成。 */
+export interface ChatSession {
+  id: string;
+  title: string;
+  /** Unix 秒。 */
+  createdAt: number;
+  updatedAt: number;
+  messages: ChatMessage[];
+  /** 人物对话标签；普通会话没有。 */
+  persona?: ChatPersona | null;
+  /** 普通会话的助手预设快照（工单 T07）；人物对话与旧会话没有。 */
+  preset?: ChatPreset | null;
+}
+
+/** 与 Rust 侧 ai.rs::ChatSessionSummary 对应。 */
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  updatedAt: number;
   messageCount: number;
   persona?: ChatPersona | null;
 }
@@ -1001,8 +1020,6 @@ export interface AssistantPreset {
   id: string;
   name: string;
   description: string;
-  /** 普通会话的助手预设快照（工单 T07）；人物对话与旧会话没有。 */
-  preset?: ChatPreset | null;
   /** 图标（emoji 等）；空串＝无。 */
   icon: string;
   /** 识别色（#rrggbb）；空串＝无。 */

@@ -476,7 +476,7 @@ export default function RelationshipCanvas({
                       {onChat && (
                         <button
                           className="btn small"
-                          title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋类型圈当人格底座）"
+                          title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋读者遐想（类型圈）当人格底座）"
                           onClick={() => onChat(note.name)}
                         >
                           跟 TA 聊

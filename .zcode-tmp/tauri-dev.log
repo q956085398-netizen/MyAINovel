@@ -1,0 +1,29 @@
+
+> app@0.1.0 tauri
+> tauri dev
+
+     Running BeforeDevCommand (`npm run dev`)
+
+> app@0.1.0 dev
+> vite
+
+
+  [32m[1mVITE[22m v8.2.2[39m  [2mready in [0m[1m310[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m1420[22m/[39m
+[2m下午5:23:31[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [optimizer] bundling dependencies...
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+        Info Watching C:\Users\q9560\Documents\GitHub\MyAINovel\app\src-tauri for changes...
+[1m[92m   Compiling[0m app v0.1.0 (C:\Users\q9560\Documents\GitHub\MyAINovel\app\src-tauri)
+[1m[96m    Building[0m [=======================> ] 424/427: app(bui…[1m[96m    Building[0m [=======================> ] 425/427: app                                                                 [1m[93mwarning[0m[1m[97m: constant `FALLBACK_COLOR` is never used[0m
+  [1m[96m--> [0msrc\relationship.rs:44:11
+   [1m[96m|[0m
+[1m[96m44[0m [1m[96m|[0m pub const FALLBACK_COLOR: &str = "#7f8c8d";
+   [1m[96m|[0m           [1m[93m^^^^^^^^^^^^^^[0m
+   [1m[96m|[0m
+   [1m[96m= [0m[1m[97mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[96m    Building[0m [=======================> ] 425/427: app                                                                 [1m[93mwarning[0m: `app` (lib) generated 1 warning
+[1m[96m    Building[0m [=======================> ] 426/427: app(bin)                                                            [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 32.63s
+[1m[92m     Running[0m `target\debug\app.exe`
+       Error The "beforeDevCommand" terminated with a non-zero status code.

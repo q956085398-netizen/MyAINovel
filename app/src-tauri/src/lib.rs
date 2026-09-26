@@ -7,6 +7,7 @@ mod expectation;
 mod export;
 mod foreshadow;
 mod inspiration;
+mod ideation;
 mod library;
 mod map;
 mod pending;
@@ -31,6 +32,7 @@ use expectation::{Expectation, ExpectationBoard};
 use export::{ChapterRange, ExportReport, ExportTemplate};
 use foreshadow::{Foreshadow, ForeshadowView};
 use inspiration::{CardDraft, ImportEntry, InspirationCard};
+use ideation::IdeationOverview;
 use library::BookEntry;
 use map::{
     GeoUpgradePreview, GeoUpgradeTarget, MapDraft, MapEntry, MapStructure, MapTransition,
@@ -270,6 +272,11 @@ fn scan_projects(root: String) -> Result<Vec<ProjectEntry>, String> {
 #[tauri::command]
 fn create_project(root: String, title: String) -> Result<ProjectEntry, String> {
     project::create_project(Path::new(&root), &title)
+}
+
+#[tauri::command]
+fn read_ideation_overview(project: String) -> Result<IdeationOverview, String> {
+    ideation::read_ideation_overview(Path::new(&project))
 }
 
 #[tauri::command]
@@ -1010,6 +1017,7 @@ pub fn run() {
             confirm_import_inspirations,
             scan_projects,
             create_project,
+            read_ideation_overview,
             read_project_meta,
             save_project_meta,
             read_map_workspace,
