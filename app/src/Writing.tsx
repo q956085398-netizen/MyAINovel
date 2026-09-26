@@ -163,6 +163,7 @@ export default function Writing({
       <WritingPage
         key={`${open.project.dir}#${open.seq}`}
         project={open.project}
+        libraryPath={libraryPath}
         active={active}
         locate={open.locate}
         onAiCommand={onAiCommand}

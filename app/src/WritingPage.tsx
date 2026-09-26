@@ -181,6 +181,7 @@ type ChapterDialog = { kind: "new" | "rename" | "goal"; value: string };
 
 interface WritingPageProps {
   project: ProjectEntry;
+  libraryPath: string | null;
   /** 书写板块当前是否在前台：切走时立即保存（板块常驻挂载，不卸载）。 */
   active: boolean;
   /** 跳转请求：打开该章并选中引文（仅挂载时生效）。 */
@@ -200,6 +201,7 @@ interface WritingPageProps {
  *  状态栏＋联动侧栏。自动保存穿指纹闸（ADR 0004），写盘前留历史版本。 */
 export default function WritingPage({
   project,
+  libraryPath,
   active,
   locate,
   onBack,
@@ -1797,10 +1799,9 @@ export default function WritingPage({
           initialTab="proof"
           initialChapter={current.ordinal}
           initialPath={current.path}
-          nonModal
           onClose={() => setProofOpen(false)}
           onJump={(issue: ProofIssue) => {
-            if (dirtyRef.current || issue.fingerprint !== fingerprintRef.current) {
+            if (dirtyRef.current) {
               window.alert("正文在校对后已经变化，请重新校对本章后再定位。");
               return;
             }

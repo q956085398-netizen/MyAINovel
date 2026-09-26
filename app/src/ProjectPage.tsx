@@ -322,6 +322,7 @@ export default function ProjectPage({
               project={project.dir}
               kind={tab}
               vocab={vocab}
+              orderedNames={tab === "单元" ? arrangement.map((item) => item.unit) : undefined}
               onChanged={refreshAll}
               onPromoted={() => setTab("单元")}
               onAiCommand={tab === "矛盾" ? () => void runAiCommand("矛盾梳理") : undefined}

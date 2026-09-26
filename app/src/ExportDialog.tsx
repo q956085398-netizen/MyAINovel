@@ -27,6 +27,11 @@ interface ExportDialogProps {
   /** 有编号的章节数：范围输入的上限提示。 */
   chapterCount: number;
   libraryPath: string | null;
+  /** 从书写页打开时可直达校对，并将范围收敛到当前章节。 */
+  initialTab?: Tab;
+  initialChapter?: number | null;
+  /** 未编号章节没有可用于范围输入的序号，校对后按文件路径只显示当前章。 */
+  initialPath?: string;
   onClose: () => void;
   /** 校对命中跳回：打开该章并选中命中词。 */
   onJump: (issue: ProofIssue) => void;
@@ -46,22 +51,38 @@ export function ExportDialog({
   projectTitle,
   chapterCount,
   libraryPath,
+  initialTab,
+  initialChapter,
+  initialPath,
   onClose,
   onJump,
 }: ExportDialogProps) {
-  const [tab, setTab] = useState<Tab>("export");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "export");
   const [templates, setTemplates] = useState<ExportTemplate[]>([]);
   const [form, setForm] = useState<ExportTemplate>(defaultExportTemplate());
   const [prefix, setPrefix] = useState<string | null>(null);
-  const [rangeMode, setRangeMode] = useState<"all" | "range">("all");
-  const [from, setFrom] = useState("1");
-  const [to, setTo] = useState(String(chapterCount || 1));
+  const [rangeMode, setRangeMode] = useState<"all" | "range">(
+    initialChapter === null || initialChapter === undefined ? "all" : "range",
+  );
+  const initialRange = initialChapter === null || initialChapter === undefined ? null : String(initialChapter);
+  const [from, setFrom] = useState(initialRange ?? "1");
+  const [to, setTo] = useState(initialRange ?? String(chapterCount || 1));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [report, setReport] = useState<ExportReport | null>(null);
   const [proof, setProof] = useState<ProofReport | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const visibleProof = useMemo(() => {
+    if (!proof || !initialPath) return proof;
+    const normalizePath = (path: string) => path.replace(/\\/g, "/").toLocaleLowerCase();
+    const currentPath = normalizePath(initialPath);
+    return {
+      ...proof,
+      issues: proof.issues.filter((issue) => normalizePath(issue.path) === currentPath),
+    };
+  }, [proof, initialPath]);
 
   useEffect(() => {
     void (async () => {
@@ -91,23 +112,23 @@ export function ExportDialog({
   }, [rangeMode, from, to]);
 
   const grouped = useMemo(() => {
-    if (!proof) return [];
+    if (!visibleProof) return [];
     const map = new Map<string, ProofIssue[]>();
-    for (const issue of proof.issues) {
+    for (const issue of visibleProof.issues) {
       const list = map.get(issue.fileName);
       if (list) list.push(issue);
       else map.set(issue.fileName, [issue]);
     }
     return [...map.entries()];
-  }, [proof]);
+  }, [visibleProof]);
 
   const kindCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const issue of proof?.issues ?? []) {
+    for (const issue of visibleProof?.issues ?? []) {
       counts[issue.kind] = (counts[issue.kind] ?? 0) + 1;
     }
     return counts;
-  }, [proof]);
+  }, [visibleProof]);
 
   function setField<K extends keyof ExportTemplate>(key: K, value: ExportTemplate[K]) {
     setForm((cur) => ({ ...cur, [key]: value }));
@@ -418,13 +439,14 @@ export function ExportDialog({
                 {busy ? "扫描中……" : "开始校对"}
               </button>
             </div>
-            {proof && (
+            {visibleProof && (
               <div className="proof-report">
                 <p className="hint">
-                  扫了 {formatCount(proof.scannedChapters)} 章，命中 {formatCount(proof.issues.length)} 处
+                  扫了 {formatCount(visibleProof.scannedChapters)} 章，
+                  {initialPath ? "当前章命中" : "命中"} {formatCount(visibleProof.issues.length)} 处
                   {KINDS.filter((k) => kindCounts[k]).map((k) => ` · ${k} ${kindCounts[k]}`).join("")}
                 </p>
-                {proof.issues.length === 0 && <p className="hint">没发现表内命中的问题。</p>}
+                {visibleProof.issues.length === 0 && <p className="hint">没发现表内命中的问题。</p>}
                 {grouped.map(([fileName, issues]) => (
                   <div key={fileName} className="proof-chapter">
                     <p className="proof-chapter-head">

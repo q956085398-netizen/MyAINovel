@@ -961,6 +961,19 @@ body {
   gap: var(--sp-3);
 }
 
+.note-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--sp-4);
+}
+
+@media (max-width: 720px) {
+  .note-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .inspiration-library .card-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
@@ -2417,8 +2430,15 @@ button.save-chip {
 
 .bridge-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: var(--sp-4);
+}
+
+@media (max-width: 720px) {
+  .bridge-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .bridge-card {

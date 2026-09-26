@@ -3,6 +3,7 @@ import { contentCardDomId } from "./contentSurfaceState";
 
 interface ContentSurfaceProps {
   identity: string;
+  className?: string;
   title: ReactNode;
   badges?: ReactNode;
   trailing?: ReactNode;
@@ -19,6 +20,7 @@ interface ContentSurfaceProps {
  *  只负责阅读层级与收起行为，不保存任何创作内容副本。 */
 export default function ContentSurface({
   identity,
+  className,
   title,
   badges,
   trailing,
@@ -33,7 +35,7 @@ export default function ContentSurface({
   return (
     <article
       id={contentCardDomId(identity)}
-      className={`card-item content-card ${pending ? "is-pending" : ""} ${searchMatched ? "is-search-hit" : ""}`}
+      className={`card-item content-card ${className ?? ""} ${pending ? "is-pending" : ""} ${searchMatched ? "is-search-hit" : ""}`}
     >
       <div className="card-title-row">
         <button className="card-title" title="编辑这张卡片" onClick={onEdit}>

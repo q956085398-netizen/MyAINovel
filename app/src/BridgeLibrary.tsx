@@ -4,6 +4,15 @@ import type { Bridge, BridgeDraft, NoteEntry } from "./types";
 import { emptyBridgeDraft } from "./types";
 import { errMsg } from "./util";
 import MarkdownEditor from "./MarkdownEditor";
+import ContentSurface from "./ContentSurface";
+import {
+  CONTENT_SURFACE_STORAGE_KEY,
+  readCollapsedCardPaths,
+  serializeCollapsedCardPaths,
+  shouldExpandContentCard,
+} from "./contentSurfaceState";
+
+const BRIDGE_CARD_SURFACE = "bridges";
 
 type Filter = "待安排" | "全部" | "已安排";
 
@@ -20,6 +29,9 @@ export default function BridgeLibrary({ project, units, onChanged }: BridgeLibra
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ draft: BridgeDraft; prevPath: string | null } | null>(null);
+  const [collapsedCards, setCollapsedCards] = useState(() =>
+    readCollapsedCardPaths(localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY), BRIDGE_CARD_SURFACE),
+  );
 
   async function load() {
     try {
@@ -40,6 +52,23 @@ export default function BridgeLibrary({ project, units, onChanged }: BridgeLibra
   const shown = bridges.filter((bridge) =>
     filter === "全部" ? true : filter === "待安排" ? !bridge.unit : Boolean(bridge.unit),
   );
+
+  function toggleCollapsed(path: string) {
+    setCollapsedCards((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      localStorage.setItem(
+        CONTENT_SURFACE_STORAGE_KEY,
+        serializeCollapsedCardPaths(
+          localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY),
+          BRIDGE_CARD_SURFACE,
+          next,
+        ),
+      );
+      return next;
+    });
+  }
 
   async function arrange(bridge: Bridge, unit: string) {
     if (!unit) return;
@@ -115,6 +144,8 @@ export default function BridgeLibrary({ project, units, onChanged }: BridgeLibra
               onArrange={(unit) => void arrange(bridge, unit)}
               onUnarrange={() => void unarrange(bridge)}
               onMove={(direction) => void move(bridge, direction)}
+              expanded={shouldExpandContentCard(bridge.path, collapsedCards, false)}
+              onToggleExpanded={() => toggleCollapsed(bridge.path)}
             />
           ))}
         </div>
@@ -145,6 +176,8 @@ function BridgeCard({
   onArrange,
   onUnarrange,
   onMove,
+  expanded,
+  onToggleExpanded,
 }: {
   bridge: Bridge;
   units: NoteEntry[];
@@ -153,6 +186,8 @@ function BridgeCard({
   onArrange: (unit: string) => void;
   onUnarrange: () => void;
   onMove: (direction: -1 | 1) => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
   const [targetUnit, setTargetUnit] = useState("");
   const siblings = bridge.unit
@@ -162,45 +197,54 @@ function BridgeCard({
   const warnings = rangeWarnings(bridge, allBridges, units, siblings, index);
 
   return (
-    <article className="bridge-card">
-      <div className="bridge-card-head">
-        <div>
-          <span className="memo-mark">桥段</span>
-          <h3>{bridge.name}</h3>
-        </div>
-        {bridge.unit ? <span className="tag">{bridge.unit} · 第 {bridge.order ?? "？"} 段</span> : <span className="pending-mark">待安排</span>}
-      </div>
-      {(bridge.body || bridge.emotionCurve || bridge.keyTurn) && (
-        <p className="bridge-summary">{bridge.body || bridge.emotionCurve || bridge.keyTurn}</p>
+    <ContentSurface
+      className="bridge-card"
+      identity={bridge.path}
+      title={bridge.name}
+      badges={<span className="memo-mark">桥段</span>}
+      trailing={bridge.unit ? (
+        <span className="tag">{bridge.unit} · 第 {bridge.order ?? "？"} 段</span>
+      ) : (
+        <span className="pending-mark">待安排</span>
       )}
-      <div className="bridge-meta">
-        {bridge.emotionCurve && <span>情绪：{bridge.emotionCurve}</span>}
-        {bridge.keyTurn && <span>转折：{bridge.keyTurn}</span>}
-        {bridge.expectationHook && <span>钩子：{bridge.expectationHook}</span>}
-      </div>
-      {(bridge.startChapter || bridge.endChapter) && <p className="hint">章节区间：{bridge.startChapter ?? "？"} ~ {bridge.endChapter ?? "？"}</p>}
+      expanded={expanded}
+      onEdit={onEdit}
+      onToggleExpanded={onToggleExpanded}
+      actions={
+        <>
+          <button className="btn small" onClick={onEdit}>编辑</button>
+          {bridge.unit ? (
+            <>
+              <button className="btn small" disabled={index <= 0} onClick={() => onMove(-1)}>上移</button>
+              <button className="btn small" disabled={index < 0 || index >= siblings.length - 1} onClick={() => onMove(1)}>下移</button>
+              <button className="text-danger" onClick={onUnarrange}>取消安排</button>
+            </>
+          ) : units.length > 0 ? (
+            <span className="bridge-arrange">
+              <select value={targetUnit} onChange={(e) => setTargetUnit(e.target.value)} aria-label={`安排「${bridge.name}」到单元`}>
+                <option value="">选择既有单元…</option>
+                {units.map((unit) => <option key={unit.path} value={unit.name}>{unit.name}</option>)}
+              </select>
+              <button className="btn small" disabled={!targetUnit} onClick={() => onArrange(targetUnit)}>安排进单元</button>
+            </span>
+          ) : (
+            <span className="hint">还没有单元；先在「单元」里展开一个矛盾。</span>
+          )}
+        </>
+      }
+    >
+      {bridge.emotionCurve && <p className="card-core">情绪曲线：{bridge.emotionCurve}</p>}
+      {bridge.keyTurn && <p className="card-core">关键转折：{bridge.keyTurn}</p>}
+      {bridge.expectationHook && <p className="card-core">期待钩子：{bridge.expectationHook}</p>}
+      {bridge.beatPlan && <p className="card-meta">章节拍安排：{bridge.beatPlan}</p>}
+      {(bridge.startChapter !== null || bridge.endChapter !== null) && (
+        <p className="card-meta">
+          章节区间：{bridge.startChapter ?? "？"} ~ {bridge.endChapter ?? "？"} 章
+        </p>
+      )}
+      {bridge.body && <div className="card-body">{bridge.body}</div>}
       {warnings.map((warning) => <p className="soft-warning" key={warning}>{warning}</p>)}
-      <div className="bridge-actions">
-        <button className="btn small" onClick={onEdit}>编辑</button>
-        {bridge.unit ? (
-          <>
-            <button className="btn small" disabled={index <= 0} onClick={() => onMove(-1)}>上移</button>
-            <button className="btn small" disabled={index < 0 || index >= siblings.length - 1} onClick={() => onMove(1)}>下移</button>
-            <button className="text-danger" onClick={onUnarrange}>取消安排</button>
-          </>
-        ) : units.length > 0 ? (
-          <span className="bridge-arrange">
-            <select value={targetUnit} onChange={(e) => setTargetUnit(e.target.value)} aria-label={`安排「${bridge.name}」到单元`}>
-              <option value="">选择既有单元…</option>
-              {units.map((unit) => <option key={unit.path} value={unit.name}>{unit.name}</option>)}
-            </select>
-            <button className="btn small" disabled={!targetUnit} onClick={() => onArrange(targetUnit)}>安排进单元</button>
-          </span>
-        ) : (
-          <span className="hint">还没有单元；先在「单元」里展开一个矛盾。</span>
-        )}
-      </div>
-    </article>
+    </ContentSurface>
   );
 }
 

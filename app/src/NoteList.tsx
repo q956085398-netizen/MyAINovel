@@ -2,16 +2,26 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { NoteDraft, NoteEntry, NoteKind, Vocabulary } from "./types";
 import { emptyNoteDraft } from "./types";
-import { errMsg, oneLinePreview } from "./util";
+import { errMsg } from "./util";
 import NoteDialog from "./NoteDialog";
-import GeoUpgradeDialog from "./GeoUpgradeDialog";
+import ContentSurface from "./ContentSurface";
 import PendingZone from "./PendingZone";
 import { usePendingToggle } from "./pendingToggle";
+import {
+  CONTENT_SURFACE_STORAGE_KEY,
+  readCollapsedCardPaths,
+  serializeCollapsedCardPaths,
+  shouldExpandContentCard,
+} from "./contentSurfaceState";
+
+const NOTE_CARD_SURFACE = "ideation-notes";
 
 interface NoteListProps {
   project: string;
   kind: NoteKind;
   vocab: Vocabulary | null;
+  /** 单元按排布次序展示；未安排项保留扫描时的相对顺序。 */
+  orderedNames?: string[];
   /** 保存/删除/提为单元后：让项目页刷新计数。 */
   onChanged: () => void;
   /** 矛盾提为单元成功后：切到单元页。 */
@@ -62,7 +72,14 @@ function NoteBadges({ kind, note }: { kind: NoteKind; note: NoteEntry }) {
 
 /** 一句话核心／来源等字段行；便笺与紧凑卡共用。 */
 function NoteCoreLines({ kind, note }: { kind: NoteKind; note: NoteEntry }) {
-  if (!note.core && !(kind === "矛盾" && (note.source || note.links.length > 0))) {
+  if (
+    !note.core &&
+    !note.emotionGoal &&
+    note.startChapter === null &&
+    note.endChapter === null &&
+    !note.source &&
+    note.links.length === 0
+  ) {
     return null;
   }
   return (
@@ -72,15 +89,17 @@ function NoteCoreLines({ kind, note }: { kind: NoteKind; note: NoteEntry }) {
           {kind === "单元" ? "核心矛盾" : "一句话核心"}：{note.core}
         </p>
       )}
-      {kind === "矛盾" && note.source && (
+      {note.emotionGoal && <p className="card-meta">单元情绪目标：{note.emotionGoal}</p>}
+      {(note.startChapter !== null || note.endChapter !== null) && (
         <p className="card-meta">
-          <span className="card-source" title="来源">
-            来源：{note.source}
-          </span>
-          {note.links.map((l) => (
-            <span key={l} className="card-source">
-              {l}
-            </span>
+          单元区间：{note.startChapter ?? "？"} ~ {note.endChapter ?? "？"} 章
+        </p>
+      )}
+      {(note.source || note.links.length > 0) && (
+        <p className="card-meta">
+          {note.source && <span className="card-source">来源：{note.source}</span>}
+          {note.links.map((link) => (
+            <span key={link} className="card-source">关联：{link}</span>
           ))}
         </p>
       )}
@@ -95,6 +114,7 @@ export default function NoteList({
   project,
   kind,
   vocab,
+  orderedNames,
   onChanged,
   onPromoted,
   onAiCommand,
@@ -107,6 +127,9 @@ export default function NoteList({
     null,
   );
   const [promoting, setPromoting] = useState<string | null>(null);
+  const [collapsedCards, setCollapsedCards] = useState(() =>
+    readCollapsedCardPaths(localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY), NOTE_CARD_SURFACE),
+  );
 
   const scan = useCallback(async () => {
     setLoading(true);
@@ -158,6 +181,40 @@ export default function NoteList({
 
   const polishing = notes.filter((n) => n.pending);
   const normal = notes.filter((n) => !n.pending);
+  const listedNotes =
+    kind === "单元" && orderedNames?.length
+      ? [...normal].sort((left, right) => {
+          const leftIndex = orderedNames.indexOf(left.name);
+          const rightIndex = orderedNames.indexOf(right.name);
+          if (leftIndex < 0 || rightIndex < 0) {
+            if (leftIndex >= 0) return -1;
+            if (rightIndex >= 0) return 1;
+            return 0;
+          }
+          return leftIndex - rightIndex;
+        })
+      : normal;
+
+  function toggleCollapsed(path: string) {
+    setCollapsedCards((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      localStorage.setItem(
+        CONTENT_SURFACE_STORAGE_KEY,
+        serializeCollapsedCardPaths(
+          localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY),
+          NOTE_CARD_SURFACE,
+          next,
+        ),
+      );
+      return next;
+    });
+  }
+
+  function isExpanded(note: NoteEntry) {
+    return shouldExpandContentCard(note.path, collapsedCards, false);
+  }
 
   const selectedStatus =
     kind === "开头" && notes.filter((n) => n.status === "选定").length > 1
@@ -195,38 +252,39 @@ export default function NoteList({
         count={polishing.length}
         hint="还在发酵；整理完成后回到下面的原位置。"
       >
-        <div className="card-list">
+        <div className="note-card-grid">
           {polishing.map((note) => (
-            <article key={note.path} className="card-item is-pending">
-              <div className="card-title-row">
-                <button
-                  className="card-title"
-                  title="编辑这篇笔记"
-                  onClick={() => setEditing({ draft: note, prevPath: note.path })}
-                >
-                  {note.name}
-                </button>
-                <NoteBadges kind={kind} note={note} />
-              </div>
+            <ContentSurface
+              key={note.path}
+              identity={note.path}
+              title={note.name}
+              badges={<NoteBadges kind={kind} note={note} />}
+              expanded={isExpanded(note)}
+              pending
+              onEdit={() => setEditing({ draft: note, prevPath: note.path })}
+              onToggleExpanded={() => toggleCollapsed(note.path)}
+              actions={
+                <>
+                  <button
+                    className="btn primary small"
+                    disabled={switching === note.path}
+                    title="解除待打磨：笔记回到原排序位置"
+                    onClick={() => void togglePending(note.path, false)}
+                  >
+                    整理完成
+                  </button>
+                  <button
+                    className="btn small"
+                    onClick={() => setEditing({ draft: note, prevPath: note.path })}
+                  >
+                    编辑
+                  </button>
+                </>
+              }
+            >
               <NoteCoreLines kind={kind} note={note} />
               {note.body && <div className="card-body">{note.body}</div>}
-              <div className="card-actions">
-                <button
-                  className="btn primary small"
-                  disabled={switching === note.path}
-                  title="解除待打磨：笔记回到原排序位置"
-                  onClick={() => void togglePending(note.path, false)}
-                >
-                  整理完成
-                </button>
-                <button
-                  className="btn small"
-                  onClick={() => setEditing({ draft: note, prevPath: note.path })}
-                >
-                  编辑
-                </button>
-              </div>
-            </article>
+            </ContentSurface>
           ))}
         </div>
       </PendingZone>
@@ -244,65 +302,51 @@ export default function NoteList({
         </div>
       )}
 
-      <div className="card-list">
-        {normal.map((note) => (
-          <div key={note.path} className="card-item">
-            <div className="card-title-row">
-              <button
-                className="card-title"
-                title="编辑这篇笔记"
-                onClick={() => setEditing({ draft: note, prevPath: note.path })}
-              >
-                {note.name}
-              </button>
-              <NoteBadges kind={kind} note={note} />
-            </div>
-
+      <div className="note-card-grid">
+        {listedNotes.map((note) => (
+          <ContentSurface
+            key={note.path}
+            identity={note.path}
+            title={note.name}
+            badges={<NoteBadges kind={kind} note={note} />}
+            expanded={isExpanded(note)}
+            onEdit={() => setEditing({ draft: note, prevPath: note.path })}
+            onToggleExpanded={() => toggleCollapsed(note.path)}
+            actions={
+              <>
+                <button
+                  className="btn small"
+                  disabled={switching === note.path}
+                  title="挪到本页顶部的待打磨区；文件与排序位置都不动"
+                  onClick={() => void togglePending(note.path, true)}
+                >
+                  待打磨
+                </button>
+                {kind === "人物" && onChat && (
+                  <button
+                    className="btn small"
+                    title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋读者遐想（类型圈）当人格底座）"
+                    onClick={() => onChat(note.name)}
+                  >
+                    跟 TA 聊
+                  </button>
+                )}
+                {kind === "矛盾" && (
+                  <button
+                    className="btn small"
+                    disabled={promoting === note.path}
+                    title="新建同名单元草稿，矛盾状态改「已成单元」"
+                    onClick={() => void promote(note)}
+                  >
+                    {promoting === note.path ? "正在提…" : "提为单元"}
+                  </button>
+                )}
+              </>
+            }
+          >
             <NoteCoreLines kind={kind} note={note} />
-            {note.body && (
-              <p className="card-preview" title={note.body}>
-                {oneLinePreview(note.body, 120)}
-              </p>
-            )}
-            <div className="card-actions">
-              <button
-                className="btn small"
-                disabled={switching === note.path}
-                title="挪到本页顶部的待打磨区；文件与排序位置都不动"
-                onClick={() => void togglePending(note.path, true)}
-              >
-                待打磨
-              </button>
-              {kind === "人物" && onChat && (
-                <button
-                  className="btn small"
-                  title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋类型圈当人格底座）"
-                  onClick={() => onChat(note.name)}
-                >
-                  跟 TA 聊
-                </button>
-              )}
-              {kind === "矛盾" && (
-                <button
-                  className="btn small"
-                  disabled={promoting === note.path}
-                  title="新建同名单元草稿，矛盾状态改「已成单元」"
-                  onClick={() => void promote(note)}
-                >
-                  {promoting === note.path ? "正在提…" : "提为单元"}
-                </button>
-              )}
-              {kind === "世界观" && note.category === "地理" && (
-                <button
-                  className="btn small"
-                  title="先查看将创建与备份的文件位置，再决定是否升级为地图或地域"
-                  onClick={() => setUpgrading(note)}
-                >
-                  升级为地图／地域
-                </button>
-              )}
-            </div>
-          </div>
+            {note.body && <div className="card-body">{note.body}</div>}
+          </ContentSurface>
         ))}
       </div>
 
