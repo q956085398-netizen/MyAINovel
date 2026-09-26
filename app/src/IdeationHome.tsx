@@ -7,14 +7,42 @@ import { errMsg } from "./util";
 import "./IdeationHome.css";
 
 const DISMISSED_KEY = "gongbi.ideation.dismissed-questions";
+const QUESTION_EDITS_KEY = "gongbi.ideation.question-edits";
+
+function readProjectPreference<T>(
+  key: string,
+  project: string,
+  normalize: (value: unknown) => T,
+): T {
+  try {
+    const stored = localStorage.getItem(`${key}.${project}`);
+    return normalize(stored ? JSON.parse(stored) : null);
+  } catch {
+    return normalize(null);
+  }
+}
+
+function writeProjectPreference(key: string, project: string, value: unknown): void {
+  try {
+    localStorage.setItem(`${key}.${project}`, JSON.stringify(value));
+  } catch {
+    // 偏好写入失败时，本次交互仍留在组件状态中。
+  }
+}
 
 function readDismissed(project: string): string[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(`${DISMISSED_KEY}.${project}`) ?? "[]");
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
+  return readProjectPreference(DISMISSED_KEY, project, (value) =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [],
+  );
+}
+
+function readQuestionEdits(project: string): Record<string, string> {
+  return readProjectPreference(QUESTION_EDITS_KEY, project, (value) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    );
+  });
 }
 
 function SummaryList({
@@ -49,6 +77,12 @@ export default function IdeationHome({
   const [overview, setOverview] = useState<IdeationOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(() => readDismissed(project));
+  const [questionEdits, setQuestionEdits] = useState(() => readQuestionEdits(project));
+
+  useEffect(() => {
+    setDismissed(readDismissed(project));
+    setQuestionEdits(readQuestionEdits(project));
+  }, [project]);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,11 +102,18 @@ export default function IdeationHome({
   if (!overview) return <p className="hint">正在整理现有构思……</p>;
 
   const question = selectOverviewQuestion(overview, dismissed);
+  const questionText = question ? questionEdits[question.id] ?? question.text : "";
   const dismissQuestion = () => {
     if (!question) return;
     const next = [...dismissed, question.id];
-    localStorage.setItem(`${DISMISSED_KEY}.${project}`, JSON.stringify(next));
+    writeProjectPreference(DISMISSED_KEY, project, next);
     setDismissed(next);
+  };
+  const editQuestion = (text: string) => {
+    if (!question) return;
+    const next = { ...questionEdits, [question.id]: text };
+    setQuestionEdits(next);
+    writeProjectPreference(QUESTION_EDITS_KEY, project, next);
   };
 
   return (
@@ -88,7 +129,13 @@ export default function IdeationHome({
         <div className="overview-question">
           <div>
             <span>想一想</span>
-            <p>{question.text}</p>
+            <textarea
+              className="overview-question-input"
+              aria-label="改写构思首页引导问题"
+              rows={2}
+              value={questionText}
+              onChange={(event) => editQuestion(event.target.value)}
+            />
           </div>
           <div className="overview-question-actions">
             <button className="btn" onClick={() => onOpen(question.tab)}>去看看</button>

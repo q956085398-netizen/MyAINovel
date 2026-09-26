@@ -19,8 +19,17 @@
   font-size: var(--fs-sub);
 }
 
-.overview-question p {
+.overview-question > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.overview-question-input {
+  display: block;
+  width: 100%;
+  min-height: 58px;
   margin: var(--sp-1) 0 0;
+  resize: vertical;
 }
 
 .overview-question-actions {

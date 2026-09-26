@@ -33,6 +33,8 @@ import { regionDetailRows } from "./contentDetailRows";
  *  转场管地图间承接、历史管时代引用；只有一层副页签。 */
 const MAP_TABS = ["全貌", "地域", "转场", "历史"] as const;
 type MapTab = (typeof MAP_TABS)[number];
+const MAP_METHOD_VIEWS = ["常规", "千丝万线", "莲花", "千层饼"] as const;
+type MapMethodView = (typeof MAP_METHOD_VIEWS)[number];
 
 const MAPS_SURFACE = "maps";
 
@@ -61,6 +63,233 @@ function fieldLines(rows: [string, string | null | undefined][]): ReactNode {
 
 function listText(values: string[]): string | null {
   return values.length > 0 ? values.join("、") : null;
+}
+
+function sharedValues(left: string[], right: string[]): string[] {
+  return [...new Set(left)].filter((value) => right.includes(value));
+}
+
+function regionsForMap(
+  mapName: string,
+  regions: MapWorkspace["regions"],
+  structure: MapStructure | null,
+): MapWorkspace["regions"] {
+  const names = new Set(
+    (structure?.contains ?? []).filter((row) => row.map === mapName).map((row) => row.region),
+  );
+  return regions.filter((region) => names.has(region.name));
+}
+
+function MapMethodLens({
+  view,
+  maps,
+  regions,
+  structure,
+  eras,
+}: {
+  view: Exclude<MapMethodView, "常规">;
+  maps: MapWorkspace["maps"];
+  regions: MapWorkspace["regions"];
+  structure: MapStructure | null;
+  eras: NoteEntry[];
+}) {
+  if (view === "千丝万线") {
+    const shared = maps.flatMap((map, index) =>
+      maps.slice(index + 1).flatMap((other) => {
+        const mapRegions = regionsForMap(map.name, regions, structure);
+        const otherRegions = regionsForMap(other.name, regions, structure);
+        const people = sharedValues(
+          [...map.people, ...mapRegions.flatMap((region) => region.people)],
+          [...other.people, ...otherRegions.flatMap((region) => region.people)],
+        );
+        const organizations = sharedValues(
+          [...map.organizations, ...mapRegions.flatMap((region) => region.organizations)],
+          [...other.organizations, ...otherRegions.flatMap((region) => region.organizations)],
+        );
+        const events = sharedValues(
+          [
+            ...map.units,
+            ...map.milestones,
+            ...mapRegions.flatMap((region) => [...region.units, ...region.contradictions]),
+          ],
+          [
+            ...other.units,
+            ...other.milestones,
+            ...otherRegions.flatMap((region) => [...region.units, ...region.contradictions]),
+          ],
+        );
+        const pairTransitions = (structure?.transitions ?? []).filter(
+          (transition) =>
+            (transition.from === map.name && transition.to === other.name) ||
+            (transition.from === other.name && transition.to === map.name),
+        );
+        const clues = [
+          ...new Set([
+            ...pairTransitions.flatMap((transition) => transition.clues),
+            ...sharedValues(
+              mapRegions.flatMap((region) => region.foreshadows),
+              otherRegions.flatMap((region) => region.foreshadows),
+            ),
+          ]),
+        ];
+        return people.length + organizations.length + events.length + clues.length > 0
+          ? [{ map, other, people, organizations, events, clues }]
+          : [];
+      }),
+    );
+
+    return (
+      <div className="card-list">
+        <p className="hint">只展示地图、地域档案与转场中已有的人物、组织、线索和情节引用；切换视角不新增关系或改动布局。</p>
+        {(structure?.transitions ?? []).map((transition, index) => (
+          <article className="card-item" key={`${transition.from}-${transition.to}-${index}`}>
+            <h3>{transition.from} → {transition.to}</h3>
+            {fieldLines([
+              ["离开原因", transition.reason],
+              ["先行人物", listText(transition.advancePeople)],
+              ["提前线索", listText(transition.clues)],
+              ["随行未解问题", listText(transition.unresolved)],
+              ["返回条件", transition.returnCondition],
+            ])}
+          </article>
+        ))}
+        {shared.map((item) => (
+          <article className="card-item" key={`${item.map.name}:${item.other.name}`}>
+            <h3>{item.map.name} ↔ {item.other.name}</h3>
+            {fieldLines([
+              ["共用人物", listText(item.people)],
+              ["共用组织", listText(item.organizations)],
+              ["共用线索", listText(item.clues)],
+              ["共用情节引用", listText(item.events)],
+            ])}
+          </article>
+        ))}
+        {(structure?.transitions.length ?? 0) === 0 && shared.length === 0 && (
+          <p className="hint">目前没有已记录的跨图转场或共用对象。</p>
+        )}
+      </div>
+    );
+  }
+
+  if (view === "莲花") {
+    const relations = structure?.mapRelations ?? [];
+    const coreNames = new Set(maps.filter((map) => map.role?.includes("核心")).map((map) => map.name));
+    for (const relation of relations) {
+      if (relation.kind.includes("核心附属")) coreNames.add(relation.from);
+    }
+    const coreMaps = maps.filter((map) => coreNames.has(map.name));
+    const coreRelations = relations.filter(
+      (relation) =>
+        coreNames.has(relation.from) || coreNames.has(relation.to) || relation.kind.includes("核心"),
+    );
+    return (
+      <div className="card-list">
+        <p className="hint">围绕作者标出的核心地图查看关系、秘密、关联地域中的伏笔与返回条件；画布式中心环绕布局由 #69 承接。</p>
+        {coreMaps.map((map) => {
+          const mapRegions = regionsForMap(map.name, regions, structure);
+          const transitions = structure?.transitions ?? [];
+          const relatedMaps = [...new Set([
+            ...coreRelations
+              .filter((relation) => relation.from === map.name || relation.to === map.name)
+              .map((relation) => relation.from === map.name ? relation.to : relation.from),
+            ...transitions
+              .filter((transition) => transition.from === map.name || transition.to === map.name)
+              .map((transition) => transition.from === map.name ? transition.to : transition.from),
+          ])];
+          const returnPaths = [...new Set(relatedMaps.flatMap((relatedMap) => {
+            const outward = transitions.some(
+              (transition) => transition.from === map.name && transition.to === relatedMap,
+            );
+            const returns = transitions.filter(
+              (transition) => transition.from === relatedMap && transition.to === map.name,
+            );
+            return outward && returns.length > 0
+              ? returns.map((transition) =>
+                  `${map.name} → ${relatedMap} → ${map.name}${transition.returnCondition ? `（${transition.returnCondition}）` : ""}`,
+                )
+              : [];
+          }))];
+          return (
+            <article className="card-item" key={map.path}>
+              <h3>核心地图：{map.name}</h3>
+              {fieldLines([
+                [
+                  "相关地图",
+                  listText(coreRelations
+                    .filter((relation) => relation.from === map.name || relation.to === map.name)
+                    .map((relation) => `${relation.kind}：${relation.from} → ${relation.to}`)),
+                ],
+                ["关联地域", listText(mapRegions.map((region) => region.name))],
+                [
+                  "地域伏笔引用",
+                  listText([...new Set(mapRegions.flatMap((region) => region.foreshadows))]),
+                ],
+                ["核心秘密", map.coreSecret],
+                ["回流路径", listText(returnPaths)],
+                ["返回条件", listText(transitions
+                  .filter((transition) => transition.from === map.name || transition.to === map.name)
+                  .map((transition) => transition.returnCondition ?? "")
+                  .filter(Boolean))],
+              ])}
+              {returnPaths.length === 0 && <p className="hint">还没有记录从核心地图出发并返回的完整转场路径。</p>}
+            </article>
+          );
+        })}
+        {coreRelations.map((relation, index) => (
+          <article className="card-item" key={`${relation.from}:${relation.to}:${relation.kind}:${index}`}>
+            <h3>{relation.from} → {relation.to}</h3>
+            <p className="field-line"><span className="field-label">关系</span>{relation.kind}</p>
+          </article>
+        ))}
+        {coreMaps.length === 0 && coreRelations.length === 0 && (
+          <p className="hint">还没有标出核心地图或地图关系；可以先在地图档案和关系中自由记录。</p>
+        )}
+      </div>
+    );
+  }
+
+  const eraNames = [...new Set([
+    ...eras.map((era) => era.name),
+    ...maps.flatMap((map) => map.eras),
+    ...regions.flatMap((region) => region.eras),
+  ])];
+  const unplacedMaps = maps.filter((map) => map.eras.length === 0);
+  const unplacedRegions = regions.filter((region) => region.eras.length === 0);
+
+  return (
+    <div className="card-list">
+      <p className="hint">按地图和地域档案中已有的时代引用分层浏览；这里不创建年表，也不改写引用。</p>
+      {eraNames.map((era) => {
+        const eraMaps = maps.filter((map) => map.eras.includes(era));
+        const eraRegions = regions.filter((region) => region.eras.includes(era));
+        return (
+          <article className="card-item" key={era}>
+            <h3>{era}</h3>
+            {eraMaps.length + eraRegions.length > 0 ? (
+              fieldLines([
+                ["地图", listText(eraMaps.map((map) => map.name))],
+                ["地域", listText(eraRegions.map((region) => region.name))],
+              ])
+            ) : (
+              <p className="hint">还没有地图或地域引用这个时代。</p>
+            )}
+          </article>
+        );
+      })}
+      {(unplacedMaps.length > 0 || unplacedRegions.length > 0) && (
+        <article className="card-item">
+          <h3>尚未关联时代</h3>
+          {fieldLines([
+            ["地图", listText(unplacedMaps.map((map) => map.name))],
+            ["地域", listText(unplacedRegions.map((region) => region.name))],
+          ])}
+        </article>
+      )}
+      {eraNames.length === 0 && unplacedMaps.length === 0 && unplacedRegions.length === 0 && (
+        <p className="hint">还没有地图或地域可分层浏览。</p>
+      )}
+    </div>
+  );
 }
 
 /** 地图卡的完整字段行（紧凑卡与待打磨便笺同一份，spec §2.3 完整内容）。 */
@@ -115,6 +344,7 @@ interface MapsViewProps {
 export default function MapsView({ project, onChanged }: MapsViewProps) {
   const destination = useSearchDestination();
   const [subtab, setSubtab] = useState<MapTab>(destination?.hit.projectDir === project && destination.hit.kind === "地域" ? "地域" : "全貌");
+  const [methodView, setMethodView] = useState<MapMethodView>("常规");
   const [workspace, setWorkspace] = useState<MapWorkspace>({ maps: [], regions: [] });
   const [structure, setStructure] = useState<MapStructure | null>(null);
   const [structureError, setStructureError] = useState<string | null>(null);
@@ -333,6 +563,35 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
         {subtab === "全貌" && (
           <>
             <DismissableIntro id="全貌">{TAB_INTROS.全貌}</DismissableIntro>
+            <section className="reader-prompt-guide" aria-label="地图方法视角">
+              <div className="reader-prompt-head">
+                <div>
+                  <strong>方法视角</strong>
+                  <p className="hint">千丝万线、莲花与千层饼只整理现有信息供观察，不复制档案，也不写入关系或布局。</p>
+                </div>
+              </div>
+              <div className="subtabs">
+                {MAP_METHOD_VIEWS.map((view) => (
+                  <button
+                    key={view}
+                    className={`subtab ${methodView === view ? "active" : ""}`}
+                    aria-pressed={methodView === view}
+                    onClick={() => setMethodView(view)}
+                  >
+                    {view}
+                  </button>
+                ))}
+              </div>
+              {methodView !== "常规" && (
+                <MapMethodLens
+                  view={methodView}
+                  maps={workspace.maps}
+                  regions={workspace.regions}
+                  structure={structure}
+                  eras={eras}
+                />
+              )}
+            </section>
             <PendingZone
               label="待打磨的地图"
               count={pendingMaps.length}
