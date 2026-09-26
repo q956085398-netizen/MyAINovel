@@ -21,6 +21,7 @@ import MapsView from "./MapsView";
 import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
 import RelationshipCanvas from "./RelationshipCanvas";
+import SocialView from "./SocialView";
 import PlanningView from "./PlanningView";
 import BridgeLibrary from "./BridgeLibrary";
 import PowerSystemHome from "./PowerSystemHome";
@@ -57,7 +58,7 @@ type Tab = ProjectTab;
 const NOTE_TABS: NoteKind[] = ["矛盾", "单元", "人物", "世界观", "开头"];
 
 /** 「人物」页签的两面：名单（小传）与画布（关系网）。 */
-const CHARACTER_VIEWS = ["名单", "画布"] as const;
+const CHARACTER_VIEWS = ["名单", "组织与归属", "画布"] as const;
 type CharacterView = (typeof CHARACTER_VIEWS)[number];
 
 function isNoteTab(tab: Tab): tab is NoteKind {
@@ -282,7 +283,7 @@ export default function ProjectPage({
                     setTab(t);
                   }}
                 >
-                  {t}
+                  {t === "人物" ? "人物与组织" : t}
                   {t === "矛盾" && project.contradictionCount > 0 && (
                     <span className="nav-badge">{project.contradictionCount}</span>
                   )}
@@ -370,6 +371,8 @@ export default function ProjectPage({
                     onPromoted={() => setTab("单元")}
                     onChat={(name) => void chatWith(name)}
                   />
+                ) : characterView === "组织与归属" ? (
+                  <SocialView project={project.dir} onChanged={refreshAll} />
                 ) : (
                   <RelationshipCanvas
                     project={project.dir}

@@ -127,6 +127,9 @@ fn palette_color(index: usize) -> String {
 }
 
 pub fn relationship_path(project: &Path) -> PathBuf {
+    if crate::social::graph_path(project).exists() {
+        return crate::social::graph_path(project);
+    }
     project.join(project::CONCEPT_DIR).join(RELATION_FILE)
 }
 
@@ -142,7 +145,17 @@ pub fn read_table(project: &Path) -> Result<RelationshipTable, String> {
             edges: Vec::new(),
         });
     }
-    let map = read_yaml_mapping(&path)?;
+    let mut map = read_yaml_mapping(&path)?;
+    if path == crate::social::graph_path(project) {
+        map = crate::social::read_graph(project)?;
+        // 旧人物画布仅投影人—人关系；组织边仍由同一社会网保存。
+        if let Some(Value::Sequence(rows)) = map.get_mut(Value::String("关系".into())) {
+            rows.retain(|v| v.as_mapping().is_some_and(|r| {
+                map_scalar(r,"起类").as_deref().unwrap_or("人物") == "人物"
+                    && map_scalar(r,"止类").as_deref().unwrap_or("人物") == "人物"
+            }));
+        }
+    }
     Ok(RelationshipTable {
         legend: legend_from(&map, &path)?,
         edges: edges_from(&map, &path)?,
@@ -158,6 +171,9 @@ pub fn save_table(project: &Path, table: &RelationshipTable) -> Result<(), Strin
     let legend = normalize_legend(&table.legend)?;
     let edges = normalize_edges(&table.edges)?;
     let path = relationship_path(project);
+    if path == crate::social::graph_path(project) {
+        return crate::social::save_person_relationships(project, &legend, &edges);
+    }
     read_table(project)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)

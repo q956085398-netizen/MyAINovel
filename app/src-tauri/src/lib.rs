@@ -15,6 +15,7 @@ mod presets;
 mod project;
 mod proofread;
 mod relationship;
+mod social;
 mod search;
 mod thread;
 mod trope;
@@ -491,6 +492,35 @@ fn transmute_character_card(
 }
 
 // --- 人物关系画布（工单 #8，docs/spec/人物关系画布.md）：构思/人物关系.yaml ---
+
+#[tauri::command]
+fn read_social_workspace(project: String) -> Result<social::SocialWorkspace, String> {
+    social::workspace(Path::new(&project))
+}
+#[tauri::command]
+fn save_organization(project: String, draft: social::OrganizationDraft, expected: Option<String>) -> Result<social::Organization,String> {
+    social::save_organization(Path::new(&project), &draft, expected.as_deref())
+}
+#[tauri::command]
+fn delete_organization(project: String, name: String, expected: String) -> Result<(),String> {
+    social::delete_organization(Path::new(&project), &name, &expected)
+}
+#[tauri::command]
+fn edit_membership(project: String, next: Option<social::Membership>, previous: Option<social::Membership>, expected: String) -> Result<(),String> {
+    social::edit_membership(Path::new(&project),next.as_ref(),previous.as_ref(),&expected)
+}
+#[tauri::command]
+fn preview_social_upgrade(project: String) -> Result<social::UpgradePreview,String> {
+    social::preview_upgrade(Path::new(&project))
+}
+#[tauri::command]
+fn confirm_social_upgrade(project: String, preview: social::UpgradePreview) -> Result<(),String> {
+    social::confirm_upgrade(Path::new(&project), &preview)
+}
+#[tauri::command]
+fn recover_social_upgrade(project: String) -> Result<(),String> {
+    social::recover_upgrade(Path::new(&project))
+}
 
 /// 画布数据：图例 ＋ 画得出来的边 ＋ 失效引用/图例外的类型（只提示）。
 /// 表坏了降级为缺省图例＋空表并带 warning，不拖垮画布。
@@ -998,6 +1028,13 @@ pub fn run() {
             transmute_story_card,
             transmute_character_card,
             read_relationships,
+            read_social_workspace,
+            save_organization,
+            delete_organization,
+            edit_membership,
+            preview_social_upgrade,
+            confirm_social_upgrade,
+            recover_social_upgrade,
             save_relationships,
             character_confluence,
             promote_characters,
