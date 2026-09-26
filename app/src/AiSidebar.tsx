@@ -15,6 +15,7 @@ import {
   copyAsNewSession,
   presetSnapshot,
   resolveDraftPreset,
+  resolveConversationTarget,
   resolveSessionTarget,
   resolveSystemPrompt,
   sessionPresetView,
@@ -101,6 +102,7 @@ export default function AiSidebar({
   const seedRef = useRef<AiSeed | null>(null);
   /** 助手预设表（工单 T07）：新建会话的卡片与胶囊从这里取；读不到退通用助手。 */
   const [presetState, setPresetState] = useState<AssistantPresetState | null>(null);
+  const [presetsLoaded, setPresetsLoaded] = useState(false);
   /** 新会话草稿点选的预设 id；null＝未点选，用设置里的默认。 */
   const [draftPresetId, setDraftPresetId] = useState<string | null>(null);
   /** 「换预设＝复制为新会话」小对话框。 */
@@ -119,7 +121,7 @@ export default function AiSidebar({
     setAdoptedSet(new Set());
   }
 
-  const provider = config?.providers.find((p) => p.id === config.activeProviderId) ?? null;
+  const conversationTarget = resolveConversationTarget(current, draftPresetId, presetState, config);
   const doc = getDoc();
 
   async function refreshSessions() {
@@ -136,6 +138,8 @@ export default function AiSidebar({
     } catch {
       // 预设表读不到不挡对话：默认解析会退通用助手基线
       setPresetState(null);
+    } finally {
+      setPresetsLoaded(true);
     }
   }
 
@@ -206,8 +210,7 @@ export default function AiSidebar({
     // 激活的全局；旧会话/人物会话没有快照，跟随全局当前选择。
     const origin = currentRef.current;
     const newSnapshot = presetSnapshot(resolveDraftPreset(draftPresetId, presetState));
-    const sessionPreset = origin ? origin.preset ?? null : newSnapshot;
-    const target = resolveSessionTarget(sessionPreset, config);
+    const target = resolveConversationTarget(origin, draftPresetId, presetState, config);
     if (!target.provider) {
       setError("先在「设置」里配置并选择供应商。");
       onOpenSettings();
@@ -303,8 +306,15 @@ export default function AiSidebar({
   // 供应商未配置时保留种子并打开设置，配好后重跑本效应即自动发出，材料不丢。
   // 人物对话种子（工单 #16）例外：不发送，只建带人格底座的新会话等人开口。
   useEffect(() => {
-    if (!seed || !config || seedRef.current === seed) return;
-    if (!provider) {
+    if (!seed || !config || !presetsLoaded || seedRef.current === seed) return;
+    // 人物对话只走全局；固定命令从人物会话发起时会另开普通会话。
+    const commandTarget = seed.persona
+      ? resolveSessionTarget(null, config)
+      : resolveConversationTarget(
+          currentRef.current?.persona ? null : currentRef.current,
+          draftPresetId, presetState, config,
+        );
+    if (!commandTarget.provider) {
       setError(
         seed.persona
           ? "先配置供应商，配好后会自动开始与这个人物的对话。"
@@ -374,7 +384,7 @@ export default function AiSidebar({
     })();
     // seed 由用户动作驱动、send 闭包读取即时不依赖其稳定性。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seed, config]);
+  }, [seed, config, presetsLoaded, presetState, draftPresetId]);
 
   function stop() {
     if (!streamingRef.current) return;
@@ -698,6 +708,9 @@ export default function AiSidebar({
       )}
 
       <div className="ai-composer">
+        {conversationTarget.stale && (
+          <p className="hint" role="status">助手的供应商覆盖已失效，已回退全局供应商与模型；可在「设置 → AI」中检查配置。</p>
+        )}
         <div className="ai-composer-controls">
           <label className="ai-attach" title="把当前打开的文档（拆书稿或当前章）全文作为上下文发给 AI">
             <input
@@ -719,13 +732,13 @@ export default function AiSidebar({
           rows={3}
           value={input}
           placeholder={
-            provider
+            conversationTarget.provider
               ? persona
                 ? `跟${persona.person}说点什么（TA 会入戏回应）……`
                 : "输入后回车发送，Shift+Enter 换行"
               : "先在「设置」里配置供应商"
           }
-          disabled={!provider}
+          disabled={!presetsLoaded || !conversationTarget.provider}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -744,7 +757,7 @@ export default function AiSidebar({
           ) : (
             <button
               className="btn primary"
-              disabled={!provider || !input.trim()}
+              disabled={!presetsLoaded || !conversationTarget.provider || !input.trim()}
               onClick={() => {
                 const text = input;
                 setInput("");

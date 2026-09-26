@@ -7,6 +7,7 @@ import {
   defaultPreset,
   presetSnapshot,
   resolveDraftPreset,
+  resolveConversationTarget,
   resolveSessionTarget,
   resolveSystemPrompt,
   sessionPresetView,
@@ -162,6 +163,23 @@ test("覆盖指向已删除的供应商时整组回退全局（模型覆盖一�
 });
 
 // ---------- 会话胶囊 ----------
+
+test("预设可只覆盖模型，失效供应商仍整组回退", () => {
+  assert.equal(resolveSessionTarget(snapshot({ modelOverride: "writer-model" }), config).model, "writer-model");
+  assert.equal(resolveSessionTarget(snapshot({ providerOverride: "gone", modelOverride: "writer-model" }), config).model, "deepseek-chat");
+});
+
+test("草稿和已有会话的覆盖通道不要求激活全局供应商", () => {
+  const inactive = { ...config, activeProviderId: null };
+  const presets = state({ userPresets: [preset({ providerOverride: "p-b", modelOverride: "writer-model" })], defaultPresetId: "u-1" });
+  assert.deepEqual(resolveConversationTarget(null, null, presets, inactive), {
+    provider: config.providers[1], model: "writer-model", stale: false,
+  });
+  assert.equal(resolveConversationTarget(null, "builtin:general", presets, inactive).provider, null);
+  assert.equal(resolveConversationTarget(session({ preset: snapshot({ providerOverride: "p-b" }) }), null, state({ userPresets: [] }), inactive).provider?.id, "p-b");
+  assert.equal(resolveConversationTarget(session(), null, presets, inactive).provider, null);
+  assert.equal(resolveConversationTarget(session({ persona: { project: "项目", person: "人物" }, preset: snapshot({ providerOverride: "p-b" }) }), null, presets, inactive).provider, null);
+});
 
 test("胶囊恒用快照名字；预设删除后标记 deleted 但不挡会话", () => {
   const view = sessionPresetView(snapshot(), state());

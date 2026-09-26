@@ -94,6 +94,19 @@ export interface SessionTarget {
   stale: boolean;
 }
 
+/** 输入框、命令入口与发送共用的通道；旧会话和人物对话不借用草稿预设。 */
+export function resolveConversationTarget(
+  session: ChatSession | null,
+  pickedId: string | null,
+  state: AssistantPresetState | null,
+  config: AiConfig | null,
+): SessionTarget {
+  const preset = session
+    ? session.persona ? null : session.preset
+    : presetSnapshot(resolveDraftPreset(pickedId, state));
+  return resolveSessionTarget(preset, config);
+}
+
 /** 会话的请求通道：普通会话用快照里的供应商/模型覆盖，没覆盖（或人物
  *  会话、旧会话）跟随全局当前选择。 */
 export function resolveSessionTarget(
@@ -110,7 +123,7 @@ export function resolveSessionTarget(
     }
     return { provider: global, model: global?.model ?? "", stale: true };
   }
-  return { provider: global, model: global?.model ?? "", stale: false };
+  return { provider: global, model: preset?.modelOverride?.trim() || global?.model || "", stale: false };
 }
 
 /** 会话胶囊的投影：名字/图标/识别色恒用快照（预设后来改名也不跟着变）；
