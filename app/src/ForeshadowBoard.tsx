@@ -1,3 +1,5 @@
+import { useSearchDestination } from "./globalSearchNavigation";
+import { contentCardDomId } from "./contentSurfaceState";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ForeshadowView } from "./types";
@@ -49,6 +51,15 @@ export default function ForeshadowBoard({
   onOpenChapter,
 }: ForeshadowBoardProps) {
   const [views, setViews] = useState<ForeshadowView[]>([]);
+  const destination = useSearchDestination();
+  useEffect(() => {
+    if (destination?.hit.kind !== "伏笔" || destination.hit.projectDir !== project) return;
+    const frame = requestAnimationFrame(() => {
+      const card = document.getElementById(contentCardDomId(`${project}/伏笔/${destination.hit.title}`));
+      card?.scrollIntoView({ block: "center" }); card?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [destination, project, views]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -177,7 +188,7 @@ export default function ForeshadowBoard({
               // 手写的状态值不在五态内：只提示不校验，原样列出让人改回来。
               const unknownState = !(FORESHADOW_STATES as readonly string[]).includes(v.state);
               return (
-                <div key={v.name} className="card-item">
+                <div key={v.name} id={contentCardDomId(`${project}/伏笔/${v.name}`)} tabIndex={-1} className={`card-item ${destination?.hit.kind === "伏笔" && destination.hit.title === v.name ? "is-search-hit" : ""}`}>
                   <div className="card-title-row">
                     <span className="card-title static">{v.name}</span>
                     {v.overdue && (

@@ -1,3 +1,4 @@
+import { useRevealSearchResult } from "./globalSearchNavigation";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { NoteDraft, NoteEntry, NoteKind, Vocabulary } from "./types";
@@ -115,6 +116,8 @@ export default function NoteList({
   );
   const [promoting, setPromoting] = useState<string | null>(null);
   const [upgrading, setUpgrading] = useState<NoteEntry | null>(null);
+
+  useRevealSearchResult(notes, (item) => { setEditing({ draft: item, prevPath: item.path }); });
 
   const scan = useCallback(async () => {
     setLoading(true);

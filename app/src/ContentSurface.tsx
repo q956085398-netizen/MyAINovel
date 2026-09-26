@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { useSearchDestination } from "./globalSearchNavigation";
 import { contentCardDomId } from "./contentSurfaceState";
 
 interface ContentSurfaceProps {
@@ -30,8 +31,21 @@ export default function ContentSurface({
   children,
   actions,
 }: ContentSurfaceProps) {
+  const destination = useSearchDestination();
+  const article = useRef<HTMLElement>(null);
+  const globalMatch = destination?.hit.path === identity;
+  useEffect(() => {
+    if (!globalMatch) return;
+    const frame = requestAnimationFrame(() => {
+      article.current?.scrollIntoView({ block: "center" });
+      article.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [globalMatch, destination]);
+  expanded = expanded || globalMatch;
+  searchMatched = searchMatched || globalMatch;
   return (
-    <article
+    <article ref={article} tabIndex={globalMatch ? -1 : undefined}
       id={contentCardDomId(identity)}
       className={`card-item content-card ${pending ? "is-pending" : ""} ${searchMatched ? "is-search-hit" : ""}`}
     >

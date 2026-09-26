@@ -1,3 +1,5 @@
+import { useSearchDestination } from "./globalSearchNavigation";
+import { registerSearchNavigationGuard } from "./globalSearchNavigation";
 import { useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
@@ -114,6 +116,23 @@ export default function EditorPage({
   const savingRef = useRef(false);
   const autosaveRef = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
+  const destination = useSearchDestination();
+  useEffect(() => {
+    if (!ready || destination?.hit.kind !== "拆书" || destination.hit.path !== book.primaryMd) return;
+    const frame = requestAnimationFrame(() => {
+      const view = viewRef.current;
+      if (!view) return;
+      const match = destination.hit.matches.find((match) => match.line > 0);
+      if (match) {
+        const line = view.state.doc.line(Math.min(match.line, view.state.doc.lines));
+        const index = line.text.indexOf(match.quote);
+        const from = line.from + Math.max(0, index);
+        view.dispatch({ selection: { anchor: from, head: index >= 0 ? from + match.quote.length : from }, scrollIntoView: true });
+      }
+      view.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [ready, destination, book.primaryMd]);
   const [loadError, setLoadError] = useState<string | null>(null);
   /** 头部保存五态（工单 #66 / T04）：干净/未保存/保存中/失败/冲突。 */
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -176,6 +195,12 @@ export default function EditorPage({
   /** 保存（门闩在此）：落定（保存成功/本无改动）返回 true。
    *  自动保存、手动保存、返回即存同走这一条链——指纹对账与冲突裁决不变。
    *  quiet＝兜底路径（卸载/关窗）：不弹框，冲突时盘上为准（ADR 0004）。 */
+  useEffect(() => registerSearchNavigationGuard(async () => {
+    if (!dirtyRef.current) return true;
+    if (conflictRef.current) return false;
+    return save(false, true);
+  }));
+
   async function save(force = false, quiet = false): Promise<boolean> {
     if (quiet && (!dirtyRef.current || conflictRef.current)) return true;
     if (savingRef.current) return false;

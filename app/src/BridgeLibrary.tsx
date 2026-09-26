@@ -1,3 +1,4 @@
+import { useRevealSearchResult } from "./globalSearchNavigation";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Bridge, BridgeDraft, NoteEntry } from "./types";
@@ -20,6 +21,8 @@ export default function BridgeLibrary({ project, units, onChanged }: BridgeLibra
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ draft: BridgeDraft; prevPath: string | null } | null>(null);
+
+  useRevealSearchResult(bridges, (item) => { setFilter("全部"); setEditing({ draft: item, prevPath: item.path }); });
 
   async function load() {
     try {

@@ -1,3 +1,4 @@
+import { registerSearchNavigationGuard } from "./globalSearchNavigation";
 import { useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, Prec, type Extension, type Range } from "@codemirror/state";
 import {
@@ -697,6 +698,12 @@ export default function WritingPage({
 
   /** 保存当前章（指纹闸）：成功 true；冲突 false（横幅交人裁决）。
    *  quiet＝关窗兜底用：失败只记日志，不拿弹框拦关窗。 */
+  useEffect(() => registerSearchNavigationGuard(async () => {
+    if (!dirtyRef.current) return true;
+    if (conflictRef.current) return false;
+    return saveNow(false, true);
+  }));
+
   async function saveNow(force: boolean, quiet = false): Promise<boolean> {
     const view = viewRef.current;
     const entry = currentRef.current;

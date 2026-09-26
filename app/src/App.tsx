@@ -4,6 +4,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import AiSidebar from "./AiSidebar";
+import GlobalSearch from "./GlobalSearch";
+import { dirName } from "./editorRender";
+import { SearchDestinationContext, prepareSearchNavigation, searchProjectTab } from "./globalSearchNavigation";
+import type { GlobalSearchHit, SearchDestination } from "./globalSearchNavigation";
 import BookLibrary from "./BookLibrary";
 import EditorPage from "./EditorPage";
 import Ideation from "./Ideation";
@@ -67,6 +71,18 @@ function App() {
     const saved = localStorage.getItem(SECTION_KEY);
     return isSection(saved) ? saved : "拆书";
   });
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchDestination, setSearchDestination] = useState<SearchDestination | null>(null);
+  const [bookSearchSeq, setBookSearchSeq] = useState(0);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" && !event.isComposing) {
+        event.preventDefault(); event.stopPropagation(); setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   const [openBook, setOpenBook] = useState<BookEntry | null>(null);
   // 库根路径为书库与灵感库共用，上提到这里统一选择与持久化。
   const [libraryPath, setLibraryPath] = useState<string | null>(() =>
@@ -195,6 +211,7 @@ function App() {
   const switchSection = useCallback((s: Section) => {
     localStorage.setItem(SECTION_KEY, s);
     setSection(s);
+    setSearchDestination(null);
     setSettingsOpen(false);
     setSettingsRequestedTab(null);
     setProjectPanelOpen(false);
@@ -297,12 +314,39 @@ function App() {
     [],
   );
 
+  async function openSearchHit(hit: GlobalSearchHit, query: string) {
+    if (!libraryPath) throw new Error("请先打开库文件夹。");
+    await prepareSearchNavigation();
+    if (hit.kind === "章节" && hit.projectDir) {
+      switchSection("书写");
+      const match = hit.matches.find((match) => match.field === "正文" && match.line > 0);
+      setWritingJump({ projectDir: hit.projectDir, locate: { ordinal: null, path: hit.path, quote: match?.quote ?? "", line: match?.line } });
+    } else if (hit.kind === "灵感") {
+      switchSection("灵感库");
+    } else if (hit.kind === "拆书") {
+      const books = await invoke<BookEntry[]>("scan_library", { root: libraryPath });
+      const book = books.find((book) => book.primaryMd === hit.path || (book.layout === "folder-book" && dirName(book.primaryMd) === dirName(hit.path)));
+      if (!book) throw new Error("拆书稿已移动或删除，请重新搜索。");
+      switchSection("拆书");
+      openBookAndRemember({ ...book, primaryMd: hit.path });
+      setBookSearchSeq((seq) => seq + 1);
+    } else if (hit.projectDir) {
+      const projects = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
+      const project = projects.find((project) => project.dir === hit.projectDir);
+      if (!project) throw new Error("项目已移动或删除，请重新搜索。");
+      switchSection("构思");
+      setIdeationJump({ project, tab: searchProjectTab(hit) });
+    }
+    setSearchDestination({ hit, query });
+  }
+
   // 三个板块常驻挂载、仅隐藏切换，编辑器里的未保存内容不因切板块而丢。
   // 进入正文（书写页开着章节）时窄轨退场（工单 #56 / T01 的 C 低干扰结构）：
   // 返回在写作页头部、切换章节在章节列表、保存状态在状态条，都仍可及。
   const railCollapsed = section === "书写" && manuscript;
 
   return (
+    <SearchDestinationContext.Provider value={searchDestination}>
     <div className={`app ${railCollapsed ? "rail-collapsed" : ""}`}>
       <aside className="sidebar" aria-label="主导航">
         <div className="rail-brand" title="工笔">
@@ -371,7 +415,7 @@ function App() {
         <div className={`section-wrap ${section === "拆书" && !settingsOpen ? "" : "hidden"}`}>
           {openBook ? (
             <EditorPage
-              key={openBook.primaryMd}
+              key={`${openBook.primaryMd}#${bookSearchSeq}`}
               book={openBook}
               libraryPath={libraryPath}
               active={section === "拆书" && !settingsOpen}
@@ -433,6 +477,7 @@ function App() {
           />
         )}
       </main>
+      {searchOpen && <GlobalSearch root={libraryPath} onClose={() => setSearchOpen(false)} onOpen={openSearchHit} />}
       <AiSidebar
         open={aiOpen}
         onClose={() => setAiOpen(false)}
@@ -449,6 +494,7 @@ function App() {
         }}
       />
     </div>
+    </SearchDestinationContext.Provider>
   );
 }
 

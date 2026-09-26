@@ -1,3 +1,4 @@
+import { useSearchDestination } from "./globalSearchNavigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -236,6 +237,21 @@ export default function InspirationLibrary({
     card: InspirationCard;
     target: TransmuteTarget;
   } | null>(null);
+
+  const destination = useSearchDestination();
+  useEffect(() => {
+    if (destination?.hit.kind !== "灵感" || !libraryPath) return;
+    let cancelled = false;
+    void invoke<InspirationCard[]>("scan_inspirations", { root: libraryPath }).then((fresh) => {
+      if (cancelled) return;
+      setCards(fresh);
+      const card = fresh.find((card) => card.path === destination.hit.path);
+      if (!card) { setError("灵感已移动或删除，请重新搜索。"); return; }
+      setActiveCategory(card.category); setQuery("");
+      setEditing({ draft: card, prevPath: card.path });
+    }).catch((e) => { if (!cancelled) setError(errMsg(e)); });
+    return () => { cancelled = true; };
+  }, [destination, libraryPath]);
 
   const scan = useCallback(async (root: string) => {
     setScanning(true);

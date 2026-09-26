@@ -1,3 +1,4 @@
+import { useSearchDestination } from "./globalSearchNavigation";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ExpectationBoard, ExpectationView } from "./types";
@@ -125,7 +126,8 @@ export default function ExpectationBoard({
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
+  const destination = useSearchDestination();
+  const [selected, setSelected] = useState<string | null>(destination?.hit.kind === "期待线" && destination.hit.projectDir === project ? destination.hit.title : null);
 
   const scan = useCallback(async () => {
     setLoading(true);

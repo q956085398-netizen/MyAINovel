@@ -1,3 +1,4 @@
+import { useSearchDestination } from "./globalSearchNavigation";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
@@ -93,6 +94,7 @@ export default function ProjectPage({
   onOpenChapter,
   onAiCommand,
 }: ProjectPageProps) {
+  const searchDestination = useSearchDestination();
   const [tab, setTab] = useState<Tab>(initialTab ?? "大纲");
   const [worldviewCategory, setWorldviewCategory] = useState("");
   const [meta, setMeta] = useState<ProjectMeta>(emptyProjectMeta());
@@ -106,7 +108,7 @@ export default function ProjectPage({
   const [arrangementError, setArrangementError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [characterView, setCharacterView] = useState<CharacterView>(
-    initialFocus ? "画布" : "名单",
+    searchDestination?.hit.projectDir === project.dir && searchDestination.hit.kind === "组织" ? "组织与归属" : initialFocus ? "画布" : "名单",
   );
 
   const loadMeta = useCallback(async () => {

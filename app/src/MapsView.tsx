@@ -1,3 +1,5 @@
+import { useSearchDestination } from "./globalSearchNavigation";
+import { contentCardDomId } from "./contentSurfaceState";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -125,7 +127,8 @@ interface MapsViewProps {
  *  档案（构思/地图、构思/地域的 .md）与结构（地图结构.yaml）是两份文件、
  *  同一份数据源；卡片、页签与重开读的都是它们，没有副本。 */
 export default function MapsView({ project, onChanged }: MapsViewProps) {
-  const [subtab, setSubtab] = useState<MapTab>("全貌");
+  const destination = useSearchDestination();
+  const [subtab, setSubtab] = useState<MapTab>(destination?.hit.projectDir === project && destination.hit.kind === "地域" ? "地域" : "全貌");
   const [workspace, setWorkspace] = useState<MapWorkspace>({ maps: [], regions: [] });
   const [structure, setStructure] = useState<MapStructure | null>(null);
   const [structureError, setStructureError] = useState<string | null>(null);
@@ -212,6 +215,15 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
   const mapNames = useMemo(() => workspace.maps.map((m) => m.name), [workspace.maps]);
 
   /** 地域 → 所属地图（结构表「包含」派生）；引用失效只提示不校验。 */
+  useEffect(() => {
+    if (!destination || destination.hit.projectDir !== project) return;
+    const frame = requestAnimationFrame(() => {
+      const card = document.getElementById(contentCardDomId(destination.hit.path));
+      card?.scrollIntoView({ block: "center" }); card?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [destination, project, workspace, subtab]);
+
   const regionOwner = useMemo(() => {
     const owner = new Map<string, string>();
     if (structure) {
@@ -342,7 +354,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
             >
               <div className="card-list">
                 {pendingMaps.map((map) => (
-                  <article key={map.path} className="card-item is-pending">
+                  <article key={map.path} id={contentCardDomId(map.path)} tabIndex={-1} className="card-item is-pending">
                     <div className="card-title-row">
                       <button
                         className="card-title"
@@ -426,7 +438,7 @@ export default function MapsView({ project, onChanged }: MapsViewProps) {
             >
               <div className="card-list">
                 {pendingRegions.map((region) => (
-                  <article key={region.path} className="card-item is-pending">
+                  <article key={region.path} id={contentCardDomId(region.path)} tabIndex={-1} className="card-item is-pending">
                     <div className="card-title-row">
                       <button
                         className="card-title"

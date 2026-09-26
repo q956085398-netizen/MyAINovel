@@ -1,3 +1,4 @@
+import { useRevealSearchResult } from "./globalSearchNavigation";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { errMsg } from "./util";
@@ -51,6 +52,8 @@ export default function SocialView({ project, onChanged }: { project: string; on
   const [member, setMember] = useState<{ next: Membership; previous: Membership | null } | null>(null);
   const [preview, setPreview] = useState<UpgradePreview | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  useRevealSearchResult(data?.organizations ?? [], (item) => { setOrganization({ draft: { ...item.draft }, expected: item.fingerprint }); });
 
   const load = useCallback(async () => {
     try {

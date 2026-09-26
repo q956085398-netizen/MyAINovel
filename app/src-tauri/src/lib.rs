@@ -17,6 +17,7 @@ mod proofread;
 mod relationship;
 mod social;
 mod search;
+mod global_search;
 mod thread;
 mod trope;
 mod vocabulary;
@@ -173,6 +174,18 @@ fn load_vocab(root: String) -> Result<Vocabulary, String> {
         return Err(format!("不是有效的文件夹：{root}"));
     }
     vocabulary::load_vocab(&path)
+}
+
+#[tauri::command]
+async fn global_search_preview(root: String, path: String, name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || global_search::preview(Path::new(&root), Path::new(&path), &name))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn global_search(root: String, query: String) -> Result<global_search::GlobalSearchReport, String> {
+    tauri::async_runtime::spawn_blocking(move || global_search::search(Path::new(&root), &query))
+        .await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -986,6 +999,8 @@ pub fn run() {
             save_tropes,
             load_vocab,
             search_library,
+            global_search,
+            global_search_preview,
             scan_inspirations,
             save_inspiration_card,
             capture_inspiration,

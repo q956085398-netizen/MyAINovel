@@ -1,0 +1,12 @@
+.global-search-overlay { z-index: 1000; }
+.global-search { width: min(760px, calc(100vw - var(--sp-7))); max-height: calc(100dvh - var(--sp-8)); overflow: hidden; display: flex; flex-direction: column; }
+.global-search .pane-head { flex-shrink: 0; }
+.global-search-label { display: grid; gap: var(--sp-3); }
+.global-search-results { overflow-y: auto; min-height: 0; overflow-wrap: anywhere; }
+.global-search-results h3 { margin: var(--sp-5) 0 var(--sp-3); }
+.global-search-result { margin-bottom: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-card); }
+.global-search-result.selected { border-color: var(--accent); }
+.global-search-open { display: grid; gap: var(--sp-3); background: transparent; color: inherit; border: 0; width: 100%; text-align: left; cursor: pointer; }
+.global-search-snippet { display: grid; gap: var(--sp-1); white-space: pre-wrap; }
+.global-search-result summary { cursor: pointer; margin-top: var(--sp-3); }
+.global-search-result pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
