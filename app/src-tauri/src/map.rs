@@ -14,8 +14,7 @@ use serde_yaml::{Mapping, Value};
 use crate::book_file::{
     content_fingerprint, file_stem_of, frontmatter_mapping, has_md_extension, is_hidden,
     is_pending, map_list, map_scalar, read_text, sanitize_file_name, set_map_list, set_map_scalar,
-    split_frontmatter, strip_bom, unique_file_path, write_frontmatter, write_text_atomic,
-    write_yaml_mapping,
+    split_frontmatter, strip_bom, unique_file_path, write_frontmatter, write_yaml_mapping,
 };
 use crate::project::{self, NoteKind};
 
@@ -1370,7 +1369,7 @@ pub fn geo_upgrade_preview(
     source: &Path,
     target: GeoUpgradeTarget,
 ) -> Result<GeoUpgradePreview, String> {
-    let (source_name, source_raw) = legacy_geography_name(project, source)?;
+    let (source_name, source_raw) = read_legacy_geography_snapshot(project, source)?;
     let target_path = project
         .join(project::CONCEPT_DIR)
         .join(target.dir_name())
@@ -1404,46 +1403,116 @@ pub fn geo_upgrade_preview(
     })
 }
 
-/// 执行已确认的升级：先核对预览快照，再写不可覆盖的备份与新实体，最后
-/// 删除旧词条。每个新文件都经原子写；过期预览拒绝执行。
+/// 执行已确认的升级：核对预览快照后，先把源文件移入备份，再校验被移动
+/// 的内容与预览一致，最后原子写入新实体。变更的源文件会恢复原位并拒绝升级。
 pub fn confirm_geo_upgrade(
     project: &Path,
     preview: &GeoUpgradePreview,
 ) -> Result<MapWorkspace, String> {
     let current = geo_upgrade_preview(project, &preview.source_path, preview.target)?;
     if current != *preview {
-        return Err("旧地理词条在预览后已变化，请关闭升级窗口并重新打开，再次预览。".into());
+        return Err("旧词条在预览后已变化，请关闭升级窗口并重新打开，再次预览。".into());
     }
     let raw = read_text(&preview.source_path)?;
     if content_fingerprint(raw.as_bytes()).to_string() != preview.source_fingerprint {
-        return Err("旧地理词条在预览后已变化，请关闭升级窗口并重新打开，再次预览。".into());
+        return Err("旧词条在预览后已变化，请关闭升级窗口并重新打开，再次预览。".into());
     }
     let (mut frontmatter, body) = parse_legacy_geography(&raw, &preview.source_path)?;
 
     // 「类别: 地理」是旧模型的分类键，不复制为新实体的业务字段；其余
-    // 手补键和正文原样进新文件，同时整份旧文件进入兼容备份以便恢复。
+    // 手补键和正文原样进新文件，原文件本身移入兼容备份。
     frontmatter.remove(Value::String("类别".to_string()));
     if let Some(parent) = preview.backup_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("无法创建兼容备份目录 {}：{e}", parent.display()))?;
     }
-    write_text_atomic(&preview.backup_path, &raw)?;
-    if let Some(parent) = preview.target_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            format!(
-                "无法创建{}目录 {}：{e}",
-                preview.target.dir_name(),
-                parent.display()
-            )
-        })?;
+    if preview.target_path.exists() || preview.backup_path.exists() {
+        return Err("目标文件或兼容备份已出现，请关闭升级窗口并重新打开，再次预览。".into());
     }
-    write_frontmatter(&preview.target_path, frontmatter, &body)?;
-    fs::remove_file(&preview.source_path)
-        .map_err(|e| format!("新{}已创建，旧词条未能移入备份：{e}", preview.target.dir_name()))?;
+    fs::rename(&preview.source_path, &preview.backup_path).map_err(|e| {
+        format!(
+            "无法将旧词条移入兼容备份 {}：{e}",
+            preview.backup_path.display()
+        )
+    })?;
+    let backup_raw = match read_text(&preview.backup_path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            return match restore_geo_source(&preview.source_path, &preview.backup_path) {
+                Ok(()) => Err(format!("无法校验兼容备份，旧词条已恢复：{error}")),
+                Err(restore) => Err(format!(
+                    "无法校验兼容备份：{error}；旧内容保留在 {}：{restore}",
+                    preview.backup_path.display()
+                )),
+            };
+        }
+    };
+    if backup_raw != raw {
+        return match restore_geo_source(&preview.source_path, &preview.backup_path) {
+            Ok(()) => Err("旧词条在预览后已变化，请关闭升级窗口并重新打开，再次预览。".into()),
+            Err(restore) => Err(format!(
+                "旧词条在预览后已变化；旧内容保留在 {}：{restore}",
+                preview.backup_path.display()
+            )),
+        };
+    }
+    if let Some(parent) = preview.target_path.parent() {
+        if let Err(error) = fs::create_dir_all(parent) {
+            return match restore_geo_source(&preview.source_path, &preview.backup_path) {
+                Ok(()) => Err(format!(
+                    "无法创建{}目录 {}：{error}",
+                    preview.target.dir_name(),
+                    parent.display()
+                )),
+                Err(restore) => Err(format!(
+                    "无法创建{}目录：{error}；旧内容保留在 {}：{restore}",
+                    preview.target.dir_name(),
+                    preview.backup_path.display()
+                )),
+            };
+        }
+    }
+    if preview.target_path.exists() {
+        return match restore_geo_source(&preview.source_path, &preview.backup_path) {
+            Ok(()) => Err("目标文件在升级期间出现，旧词条已恢复；请重新预览。".into()),
+            Err(restore) => Err(format!(
+                "目标文件在升级期间出现；旧内容保留在 {}：{restore}",
+                preview.backup_path.display()
+            )),
+        };
+    }
+    if let Err(error) = write_frontmatter(&preview.target_path, frontmatter, &body) {
+        return match restore_geo_source(&preview.source_path, &preview.backup_path) {
+            Ok(()) => Err(format!(
+                "写入新{}失败，旧词条已恢复：{error}",
+                preview.target.dir_name()
+            )),
+            Err(restore) => Err(format!(
+                "写入新{}失败：{error}；旧内容保留在 {}：{restore}",
+                preview.target.dir_name(),
+                preview.backup_path.display()
+            )),
+        };
+    }
+    if preview.source_path.exists() {
+        return Err(format!(
+            "升级期间原路径出现新文件，已保留该文件及新{}与兼容备份，请关闭并重新打开项目后处理。",
+            preview.target.dir_name()
+        ));
+    }
     map_workspace(project)
 }
 
-fn legacy_geography_name(project: &Path, source: &Path) -> Result<(String, String), String> {
+fn restore_geo_source(source: &Path, backup: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(source) {
+        Ok(_) => return Err("原路径已有新文件，未覆盖它".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("无法检查原路径是否出现新文件：{error}")),
+    }
+    fs::rename(backup, source).map_err(|e| format!("无法从兼容备份恢复旧词条：{e}"))
+}
+
+fn read_legacy_geography_snapshot(project: &Path, source: &Path) -> Result<(String, String), String> {
     let expected_dir = project
         .join(project::CONCEPT_DIR)
         .join(NoteKind::Worldview.name());
@@ -1546,6 +1615,24 @@ mod tests {
         assert_eq!(fs::read_to_string(&source).unwrap(), changed);
         assert!(!preview.target_path.exists(), "过期预览不能创建目标文件");
         assert!(!preview.backup_path.exists(), "过期预览不能创建备份");
+    }
+
+    #[test]
+    fn 地图目录创建失败_恢复旧词条() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《山河》");
+        let source = project.join("构思/世界观/京城.md");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        let original = "---\n类别: 地理\n---\n旧城的自由正文。\n";
+        fs::write(&source, original).unwrap();
+
+        let preview = geo_upgrade_preview(&project, &source, GeoUpgradeTarget::Map).unwrap();
+        fs::write(preview.target_path.parent().unwrap(), "阻止创建地图目录").unwrap();
+
+        assert!(confirm_geo_upgrade(&project, &preview).is_err());
+        assert_eq!(fs::read_to_string(&source).unwrap(), original);
+        assert!(!preview.backup_path.exists(), "失败后旧词条已恢复");
+        assert!(!preview.target_path.exists());
     }
 
     #[test]
