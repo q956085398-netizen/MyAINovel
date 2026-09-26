@@ -7,10 +7,11 @@ import type {
   Vocabulary,
 } from "./types";
 import { AI_CHAPTER_COMPANION } from "./types";
-import { DEFAULT_ASSISTANT_PROMPT } from "./settingsState";
 
 /** 普通对话的默认系统提示（ADR 0003：只做梳理、建议、提炼、激发灵感这类助手活）。 */
-export const DEFAULT_SYSTEM_PROMPT = DEFAULT_ASSISTANT_PROMPT;
+export const DEFAULT_SYSTEM_PROMPT =
+  "你是「工笔」（个人网文创作工具）里的写作助手，帮用户拆书、找灵感、构思剧情。" +
+  "回答用中文，简明直接，多用要点。";
 
 /** 词表进标注提示词的类型上限：防词表长大后提示词膨胀。 */
 const VOCAB_PROMPT_LIMIT = 60;

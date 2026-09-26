@@ -68,11 +68,35 @@ export const DEFAULT_CHAPTER_PREFIX = "第{n}章";
 const KEY = "gongbi.settings";
 
 function load(): AppSettings {
+  let stored: unknown;
+  let settings: AppSettings;
   try {
     const raw = localStorage.getItem(KEY);
-    return normalizeSettings(raw ? JSON.parse(raw) : null);
+    stored = raw ? JSON.parse(raw) : null;
+    settings = normalizeSettings(stored);
   } catch {
     return normalizeSettings(null);
+  }
+
+  const storedRecord =
+    typeof stored === "object" && stored !== null && !Array.isArray(stored)
+      ? (stored as Record<string, unknown>)
+      : {};
+  try {
+    const legacyRaw = localStorage.getItem("gongbi.writing.prefs");
+    if (!legacyRaw) return settings;
+    const legacy: unknown = JSON.parse(legacyRaw);
+    if (typeof legacy !== "object" || legacy === null || Array.isArray(legacy)) return settings;
+    const legacyRecord = legacy as Record<string, unknown>;
+    if (typeof storedRecord.typewriter !== "boolean" && typeof legacyRecord.typewriter === "boolean") {
+      settings.typewriter = legacyRecord.typewriter;
+    }
+    if (typeof storedRecord.dimming !== "boolean" && typeof legacyRecord.dimming === "boolean") {
+      settings.dimming = legacyRecord.dimming;
+    }
+    return settings;
+  } catch {
+    return settings;
   }
 }
 

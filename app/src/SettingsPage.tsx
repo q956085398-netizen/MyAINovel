@@ -20,7 +20,7 @@ import {
   type ThemeMode,
   type ThemePalette,
 } from "./settings";
-import { DEFAULT_ASSISTANT_PROMPT, settingsTabForEntry, type SettingsTab } from "./settingsState";
+import { settingsTabForEntry, type SettingsTab } from "./settingsState";
 import type { AiConfig } from "./types";
 import { errMsg } from "./util";
 
@@ -295,6 +295,27 @@ export default function SettingsPage({
               <section className="settings-section">
                 <h2>写作行为与保存</h2>
                 <div className="settings-field settings-field-stacked">
+                  <span className="settings-label">行为</span>
+                  <div className="settings-check-list">
+                    <label className="settings-check-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.typewriter}
+                        onChange={(event) => update({ typewriter: event.target.checked })}
+                      />
+                      打字机（当前行保持在编辑区中部）
+                    </label>
+                    <label className="settings-check-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.dimming}
+                        onChange={(event) => update({ dimming: event.target.checked })}
+                      />
+                      行淡化（弱化非当前行）
+                    </label>
+                  </div>
+                </div>
+                <div className="settings-field settings-field-stacked">
                   <span className="settings-label">自动保存</span>
                   <div className="display-toggle" role="radiogroup" aria-label="自动保存间隔">
                     {AUTOSAVE_OPTIONS.map((seconds) => (
@@ -313,26 +334,13 @@ export default function SettingsPage({
 
           {tab === "ai" && (
             <section className="settings-section">
-              <div className="settings-note settings-assistant-preset">
-                <h3>默认助手预设</h3>
-                <p className="hint">普通对话使用这段提示词；拆书、构思等固定命令继续使用各自的专用提示。</p>
-                <textarea
-                  className="settings-prompt"
-                  aria-label="默认助手预设"
-                  value={settings.assistantPrompt}
-                  onChange={(event) => update({ assistantPrompt: event.target.value })}
-                  rows={5}
-                />
-                <button className="btn small" onClick={() => update({ assistantPrompt: DEFAULT_ASSISTANT_PROMPT })}>
-                  恢复默认预设
-                </button>
-              </div>
               {aiConfig && <ProviderSettingsForm initial={aiConfig} onSaved={setAiConfig} />}
               {!aiConfig && !aiError && <p className="hint">正在读取供应商设置…</p>}
               {aiError && <div className="error-box">读取供应商设置失败：{aiError}</div>}
               <div className="settings-note">
                 <h3>上下文与隐私</h3>
                 <p>普通对话只在你主动勾选时携带当前文档；固定 AI 命令只发送命令所需材料。供应商会收到你明确发送的内容。</p>
+                <p className="hint">AI 助手预设将在后续工单中加入本页，不会重新放回对话侧栏。</p>
               </div>
             </section>
           )}

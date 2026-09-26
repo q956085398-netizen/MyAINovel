@@ -28,7 +28,6 @@ import type {
 } from "./types";
 import { errMsg, oneLinePreview, stripBookMarks } from "./util";
 import ChatAdoptDialog, { type ChatExcerptEntry } from "./ChatAdoptDialog";
-import { getSettings } from "./settings";
 
 interface AiSidebarProps {
   open: boolean;
@@ -209,9 +208,7 @@ export default function AiSidebar({
       : withUser.messages;
     const reqMessages = buildRequestMessages(
       history,
-      system ??
-        personaBase?.content ??
-        (getSettings().assistantPrompt.trim() || DEFAULT_SYSTEM_PROMPT),
+      system ?? personaBase?.content ?? DEFAULT_SYSTEM_PROMPT,
       docForRequest,
     );
     const token = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);

@@ -39,7 +39,7 @@ import {
   expectationOverdueChapters,
 } from "./types";
 import { errMsg, formatCount } from "./util";
-import { autosaveIntervalMs } from "./settings";
+import { autosaveIntervalMs, useSettings } from "./settings";
 import { registerFlushSaver } from "./saveFlush";
 import {
   chapterLabel,
@@ -62,7 +62,6 @@ import { saveStatusAfterEdit, type SaveStatus } from "./editorHeaderState";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 /** 自动保存防抖：停笔满设置间隔（默认 3 秒，工单 #28 起两编辑器共用）落盘。 */
-const PREFS_KEY = "gongbi.writing.prefs";
 const chapterKey = (dir: string) => `gongbi.writing.chapter.${dir}`;
 
 const editorTheme = baseEditorTheme({ fontSize: "17px", paddingBottom: "40vh" });
@@ -163,17 +162,6 @@ function dimmingExtension(): Extension {
   );
 }
 
-function loadPrefs(): { typewriter: boolean; dimming: boolean } {
-  const fallback = { typewriter: true, dimming: false };
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return fallback;
-    return { ...fallback, ...(JSON.parse(raw) as Partial<typeof fallback>) };
-  } catch {
-    return fallback;
-  }
-}
-
 /** 新建/重命名/每日目标三个单输入框弹窗共用一个壳。 */
 type ChapterDialog = { kind: "new" | "rename" | "goal"; value: string };
 
@@ -206,6 +194,8 @@ export default function WritingPage({
   registerBridge,
   onChapterActive,
 }: WritingPageProps) {
+  const [appSettings, updateSettings] = useSettings();
+  const prefs = { typewriter: appSettings.typewriter, dimming: appSettings.dimming };
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const extensionsRef = useRef<Extension[] | null>(null);
@@ -242,7 +232,6 @@ export default function WritingPage({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [immersive, setImmersive] = useState(false);
   const [typoOpen, setTypoOpen] = useState(false);
-  const [prefs, setPrefs] = useState(loadPrefs);
   const [dialog, setDialog] = useState<ChapterDialog | null>(null);
   const [history, setHistory] = useState<null | {
     list: SnapshotEntry[];
@@ -887,8 +876,7 @@ export default function WritingPage({
 
   function togglePref(key: "typewriter" | "dimming", value: boolean) {
     const next = { ...prefs, [key]: value };
-    setPrefs(next);
-    localStorage.setItem(PREFS_KEY, JSON.stringify(next));
+    updateSettings(key === "typewriter" ? { typewriter: value } : { dimming: value });
     viewRef.current?.dispatch({
       effects: [
         typewriterCompartment.reconfigure(next.typewriter ? typewriterExtension() : []),
@@ -1080,6 +1068,15 @@ export default function WritingPage({
 
   // 设置变化（主题/排版）→ 编辑器外观重配（工单 #24/#26）。
   useEditorAppearance(viewRef, appearanceCompartment);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: [
+        typewriterCompartment.reconfigure(prefs.typewriter ? typewriterExtension() : []),
+        dimCompartment.reconfigure(prefs.dimming ? dimmingExtension() : []),
+      ],
+    });
+  }, [prefs.typewriter, prefs.dimming]);
 
   useEffect(() => {
     if (!immersive) return;

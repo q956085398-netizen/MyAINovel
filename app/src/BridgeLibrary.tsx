@@ -304,8 +304,8 @@ function BridgeDialog({
   }
 
   return (
-    <div className="dialog-overlay detail-panel-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="dialog wide detail-panel bridge-dialog">
+    <div className="dialog-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dialog wide bridge-dialog">
         <h2>{prevPath ? "编辑桥段" : "新建桥段草案"}</h2>
         <label>桥段名<input autoFocus value={draft.name} onChange={(e) => set("name", e.target.value)} placeholder="如：夜探旧宅" /></label>
         <label>情绪曲线<input value={draft.emotionCurve ?? ""} onChange={(e) => set("emotionCurve", e.target.value || null)} placeholder="如：压抑 → 犹疑 → 痛快" /></label>

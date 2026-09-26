@@ -26,7 +26,8 @@ test("旧设置升级到朱砂纸墨且保留自定义编辑器背景", () => {
   assert.equal(settings.font, "楷");
   assert.equal(settings.fontSize, 18);
   assert.equal(settings.autosaveSec, 3);
-  assert.equal(settings.assistantPrompt, DEFAULT_SETTINGS.assistantPrompt);
+  assert.equal(settings.typewriter, true);
+  assert.equal(settings.dimming, false);
 });
 
 test("损坏字段逐项回退，不抹掉仍然有效的旧字段", () => {
@@ -47,11 +48,8 @@ test("损坏字段逐项回退，不抹掉仍然有效的旧字段", () => {
   assert.equal(settings.firstLineIndent, DEFAULT_SETTINGS.firstLineIndent);
   assert.equal(settings.autosaveSec, DEFAULT_SETTINGS.autosaveSec);
   assert.equal(settings.chapterPrefix, DEFAULT_SETTINGS.chapterPrefix);
-  assert.equal(settings.assistantPrompt, DEFAULT_SETTINGS.assistantPrompt);
-  assert.equal(
-    normalizeSettings({ assistantPrompt: "用中文简明协助构思。" }).assistantPrompt,
-    "用中文简明协助构思。",
-  );
+  assert.equal(settings.typewriter, DEFAULT_SETTINGS.typewriter);
+  assert.equal(settings.dimming, DEFAULT_SETTINGS.dimming);
 });
 
 test("只有跟随系统会响应系统明暗变化", () => {

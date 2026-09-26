@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ForeshadowView } from "./types";
 import {
@@ -15,6 +15,8 @@ interface ForeshadowBoardProps {
   project: string;
   /** 项目章前缀，用于渲染「第N章」。 */
   chapterPrefix: string | null;
+  /** 侧栏跳转时滚动到这条伏笔。 */
+  focusName?: string;
   /** 伏笔变了：让项目页刷新计数。 */
   onChanged: () => void;
   /** 点章名：跳到书写板块打开该章并选中引文。 */
@@ -45,6 +47,7 @@ function groupSort(state: string) {
 export default function ForeshadowBoard({
   project,
   chapterPrefix,
+  focusName,
   onChanged,
   onOpenChapter,
 }: ForeshadowBoardProps) {
@@ -53,6 +56,7 @@ export default function ForeshadowBoard({
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const focusedName = useRef<string | null>(null);
 
   const scan = useCallback(async () => {
     setLoading(true);
@@ -70,6 +74,15 @@ export default function ForeshadowBoard({
   useEffect(() => {
     void scan();
   }, [scan]);
+
+  useEffect(() => {
+    if (!focusName || loading || focusedName.current === focusName) return;
+    const target = document.getElementById(`foreshadow-${encodeURIComponent(focusName)}`);
+    if (!target) return;
+    focusedName.current = focusName;
+    const frame = requestAnimationFrame(() => target.scrollIntoView({ block: "center" }));
+    return () => cancelAnimationFrame(frame);
+  }, [focusName, loading, views]);
 
   async function changeState(name: string, state: string) {
     if (busy) return;
@@ -177,7 +190,11 @@ export default function ForeshadowBoard({
               // 手写的状态值不在五态内：只提示不校验，原样列出让人改回来。
               const unknownState = !(FORESHADOW_STATES as readonly string[]).includes(v.state);
               return (
-                <div key={v.name} className="card-item">
+                <div
+                  key={v.name}
+                  id={`foreshadow-${encodeURIComponent(v.name)}`}
+                  className={`card-item ${v.name === focusName ? "rail-task-target" : ""}`}
+                >
                   <div className="card-title-row">
                     <span className="card-title static">{v.name}</span>
                     {v.overdue && (

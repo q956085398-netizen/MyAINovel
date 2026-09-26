@@ -47,6 +47,28 @@ function newestFirst(a: InspirationCard, b: InspirationCard): number {
   return b.mtime - a.mtime || a.title.localeCompare(b.title, "zh-Hans-CN");
 }
 
+function searchField(card: InspirationCard, query: string): { label: string; text: string } {
+  const needle = query.trim().toLocaleLowerCase("zh-Hans-CN");
+  const fields = [
+    { label: "标题", text: card.title },
+    { label: "一句话核心", text: card.core ?? "" },
+    { label: "正文", text: card.body },
+    { label: "来源", text: card.source ?? "" },
+    { label: "标签", text: card.tags.join("、") },
+    { label: "关联", text: card.links.join("、") },
+  ];
+  return fields.find((field) => field.text.toLocaleLowerCase("zh-Hans-CN").includes(needle)) ?? fields[0];
+}
+
+function compactSearchExcerpt(text: string, query: string): string {
+  const needle = query.trim().toLocaleLowerCase("zh-Hans-CN");
+  if (!needle || text.length <= 132) return text;
+  const hit = text.toLocaleLowerCase("zh-Hans-CN").indexOf(needle);
+  const start = Math.max(0, hit - 44);
+  const end = Math.min(text.length, start + 132);
+  return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
+}
+
 /** 卡片类别 → 转生落点（只开两条通道：故事卡→单元 #9、角色卡→人物 #8）。 */
 const TRANSMUTE_ACTIONS: Partial<
   Record<CardCategory, { target: TransmuteTarget; label: string; hint: string }>
@@ -202,6 +224,9 @@ interface InspirationLibraryProps {
   onOpenProject: (project: ProjectEntry, tab?: ProjectTab, focus?: string) => void;
   /** 转生时没有项目可去：切到「构思」板块新建。 */
   onGoIdeation: () => void;
+  /** 侧栏真实待办点卡片：直接打开这张灵感卡。 */
+  openCard: InspirationCard | null;
+  onCardOpened: () => void;
 }
 
 /** 灵感库（设计共识 §六）：九类卡片＋未分类，一卡一文件存于库根
@@ -213,6 +238,8 @@ export default function InspirationLibrary({
   onOpenBook,
   onOpenProject,
   onGoIdeation,
+  openCard,
+  onCardOpened,
 }: InspirationLibraryProps) {
   const [cards, setCards] = useState<InspirationCard[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -220,6 +247,7 @@ export default function InspirationLibrary({
 
   const [activeCategory, setActiveCategory] = useState<CardCategory | null>(null);
   const [query, setQuery] = useState("");
+  const [expandedSearchHits, setExpandedSearchHits] = useState<Set<string>>(() => new Set());
   const [quickCapture, setQuickCapture] = useState("");
   const [capturing, setCapturing] = useState(false);
   const [collapsedCards, setCollapsedCards] = useState<Set<string>>(() =>
@@ -253,6 +281,12 @@ export default function InspirationLibrary({
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);
   }, [libraryPath, scan]);
+
+  useEffect(() => {
+    if (!openCard) return;
+    setEditing({ draft: openCard, prevPath: openCard.path });
+    onCardOpened();
+  }, [openCard, onCardOpened]);
 
   /** 待打磨切换（工单 #64）：成功后重扫灵感库。 */
   const { switching, toggle: togglePending } = usePendingToggle(
@@ -397,19 +431,17 @@ export default function InspirationLibrary({
   }, [listed, polishing, unclassified, query]);
 
   useEffect(() => {
-    const firstMatch = [...polishing, ...unclassified, ...listed].find((card) =>
-      searchMatches.has(card.path),
-    );
+    if (!query.trim()) return;
+    const firstMatch = visible[0];
     if (!firstMatch) return;
     const frame = requestAnimationFrame(() => {
       const cardElement = document.getElementById(contentCardDomId(firstMatch.path));
-      const matchElement = cardElement?.querySelector<HTMLElement>("mark[data-search-hit='true']");
-      (matchElement ?? cardElement)?.scrollIntoView({
-        block: "center",
-      });
+      cardElement?.scrollIntoView({ block: "center" });
     });
     return () => cancelAnimationFrame(frame);
-  }, [listed, polishing, unclassified, searchMatches]);
+  }, [query, visible]);
+
+  useEffect(() => setExpandedSearchHits(new Set()), [query, activeCategory]);
 
   function toggleCollapsed(path: string) {
     setCollapsedCards((current) =>
@@ -505,7 +537,7 @@ export default function InspirationLibrary({
         </section>
       )}
 
-      {libraryPath && !scanning && (
+      {libraryPath && !scanning && !query.trim() && (
         <PendingZone
           label="待打磨"
           count={polishing.length}
@@ -532,7 +564,7 @@ export default function InspirationLibrary({
         </PendingZone>
       )}
 
-      {libraryPath && !scanning && unclassified.length > 0 && (
+      {libraryPath && !scanning && !query.trim() && unclassified.length > 0 && (
         <section className="pending-inspirations" aria-labelledby="pending-inspirations-title">
           <div className="section-heading">
             <div>
@@ -613,7 +645,58 @@ export default function InspirationLibrary({
             共 {formatCount(cards.length)} 张卡片{activeCategory && ` · 当前 ${activeCategory} ${formatCount(visible.length)} 张`}
           </p>
 
-          {listed.length === 0 ? (
+          {query.trim() ? (
+            visible.length === 0 ? (
+              <p className="hint">没有找到匹配的灵感。</p>
+            ) : (
+              <div className="search-results inspiration-search-results">
+                <p className="stats">命中 {formatCount(visible.length)} 张灵感卡</p>
+                <ul>
+                  {visible.map((card) => {
+                    const expanded = expandedSearchHits.has(card.path);
+                    const hit = searchField(card, query);
+                    return (
+                      <li
+                        id={contentCardDomId(card.path)}
+                        key={card.path}
+                        className={`hit-row ${expanded ? "is-expanded" : ""}`}
+                      >
+                        <button
+                          className="link-like hit-book"
+                          title="打开这张灵感卡"
+                          onClick={() => setEditing({ draft: card, prevPath: card.path })}
+                        >
+                          <SearchHighlight text={card.title} query={query} />
+                        </button>
+                        <span className="hit-line">{card.category}{card.pending ? " · 待打磨" : ""}</span>
+                        <button
+                          type="button"
+                          className="hit-expand"
+                          aria-expanded={expanded}
+                          title="展开或收起命中片段"
+                          onClick={() => setExpandedSearchHits((current) => {
+                            const next = new Set(current);
+                            if (next.has(card.path)) next.delete(card.path);
+                            else next.add(card.path);
+                            return next;
+                          })}
+                        >
+                          {expanded ? "收起" : "展开片段"}
+                        </button>
+                        <span className="hit-snippet">
+                          <span className="hint">{hit.label}：</span>
+                          <SearchHighlight
+                            text={expanded ? hit.text : compactSearchExcerpt(hit.text, query)}
+                            query={query}
+                          />
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )
+          ) : listed.length === 0 ? (
             <p className="hint">这个筛选下没有卡片。</p>
           ) : (
             <div className="card-list">

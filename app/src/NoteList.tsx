@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { NoteDraft, NoteEntry, NoteKind, Vocabulary } from "./types";
 import { emptyNoteDraft } from "./types";
@@ -9,6 +9,7 @@ import PendingZone from "./PendingZone";
 import { usePendingToggle } from "./pendingToggle";
 import {
   CONTENT_SURFACE_STORAGE_KEY,
+  contentCardDomId,
   readCollapsedCardPaths,
   shouldExpandContentCard,
   toggleCollapsedCardPath,
@@ -22,6 +23,8 @@ interface NoteListProps {
   vocab: Vocabulary | null;
   /** 单元按排布次序展示；未安排项保留扫描时的相对顺序。 */
   orderedNames?: string[];
+  /** 跨板块跳转时滚动到这张具体笔记。 */
+  focusName?: string;
   /** 保存/删除/提为单元后：让项目页刷新计数。 */
   onChanged: () => void;
   /** 矛盾提为单元成功后：切到单元页。 */
@@ -115,6 +118,7 @@ export default function NoteList({
   kind,
   vocab,
   orderedNames,
+  focusName,
   onChanged,
   onPromoted,
   onAiCommand,
@@ -130,6 +134,7 @@ export default function NoteList({
   const [collapsedCards, setCollapsedCards] = useState(() =>
     readCollapsedCardPaths(localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY), NOTE_CARD_SURFACE),
   );
+  const focusedName = useRef<string | null>(null);
 
   const scan = useCallback(async () => {
     setLoading(true);
@@ -147,6 +152,17 @@ export default function NoteList({
   useEffect(() => {
     void scan();
   }, [scan]);
+
+  useEffect(() => {
+    if (!focusName || focusedName.current === focusName) return;
+    const note = notes.find((entry) => entry.name === focusName);
+    if (!note) return;
+    const target = document.getElementById(contentCardDomId(note.path));
+    if (!target) return;
+    focusedName.current = focusName;
+    const frame = requestAnimationFrame(() => target.scrollIntoView({ block: "center" }));
+    return () => cancelAnimationFrame(frame);
+  }, [focusName, notes]);
 
   /** 待打磨切换（工单 #64）：成功后通知项目页刷新计数并重扫本页。 */
   const { switching, toggle: togglePending } = usePendingToggle(
@@ -179,11 +195,9 @@ export default function NoteList({
     }
   }
 
-  const polishing = notes.filter((n) => n.pending);
-  const normal = notes.filter((n) => !n.pending);
-  const listedNotes =
+  const sortInStoryOrder = (items: NoteEntry[]) =>
     kind === "单元" && orderedNames?.length
-      ? [...normal].sort((left, right) => {
+      ? [...items].sort((left, right) => {
           const leftIndex = orderedNames.indexOf(left.name);
           const rightIndex = orderedNames.indexOf(right.name);
           if (leftIndex < 0 || rightIndex < 0) {
@@ -193,7 +207,9 @@ export default function NoteList({
           }
           return leftIndex - rightIndex;
         })
-      : normal;
+      : items;
+  const polishing = sortInStoryOrder(notes.filter((n) => n.pending));
+  const listedNotes = sortInStoryOrder(notes.filter((n) => !n.pending));
 
   function toggleCollapsed(path: string) {
     setCollapsedCards((current) =>
@@ -246,6 +262,7 @@ export default function NoteList({
             <ContentSurface
               key={note.path}
               identity={note.path}
+              className={note.name === focusName ? "rail-task-target" : undefined}
               title={note.name}
               badges={<NoteBadges kind={kind} note={note} />}
               expanded={isExpanded(note)}
@@ -296,6 +313,7 @@ export default function NoteList({
           <ContentSurface
             key={note.path}
             identity={note.path}
+            className={note.name === focusName ? "rail-task-target" : undefined}
             title={note.name}
             badges={<NoteBadges kind={kind} note={note} />}
             expanded={isExpanded(note)}

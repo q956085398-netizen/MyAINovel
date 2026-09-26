@@ -58,20 +58,20 @@ pub fn read_ideation_overview(project: &Path) -> Result<IdeationOverview, String
     let mut pending = Vec::new();
     for kind in NoteKind::ALL {
         for note in crate::project::scan_notes(project, kind)? {
-            let pending_state = note
+            let status_pending = note
                 .status
                 .as_deref()
                 .is_some_and(|status| matches!(status.trim(), "待打磨" | "待处理"));
-            if pending_state {
+            if note.pending || status_pending {
                 pending.push(IdeationOverviewItem {
                     name: note.name.clone(),
-                    detail: note.status.clone(),
-                    tab: kind.name().to_string(),
-                    focus: if kind == NoteKind::Character {
-                        Some(note.name)
+                    detail: if note.pending {
+                        Some("待打磨".to_string())
                     } else {
-                        None
+                        note.status.clone()
                     },
+                    tab: kind.name().to_string(),
+                    focus: Some(note.name),
                 });
             }
         }
@@ -231,13 +231,31 @@ mod tests {
             "---\n状态: 待打磨\n---\n\n从出发前一晚切入。\n",
         )
         .expect("opening");
+        fs::write(
+            project.join("构思").join("开头").join("下一版.md"),
+            "---\n待打磨: true\n---\n\n从主角出门前切入。\n",
+        )
+        .expect("pending opening");
 
         let overview = read_ideation_overview(&project).expect("overview");
         assert_eq!(overview.reader_imagination.as_deref(), Some("冒险、搜刮"));
         assert_eq!(overview.mainlines[0].name, "出发");
         assert_eq!(overview.characters[0].name, "里昂");
         assert_eq!(overview.maps[0].name, "边境村");
-        assert_eq!(overview.pending[0].name, "版本A");
+        let marked = overview
+            .pending
+            .iter()
+            .find(|item| item.name == "版本A")
+            .expect("status-based pending note");
+        assert_eq!(marked.detail.as_deref(), Some("待打磨"));
+        assert_eq!(marked.focus.as_deref(), Some("版本A"));
+        let frontmatter_pending = overview
+            .pending
+            .iter()
+            .find(|item| item.name == "下一版")
+            .expect("frontmatter pending note");
+        assert_eq!(frontmatter_pending.detail.as_deref(), Some("待打磨"));
+        assert_eq!(frontmatter_pending.focus.as_deref(), Some("下一版"));
         let _ = fs::remove_dir_all(project);
     }
 }

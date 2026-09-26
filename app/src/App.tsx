@@ -8,7 +8,7 @@ import BookLibrary from "./BookLibrary";
 import EditorPage from "./EditorPage";
 import Ideation from "./Ideation";
 import InspirationLibrary from "./InspirationLibrary";
-import RailProjectPanel from "./RailProjectPanel";
+import RailProjectPanel, { type RailSection } from "./RailProjectPanel";
 import Writing from "./Writing";
 import SettingsPage from "./SettingsPage";
 import { getSettings, initSettings } from "./settings";
@@ -29,8 +29,10 @@ import type { ProjectTab } from "./ProjectPage";
 import type {
   AiSeed,
   BookEntry,
+  ChapterEntry,
   DocSnapshot,
   EditorBridge,
+  InspirationCard,
   ProjectEntry,
   TropeSuggestion,
   WritingBridge,
@@ -39,8 +41,8 @@ import type {
 
 // 灵感库独立侧栏导航（工单 #37）：拆书板块的书库/灵感库子页签取消，
 // 灵感库升为一级板块，顺序 拆书 → 灵感库 → 构思 → 书写。
-const SECTIONS = ["拆书", "灵感库", "构思", "书写"] as const;
-type Section = (typeof SECTIONS)[number];
+const SECTIONS = ["拆书", "灵感库", "构思", "书写"] as const satisfies readonly RailSection[];
+type Section = RailSection;
 
 // 板块图标（工单 #35，方向乙）：一处映射，侧栏导航四项共用。
 const SECTION_ICONS: Record<Section, Glyph> = {
@@ -90,6 +92,7 @@ function App() {
     /** 落到某个人物（「《书名》/人名」关联）：人物页签切到画布并选中该节点。 */
     focus?: string;
   } | null>(null);
+  const [inspirationJump, setInspirationJump] = useState<InspirationCard | null>(null);
   // 构思（伏笔看板）→ 书写的跳转请求：打开该项目的这一章并选中引文；
   // locate 为空时＝「继续工作」（写作页自己回到上次章节）。消费后清空。
   const [writingJump, setWritingJump] = useState<{
@@ -220,6 +223,14 @@ function App() {
 
   const consumeIdeationJump = useCallback(() => setIdeationJump(null), []);
 
+  const openInspirationFromPanel = useCallback((card: InspirationCard) => {
+    setProjectPanelOpen(false);
+    setInspirationJump(card);
+    switchSection("灵感库");
+  }, [switchSection]);
+
+  const consumeInspirationJump = useCallback(() => setInspirationJump(null), []);
+
   /** 伏笔看板点章：切到书写板块，打开该章并选中引文。 */
   const openChapterFromIdeation = useCallback(
     (projectDir: string, ordinal: number, quote: string) => {
@@ -243,12 +254,24 @@ function App() {
     [switchSection],
   );
 
+  const openChapterFromPanel = useCallback(
+    (project: ProjectEntry, chapter: ChapterEntry) => {
+      setProjectPanelOpen(false);
+      switchSection("书写");
+      setWritingJump({
+        projectDir: project.dir,
+        locate: { ordinal: chapter.ordinal, path: chapter.path, quote: "" },
+      });
+    },
+    [switchSection],
+  );
+
   /** 飞出面板待办点开：跳到构思对应看板。 */
   const openBoardFromPanel = useCallback(
-    (project: ProjectEntry, tab: ProjectTab) => {
+    (project: ProjectEntry, tab: ProjectTab, focus?: string) => {
       setProjectPanelOpen(false);
       switchSection("构思");
-      setIdeationJump({ project, tab });
+      setIdeationJump({ project, tab, focus });
     },
     [switchSection],
   );
@@ -359,9 +382,13 @@ function App() {
             <div className="rail-flyout-backdrop" onClick={() => setProjectPanelOpen(false)} />
             <RailProjectPanel
               libraryPath={libraryPath}
+              section={section}
               onChooseFolder={chooseLibraryFolder}
               onResume={resumeWriting}
               onOpenBoard={openBoardFromPanel}
+              onOpenBook={openBookFromInspiration}
+              onOpenInspiration={openInspirationFromPanel}
+              onOpenChapter={openChapterFromPanel}
               onGoIdeation={() => switchSection("构思")}
             />
           </>
@@ -397,6 +424,8 @@ function App() {
             onOpenBook={openBookFromInspiration}
             onOpenProject={openProjectFromInspiration}
             onGoIdeation={() => switchSection("构思")}
+            openCard={inspirationJump}
+            onCardOpened={consumeInspirationJump}
           />
         </div>
         <div className={`section-wrap ${section === "构思" && !settingsOpen ? "" : "hidden"}`}>
