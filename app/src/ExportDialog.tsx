@@ -18,6 +18,7 @@ import {
 } from "./types";
 import { chapterHead } from "./chapterFile";
 import { errMsg, formatCount } from "./util";
+import { useDialogKeyboard } from "./useDialogKeyboard";
 
 /** 导出与发布（工单 #14，docs/spec/导出与发布.md）：入口在书写板块的
  *  项目列表，不进写作页顶栏。导出是只读派生动作，只写 项目/导出/；
@@ -75,6 +76,7 @@ export function ExportDialog({
   const [proof, setProof] = useState<ProofReport | null>(null);
   const [copied, setCopied] = useState(false);
   const [proofOptions, setProofOptions] = useState<ProofreadOptions>({ punctuation: true, repetition: true, wrongWords: true, properNouns: true });
+  const keyboard = useDialogKeyboard(true, onClose, busy, !nonModal);
 
   useEffect(() => {
     void (async () => {
@@ -208,7 +210,7 @@ export function ExportDialog({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="dialog wide">
+      <div className="dialog wide" {...keyboard} role="dialog" aria-modal={!nonModal} aria-label={initialTab === "proof" ? "本地校对" : "导出与发布"}>
         <h2>导出与发布 · {projectTitle}</h2>
         <div className="subtabs export-tabs">
           <button

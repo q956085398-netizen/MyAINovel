@@ -1,4 +1,6 @@
 import { registerSearchNavigationGuard } from "./globalSearchNavigation";
+import { useDialogKeyboard } from "./useDialogKeyboard";
+import type { InspirationCard } from "./types";
 import { useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, Prec, type Extension, type Range } from "@codemirror/state";
 import {
@@ -266,6 +268,13 @@ export default function WritingPage({
   const [prefs, setPrefs] = useState(loadPrefs);
   const [dialog, setDialog] = useState<ChapterDialog | null>(null);
   const [proofOpen, setProofOpen] = useState(false);
+  const [chapterNotes, setChapterNotes] = useState<InspirationCard[]>([]);
+  const [chapterNotesError, setChapterNotesError] = useState<string | null>(null);
+  const [notesRevision, setNotesRevision] = useState(0);
+  const returnToWriting = () => viewRef.current?.focus();
+  const splitKeyboard = useDialogKeyboard(!!splitDialog, () => { setSplitDialog(null); returnToWriting(); }, !!splitDialog?.busy);
+  const overviewKeyboard = useDialogKeyboard(!!overview, () => { setOverview(null); returnToWriting(); });
+  const quickNoteKeyboard = useDialogKeyboard(quickNoteOpen, () => { setQuickNoteOpen(false); returnToWriting(); }, quickNoteBusy);
   const [history, setHistory] = useState<null | {
     list: SnapshotEntry[];
     selected: string | null;
@@ -465,6 +474,7 @@ export default function WritingPage({
         body: quickNoteText,
       });
       setQuickNoteText("");
+      setNotesRevision((revision) => revision + 1);
       setQuickNoteOpen(false);
       viewRef.current?.focus();
     } catch (e) {
@@ -1188,15 +1198,16 @@ export default function WritingPage({
   useEffect(() => {
     if (!immersive) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !quickNoteOpen && !overview) setImmersive(false);
+      if (e.key === "Escape" && !e.defaultPrevented && !quickNoteOpen && !overview && !splitDialog && !proofOpen) setImmersive(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [immersive, quickNoteOpen, overview]);
+  }, [immersive, quickNoteOpen, overview, splitDialog, proofOpen]);
 
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || quickNoteOpen || overview || splitDialog || proofOpen) return;
       if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "o") {
         e.preventDefault();
         if (!quickNoteOpen) void openOverview();
@@ -1206,19 +1217,30 @@ export default function WritingPage({
           setQuickNoteError(null);
           setQuickNoteOpen(true);
         }
-      } else if (e.key === "Escape" && quickNoteOpen && !quickNoteBusy) {
-        e.preventDefault();
-        setQuickNoteOpen(false);
-        viewRef.current?.focus();
-      } else if (e.key === "Escape" && overview) {
-        e.preventDefault();
-        setOverview(null);
-        viewRef.current?.focus();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, libraryPath, overview, quickNoteOpen, quickNoteBusy]);
+  }, [active, libraryPath, overview, quickNoteOpen, quickNoteBusy, splitDialog, proofOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setChapterNotes([]);
+    setChapterNotesError(null);
+    if (!active || !libraryPath || !current) return;
+    const projectName = project.dir.split(/[\\/]/).pop();
+    const target = `${projectName}/${current.fileName}`;
+    void invoke<InspirationCard[]>("scan_inspirations", { root: libraryPath }).then((cards) => {
+      if (cancelled) return;
+      setChapterNotes(cards.filter((card) => card.links.some((link) => {
+        if (!link.startsWith("章:")) return false;
+        try { return decodeURIComponent(link.slice(2)) === target; } catch { return false; }
+      })));
+    }).catch((error) => {
+      if (!cancelled) setChapterNotesError(`关联便笺读取失败：${errMsg(error)}`);
+    });
+    return () => { cancelled = true; };
+  }, [active, libraryPath, current?.path, project.dir, notesRevision]);
 
   // 切出书写板块：立即落盘；切回来：焦点还给编辑器（板块常驻挂载，不卸载），
   // 并重读伏笔与三线（构思侧看板可能刚改过状态/删过条目）。
@@ -1524,6 +1546,18 @@ export default function WritingPage({
 
         {sidebarOpen && (
           <aside className="writing-sidebar">
+            {(chapterNotes.length > 0 || chapterNotesError) && (
+              <section aria-label="本章关联便笺">
+                <h2 className="sidebar-title">本章关联便笺</h2>
+                {chapterNotesError && <p role="alert">{chapterNotesError}</p>}
+                {chapterNotes.map((card) => (
+                  <details key={card.path} className="chapter-intent-card" open>
+                    <summary>{card.title}{card.pending ? " · 待打磨" : ""}</summary>
+                    <div className="chapter-intent-content" style={{ whiteSpace: "pre-wrap" }}>{card.body}</div>
+                  </details>
+                ))}
+              </section>
+            )}
             <div className="sidebar-section-head">
               <h2 className="sidebar-title">本章意图</h2>
               <button
@@ -1805,10 +1839,10 @@ export default function WritingPage({
         <div
           className="dialog-overlay"
           onClick={(e) => {
-            if (e.target === e.currentTarget && !splitDialog.busy) setSplitDialog(null);
+            if (e.target === e.currentTarget && !splitDialog.busy) { setSplitDialog(null); returnToWriting(); }
           }}
         >
-          <div className="dialog split-chapter-dialog">
+          <div className="dialog split-chapter-dialog" {...splitKeyboard} role="dialog" aria-modal="true" aria-label="在光标处拆章">
             <h2>在光标处拆章</h2>
             <label>
               新章标题（可留空）
@@ -1864,7 +1898,7 @@ export default function WritingPage({
               </>
             )}
             <div className="dialog-actions">
-              <button className="btn" disabled={splitDialog.busy} onClick={() => setSplitDialog(null)}>
+              <button className="btn" disabled={splitDialog.busy} onClick={() => { setSplitDialog(null); returnToWriting(); }}>
                 取消
               </button>
               <button
@@ -1887,7 +1921,7 @@ export default function WritingPage({
         <div className="dialog-overlay" onClick={(e) => {
           if (e.target === e.currentTarget) { setOverview(null); viewRef.current?.focus(); }
         }}>
-          <div className="dialog chapter-overview-dialog" role="dialog" aria-modal="true" aria-labelledby="chapter-overview-title">
+          <div className="dialog chapter-overview-dialog" {...overviewKeyboard} role="dialog" aria-modal="true" aria-labelledby="chapter-overview-title">
             <div className="chapter-overview-head">
               <div>
                 <h2 id="chapter-overview-title">章节总览</h2>
@@ -1924,7 +1958,7 @@ export default function WritingPage({
         <div className="dialog-overlay" onClick={(e) => {
           if (e.target === e.currentTarget && !quickNoteBusy) { setQuickNoteOpen(false); viewRef.current?.focus(); }
         }}>
-          <div className="dialog quick-note-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-note-title">
+          <div className="dialog quick-note-dialog" {...quickNoteKeyboard} role="dialog" aria-modal="true" aria-labelledby="quick-note-title">
             <h2 id="quick-note-title">灵感速记</h2>
             <p className="hint">保存到灵感库待打磨区 · 关联 {project.title} / {chapterLabel(current, prefix)}</p>
             <label>
@@ -2095,7 +2129,7 @@ export default function WritingPage({
           initialChapter={current.ordinal}
           initialPath={current.path}
           nonModal
-          onClose={() => setProofOpen(false)}
+          onClose={() => { setProofOpen(false); returnToWriting(); }}
           onJump={(issue: ProofIssue) => {
             if (dirtyRef.current || issue.fingerprint !== fingerprintRef.current) {
               window.alert("正文在校对后已经变化，请重新校对本章后再定位。");
