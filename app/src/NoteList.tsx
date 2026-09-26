@@ -5,6 +5,7 @@ import type { NoteDraft, NoteEntry, NoteKind, Vocabulary } from "./types";
 import { emptyNoteDraft } from "./types";
 import { errMsg, oneLinePreview } from "./util";
 import NoteDialog from "./NoteDialog";
+import CharacterArchive from "./CharacterArchive";
 import GeoUpgradeDialog from "./GeoUpgradeDialog";
 import PendingZone from "./PendingZone";
 import { usePendingToggle } from "./pendingToggle";
@@ -22,6 +23,8 @@ interface NoteListProps {
   onAiCommand?: () => void;
   /** 人物页专属：「跟 TA 聊」进人物对话（工单 #16）。 */
   onChat?: (name: string) => void;
+  onRelations?: (name: string) => void;
+  onOrganizations?: () => void;
   /** 首页进入力量体系时按类别筛看；仍编辑同一份世界观词条。 */
   worldviewCategory?: string;
   onWorldviewCategoryChange?: (category: string) => void;
@@ -104,6 +107,8 @@ export default function NoteList({
   onPromoted,
   onAiCommand,
   onChat,
+  onRelations,
+  onOrganizations,
   worldviewCategory,
   onWorldviewCategoryChange,
 }: NoteListProps) {
@@ -176,6 +181,19 @@ export default function NoteList({
     kind === "开头" && notes.filter((n) => n.status === "选定").length > 1
       ? notes.filter((n) => n.status === "选定").length
       : 0;
+
+  if (kind === "人物") return <>
+    <CharacterArchive project={project} notes={notes} loading={loading} error={error} switching={switching}
+      onNew={() => setEditing({ draft: emptyNoteDraft(kind), prevPath: null })}
+      onEdit={(note) => setEditing({ draft: note, prevPath: note.path })}
+      onTogglePending={(path, pending) => void togglePending(path, pending)}
+      onChat={onChat} onRelations={onRelations} onOrganizations={onOrganizations} />
+    {editing && <NoteDialog key={editing.prevPath ?? "new"} project={project}
+      initial={editing.draft} prevPath={editing.prevPath} vocab={vocab}
+      onClose={() => setEditing(null)}
+      onSaved={() => { setEditing(null); onChanged(); void scan(); }}
+      onDeleted={() => { setEditing(null); onChanged(); void scan(); }} />}
+  </>;
 
   return (
     <div className="note-pane">
@@ -298,15 +316,6 @@ export default function NoteList({
               >
                 待打磨
               </button>
-              {kind === "人物" && onChat && (
-                <button
-                  className="btn small"
-                  title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋类型圈当人格底座）"
-                  onClick={() => onChat(note.name)}
-                >
-                  跟 TA 聊
-                </button>
-              )}
               {kind === "矛盾" && (
                 <button
                   className="btn small"

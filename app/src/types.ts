@@ -353,6 +353,10 @@ export const NOTE_KINDS: NoteKind[] = ["矛盾", "单元", "人物", "世界观"
 /** 与 Rust 侧 project::NoteDraft 对应（IPC 走 camelCase）；
  *  五类共用一张宽表，落盘时只写本类别的键。 */
 export interface NoteDraft {
+  /** 编辑框的内容版本；旧命令入参可不传。 */
+  fingerprint?: string;
+  /** 人物专用；旧入参缺省为空，避免影响其他笔记与转生。 */
+  character?: import("./characterProfile").CharacterProfile;
   kind: NoteKind;
   /** 标题＝文件名（矛盾/单元名、人名、词条名、版本名）。 */
   name: string;

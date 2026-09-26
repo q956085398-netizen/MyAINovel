@@ -26,7 +26,7 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_yaml::{Mapping, Value};
 
 use crate::book_file::{
-    has_md_extension, is_hidden, lossy_yaml_mapping, map_list, map_scalar, map_u32, read_text,
+    content_fingerprint, has_md_extension, is_hidden, lossy_yaml_mapping, map_list, map_scalar, map_u32, read_text,
     read_yaml_mapping, sanitize_file_name, set_map_list, set_map_scalar, set_map_u32,
     split_frontmatter, strip_bom, unique_file_path, write_frontmatter, write_text_atomic,
     write_yaml_mapping, frontmatter_mapping,
@@ -405,12 +405,52 @@ impl NoteKind {
     }
 }
 
+/// 人物的可选结构摘要；小传、外貌、说话方式与人物弧仍在自由正文。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CharacterProfile {
+    pub image: Option<String>,
+    pub identity: Option<String>,
+    pub age: Option<String>,
+    pub gender: Option<String>,
+    pub traits: Vec<String>,
+    pub goal: Option<String>,
+    pub ability: Option<String>,
+    pub weakness: Option<String>,
+    pub secret: Option<String>,
+}
+
+impl CharacterProfile {
+    fn read(map: &Mapping) -> Self {
+        Self {
+            image: map_scalar(map, "形象图"), identity: map_scalar(map, "一句话身份"),
+            age: map_scalar(map, "年龄或年龄感"), gender: map_scalar(map, "性别"),
+            traits: map_list(map, "性格关键词"), goal: map_scalar(map, "当前目标"),
+            ability: map_scalar(map, "能力"), weakness: map_scalar(map, "弱点或代价"),
+            secret: map_scalar(map, "个人秘密"),
+        }
+    }
+
+    fn apply(&self, map: &mut Mapping) {
+        for (key, value) in [
+            ("形象图", &self.image), ("一句话身份", &self.identity),
+            ("年龄或年龄感", &self.age), ("性别", &self.gender),
+            ("当前目标", &self.goal), ("能力", &self.ability),
+            ("弱点或代价", &self.weakness), ("个人秘密", &self.secret),
+        ] { set_map_scalar(map, key, value.as_deref()); }
+        set_map_list(map, "性格关键词", &self.traits);
+    }
+}
+
 /// 笔记保存入参：五类共用一张宽表，落盘时只写本类别的键
 /// （矛盾＝一句话核心/类型/来源/关联/状态；单元＝核心矛盾/类型/情绪目标/单元区间；
-/// 人物＝分组/别名；世界观＝类别；开头＝状态）。
+/// 人物＝结构摘要/别名（分组只读兼容）；世界观＝类别；开头＝状态）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteDraft {
+    /// 编辑框载入时的内容版本；旧命令入参兼容缺省。
+    #[serde(default)]
+    pub fingerprint: Option<String>,
     pub kind: NoteKind,
     /// 标题＝文件名（矛盾/单元名、人名、词条名、版本名）。
     pub name: String,
@@ -421,6 +461,8 @@ pub struct NoteDraft {
     pub status: Option<String>,
     pub group: Option<String>,
     pub aliases: Vec<String>,
+    #[serde(default)]
+    pub character: CharacterProfile,
     pub category: Option<String>,
     /// 单元专用的整体情绪承诺；与桥段的局部情绪曲线并列，不相互推导。
     pub emotion_goal: Option<String>,
@@ -433,6 +475,7 @@ pub struct NoteDraft {
 impl NoteDraft {
     pub fn new(kind: NoteKind, name: impl Into<String>) -> NoteDraft {
         NoteDraft {
+            fingerprint: None,
             kind,
             name: name.into(),
             core: None,
@@ -442,6 +485,7 @@ impl NoteDraft {
             status: None,
             group: None,
             aliases: Vec::new(),
+            character: CharacterProfile::default(),
             category: None,
             emotion_goal: None,
             start_chapter: None,
@@ -454,6 +498,7 @@ impl NoteDraft {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteEntry {
+    pub fingerprint: String,
     pub path: PathBuf,
     pub kind: NoteKind,
     pub name: String,
@@ -464,6 +509,7 @@ pub struct NoteEntry {
     pub status: Option<String>,
     pub group: Option<String>,
     pub aliases: Vec<String>,
+    pub character: CharacterProfile,
     pub category: Option<String>,
     pub emotion_goal: Option<String>,
     pub start_chapter: Option<u32>,
@@ -500,7 +546,7 @@ enum NoteField {
     Source,
     Links,
     Status,
-    Group,
+    Character,
     Aliases,
     Category,
     EmotionGoal,
@@ -513,7 +559,7 @@ fn note_fields(kind: NoteKind) -> &'static [NoteField] {
     match kind {
         NoteKind::Contradiction => &[Core("一句话核心"), Types, Source, Links, Status],
         NoteKind::Unit => &[Core("核心矛盾"), Types, EmotionGoal, ChapterRange],
-        NoteKind::Character => &[Group, Aliases],
+        NoteKind::Character => &[Character, Aliases],
         NoteKind::Worldview => &[Category],
         NoteKind::Opening => &[Status],
     }
@@ -522,6 +568,7 @@ fn note_fields(kind: NoteKind) -> &'static [NoteField] {
 /// 读一篇构思笔记；文件读不到/损坏时降级为空内容（列表不因单文件拖垮）。
 fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
     let mut entry = NoteEntry {
+        fingerprint: String::new(),
         path: path.to_path_buf(),
         kind,
         name: file_stem_of(path),
@@ -532,6 +579,7 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
         status: None,
         group: None,
         aliases: Vec::new(),
+        character: CharacterProfile::default(),
         category: None,
         emotion_goal: None,
         start_chapter: None,
@@ -542,6 +590,7 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
     let Ok(raw) = read_text(path) else {
         return entry;
     };
+    entry.fingerprint = content_fingerprint(raw.as_bytes()).to_string();
     let raw = strip_bom(&raw);
     let Some((yaml_text, body)) = split_frontmatter(raw) else {
         entry.body = raw.to_string();
@@ -563,7 +612,10 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
             NoteField::Source => entry.source = map_scalar(&map, "来源"),
             NoteField::Links => entry.links = map_list(&map, "关联"),
             NoteField::Status => entry.status = map_scalar(&map, "状态"),
-            NoteField::Group => entry.group = map_scalar(&map, "分组"),
+            NoteField::Character => {
+                entry.group = map_scalar(&map, "分组"); // 只读兼容，不再新增或回写分组。
+                entry.character = CharacterProfile::read(&map);
+            }
             NoteField::Aliases => entry.aliases = map_list(&map, "别名"),
             NoteField::Category => entry.category = map_scalar(&map, "类别"),
             NoteField::EmotionGoal => entry.emotion_goal = map_scalar(&map, "情绪目标"),
@@ -591,6 +643,12 @@ pub fn save_note(
     let path = unique_file_path(&dir, &format!("{name}.md"), prev_path);
 
     let base = prev_path.filter(|p| *p != path).unwrap_or(&path);
+    if let Some(expected) = &draft.fingerprint {
+        let current = read_text(base)?;
+        if &content_fingerprint(current.as_bytes()).to_string() != expected {
+            return Err("笔记在载入后已改变，未覆盖外部修改；请重新打开核对".into());
+        }
+    }
     let mut map = frontmatter_mapping(base).unwrap_or_default();
     apply_draft(&mut map, draft);
 
@@ -612,7 +670,7 @@ fn apply_draft(map: &mut Mapping, draft: &NoteDraft) {
             NoteField::Source => set_map_scalar(map, "来源", draft.source.as_deref()),
             NoteField::Links => set_map_list(map, "关联", &draft.links),
             NoteField::Status => set_map_scalar(map, "状态", draft.status.as_deref()),
-            NoteField::Group => set_map_scalar(map, "分组", draft.group.as_deref()),
+            NoteField::Character => draft.character.apply(map),
             NoteField::Aliases => set_map_list(map, "别名", &draft.aliases),
             NoteField::Category => set_map_scalar(map, "类别", draft.category.as_deref()),
             NoteField::EmotionGoal => {
@@ -1188,6 +1246,60 @@ mod tests {
     }
 
     #[test]
+    fn 人物完整档案与旧人物新组织混合重开() {
+        let temp = TempDir::new().unwrap();
+        let p = temp.path();
+        let old = p.join("构思/人物/旧人物.md");
+        write(&old, "---\n分组: 山门\n别名: [小陈]\n手补: 不可丢\n---\n\n小传、外貌、说话方式和人物弧自由写。\n");
+        let mut d = NoteDraft::new(NoteKind::Character, "新人");
+        d.character = CharacterProfile {
+            image: Some("../../附件/不存在.png".into()),
+            identity: Some("守门人".into()), age: Some("看起来二十岁".into()),
+            gender: Some("女".into()), traits: vec!["谨慎".into(), "执拗".into()],
+            goal: Some("寻回兄长".into()), ability: Some("听风".into()),
+            weakness: Some("每次使用失聪一天".into()), secret: Some("来自敌营".into()),
+        };
+        d.aliases = vec!["阿风".into()];
+        d.body = "## 小传\n不受固定表单限制。\n## 人物弧\n学会信任。".into();
+        let created = save_note(p, &d, None).unwrap();
+        crate::social::save_organization(p, &crate::social::OrganizationDraft {
+            name: "山门".into(), purpose: Some("守护山道".into()), body: "完整组织正文".into(),
+            ..Default::default()
+        }, None).unwrap();
+        let reopened = scan_notes(p, NoteKind::Character).unwrap();
+        assert_eq!(reopened.iter().find(|n| n.name == "新人").unwrap(), &created);
+        let legacy = reopened.iter().find(|n| n.name == "旧人物").unwrap();
+        assert_eq!(legacy.character, CharacterProfile::default());
+        assert_eq!(legacy.group.as_deref(), Some("山门"));
+        assert_eq!(crate::social::workspace(p).unwrap().organizations[0].draft.body, "完整组织正文");
+        d.character = CharacterProfile::default();
+        let cleared = save_note(p, &d, Some(&created.path)).unwrap();
+        assert_eq!(cleared.character, CharacterProfile::default());
+        assert_eq!(cleared.body, d.body);
+        let mut legacy_draft = NoteDraft::new(NoteKind::Character, "旧人物");
+        legacy_draft.body = legacy.body.clone();
+        legacy_draft.aliases = legacy.aliases.clone();
+        legacy_draft.character.identity = Some("旧档补身份".into());
+        save_note(p, &legacy_draft, Some(&old)).unwrap();
+        let raw = fs::read_to_string(&old).unwrap();
+        assert!(raw.contains("手补: 不可丢"));
+        assert!(raw.contains("分组: 山门"));
+    }
+
+    #[test]
+    fn 人物编辑版本过期不覆盖外部改动() {
+        let temp = TempDir::new().unwrap();
+        let mut d = NoteDraft::new(NoteKind::Character, "甲");
+        d.body = "原小传".into();
+        let saved = save_note(temp.path(), &d, None).unwrap();
+        d.fingerprint = Some(saved.fingerprint);
+        d.character.identity = Some("新身份".into());
+        fs::write(&saved.path, "外部改写的小传").unwrap();
+        assert!(save_note(temp.path(), &d, Some(&saved.path)).is_err());
+        assert_eq!(fs::read_to_string(saved.path).unwrap(), "外部改写的小传");
+    }
+
+    #[test]
     fn 项目_ipc_走_camelCase_与中文类别() {
         let entry = ProjectEntry {
             dir: PathBuf::from("项目/《书》"),
@@ -1380,7 +1492,8 @@ mod tests {
         save_note(&dir, &unit, None).unwrap();
 
         let mut character = draft(NoteKind::Character, "陈平安");
-        character.group = Some("主角阵营".into());
+        character.character.identity = Some("主角的同门".into());
+        character.group = Some("主角阵营".into()); // 旧入参不再写单一分组。
         character.aliases = vec!["小陈".into()];
         save_note(&dir, &character, None).unwrap();
 
@@ -1403,7 +1516,8 @@ mod tests {
         assert!(!unit_text.contains("一句话核心"));
 
         let read = scan_notes(&dir, NoteKind::Character).unwrap();
-        assert_eq!(read[0].group.as_deref(), Some("主角阵营"));
+        assert_eq!(read[0].group, None);
+        assert_eq!(read[0].character.identity.as_deref(), Some("主角的同门"));
         assert_eq!(read[0].aliases, vec!["小陈"]);
 
         let read = scan_notes(&dir, NoteKind::Worldview).unwrap();
@@ -1482,10 +1596,10 @@ mod tests {
         let root = root();
         let dir = project(&root);
         let mut d = draft(NoteKind::Character, "陈平安");
-        d.group = Some("主角阵营".into());
+        d.character.identity = Some("同门".into());
         save_note(&dir, &d, None).unwrap();
 
-        d.group = None;
+        d.character.identity = None;
         d.body = "只有正文".into();
         let saved = save_note(&dir, &d, Some(&saved_path(&dir, NoteKind::Character, "陈平安"))).unwrap();
         let text = fs::read_to_string(&saved.path).unwrap();

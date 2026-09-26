@@ -110,6 +110,7 @@ export default function ProjectPage({
   const [characterView, setCharacterView] = useState<CharacterView>(
     searchDestination?.hit.projectDir === project.dir && searchDestination.hit.kind === "组织" ? "组织与归属" : initialFocus ? "画布" : "名单",
   );
+  const [relationFocus, setRelationFocus] = useState(initialFocus);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -372,13 +373,15 @@ export default function ProjectPage({
                     onChanged={refreshAll}
                     onPromoted={() => setTab("单元")}
                     onChat={(name) => void chatWith(name)}
+                    onRelations={(name) => { setRelationFocus(name); setCharacterView("画布"); }}
+                    onOrganizations={() => setCharacterView("组织与归属")}
                   />
                 ) : characterView === "组织与归属" ? (
                   <SocialView project={project.dir} onChanged={refreshAll} />
                 ) : (
                   <RelationshipCanvas
                     project={project.dir}
-                    focusName={initialFocus}
+                    focusName={relationFocus}
                     onAiCommand={(names) => void runAiCommand("人物关系梳理", names)}
                     onChat={(name) => void chatWith(name)}
                     onPromoted={() => setTab("矛盾")}
