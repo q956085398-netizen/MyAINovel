@@ -6,7 +6,9 @@
 
 use std::collections::HashSet;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
@@ -1369,7 +1371,7 @@ pub fn geo_upgrade_preview(
     source: &Path,
     target: GeoUpgradeTarget,
 ) -> Result<GeoUpgradePreview, String> {
-    let (source_name, source_raw) = read_legacy_geography_snapshot(project, source)?;
+    let (source_name, source_raw) = read_legacy_map_source_snapshot(project, source)?;
     let target_path = project
         .join(project::CONCEPT_DIR)
         .join(target.dir_name())
@@ -1429,7 +1431,7 @@ pub fn confirm_geo_upgrade(
     if preview.target_path.exists() || preview.backup_path.exists() {
         return Err("目标文件或兼容备份已出现，请关闭升级窗口并重新打开，再次预览。".into());
     }
-    fs::rename(&preview.source_path, &preview.backup_path).map_err(|e| {
+    move_file_new(&preview.source_path, &preview.backup_path).map_err(|e| {
         format!(
             "无法将旧词条移入兼容备份 {}：{e}",
             preview.backup_path.display()
@@ -1438,61 +1440,46 @@ pub fn confirm_geo_upgrade(
     let backup_raw = match read_text(&preview.backup_path) {
         Ok(raw) => raw,
         Err(error) => {
-            return match restore_geo_source(&preview.source_path, &preview.backup_path) {
-                Ok(()) => Err(format!("无法校验兼容备份，旧词条已恢复：{error}")),
-                Err(restore) => Err(format!(
-                    "无法校验兼容备份：{error}；旧内容保留在 {}：{restore}",
-                    preview.backup_path.display()
-                )),
-            };
+            return Err(restore_geo_source_after_failure(
+                &preview.source_path,
+                &preview.backup_path,
+                format!("无法校验兼容备份：{error}"),
+            ))
         }
     };
     if backup_raw != raw {
-        return match restore_geo_source(&preview.source_path, &preview.backup_path) {
-            Ok(()) => Err("旧词条在预览后已变化，请关闭升级窗口并重新打开，再次预览。".into()),
-            Err(restore) => Err(format!(
-                "旧词条在预览后已变化；旧内容保留在 {}：{restore}",
-                preview.backup_path.display()
-            )),
-        };
+        return Err(restore_geo_source_after_failure(
+            &preview.source_path,
+            &preview.backup_path,
+            "旧词条在预览后已变化，请关闭升级窗口并重新打开，再次预览。".into(),
+        ));
     }
     if let Some(parent) = preview.target_path.parent() {
         if let Err(error) = fs::create_dir_all(parent) {
-            return match restore_geo_source(&preview.source_path, &preview.backup_path) {
-                Ok(()) => Err(format!(
+            return Err(restore_geo_source_after_failure(
+                &preview.source_path,
+                &preview.backup_path,
+                format!(
                     "无法创建{}目录 {}：{error}",
                     preview.target.dir_name(),
                     parent.display()
-                )),
-                Err(restore) => Err(format!(
-                    "无法创建{}目录：{error}；旧内容保留在 {}：{restore}",
-                    preview.target.dir_name(),
-                    preview.backup_path.display()
-                )),
-            };
+                ),
+            ));
         }
     }
     if preview.target_path.exists() {
-        return match restore_geo_source(&preview.source_path, &preview.backup_path) {
-            Ok(()) => Err("目标文件在升级期间出现，旧词条已恢复；请重新预览。".into()),
-            Err(restore) => Err(format!(
-                "目标文件在升级期间出现；旧内容保留在 {}：{restore}",
-                preview.backup_path.display()
-            )),
-        };
+        return Err(restore_geo_source_after_failure(
+            &preview.source_path,
+            &preview.backup_path,
+            "目标文件在升级期间出现，请重新预览。".into(),
+        ));
     }
-    if let Err(error) = write_frontmatter(&preview.target_path, frontmatter, &body) {
-        return match restore_geo_source(&preview.source_path, &preview.backup_path) {
-            Ok(()) => Err(format!(
-                "写入新{}失败，旧词条已恢复：{error}",
-                preview.target.dir_name()
-            )),
-            Err(restore) => Err(format!(
-                "写入新{}失败：{error}；旧内容保留在 {}：{restore}",
-                preview.target.dir_name(),
-                preview.backup_path.display()
-            )),
-        };
+    if let Err(error) = write_frontmatter_new(&preview.target_path, frontmatter, &body) {
+        return Err(restore_geo_source_after_failure(
+            &preview.source_path,
+            &preview.backup_path,
+            format!("写入新{}失败：{error}", preview.target.dir_name()),
+        ));
     }
     if preview.source_path.exists() {
         return Err(format!(
@@ -1509,10 +1496,20 @@ fn restore_geo_source(source: &Path, backup: &Path) -> Result<(), String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(format!("无法检查原路径是否出现新文件：{error}")),
     }
-    fs::rename(backup, source).map_err(|e| format!("无法从兼容备份恢复旧词条：{e}"))
+    move_file_new(backup, source).map_err(|e| format!("无法从兼容备份恢复旧词条：{e}"))
 }
 
-fn read_legacy_geography_snapshot(project: &Path, source: &Path) -> Result<(String, String), String> {
+fn restore_geo_source_after_failure(source: &Path, backup: &Path, failure: String) -> String {
+    match restore_geo_source(source, backup) {
+        Ok(()) => format!("{failure}；旧词条已恢复"),
+        Err(restore) => format!("{failure}；旧内容保留在 {}：{restore}", backup.display()),
+    }
+}
+
+fn read_legacy_map_source_snapshot(
+    project: &Path,
+    source: &Path,
+) -> Result<(String, String), String> {
     let expected_dir = project
         .join(project::CONCEPT_DIR)
         .join(NoteKind::Worldview.name());
@@ -1526,6 +1523,137 @@ fn read_legacy_geography_snapshot(project: &Path, source: &Path) -> Result<(Stri
         .and_then(|name| name.to_str())
         .ok_or_else(|| format!("无法读取词条名：{}", source.display()))?;
     Ok((sanitize_file_name(name)?, raw))
+}
+
+/// Rename only when the destination is absent. Supported desktop platforms
+/// have native exclusive-rename operations; other platforms fail closed.
+fn move_file_new(source: &Path, target: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+
+        #[link(name = "Kernel32")]
+        extern "system" {
+            fn MoveFileExW(existing: *const u16, new: *const u16, flags: u32) -> i32;
+        }
+
+        const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
+        let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+        let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+        let ok = unsafe { MoveFileExW(source.as_ptr(), target.as_ptr(), MOVEFILE_WRITE_THROUGH) };
+        if ok == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::ffi::CString;
+        use std::os::raw::{c_char, c_int, c_uint};
+        use std::os::unix::ffi::OsStrExt;
+
+        #[link(name = "c")]
+        extern "C" {
+            fn renameat2(
+                old_dirfd: c_int,
+                old_path: *const c_char,
+                new_dirfd: c_int,
+                new_path: *const c_char,
+                flags: c_uint,
+            ) -> c_int;
+        }
+
+        const AT_FDCWD: c_int = -100;
+        const RENAME_NOREPLACE: c_uint = 1;
+        let source = CString::new(source.as_os_str().as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "源路径包含 NUL"))?;
+        let target = CString::new(target.as_os_str().as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "目标路径包含 NUL"))?;
+        let result = unsafe {
+            renameat2(
+                AT_FDCWD,
+                source.as_ptr(),
+                AT_FDCWD,
+                target.as_ptr(),
+                RENAME_NOREPLACE,
+            )
+        };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        use std::ffi::CString;
+        use std::os::raw::{c_char, c_int, c_uint};
+        use std::os::unix::ffi::OsStrExt;
+
+        #[link(name = "System")]
+        extern "C" {
+            fn renamex_np(from: *const c_char, to: *const c_char, flags: c_uint) -> c_int;
+        }
+
+        const RENAME_EXCL: c_uint = 0x0000_0004;
+        let source = CString::new(source.as_os_str().as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "源路径包含 NUL"))?;
+        let target = CString::new(target.as_os_str().as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "目标路径包含 NUL"))?;
+        let result = unsafe { renamex_np(source.as_ptr(), target.as_ptr(), RENAME_EXCL) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos", target_os = "ios")))]
+    {
+        let _ = (source, target);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "当前平台不支持无覆盖原子改名",
+        ))
+    }
+}
+
+static GEO_UPGRADE_TEMP_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Publish a fully written target atomically, but fail if another file already
+/// occupies the confirmed destination.
+fn write_frontmatter_new(path: &Path, frontmatter: Mapping, body: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("无法确定目标目录：{}", path.display()))?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| format!("无法确定目标文件名：{}", path.display()))?;
+    let (temporary, file) = loop {
+        let id = GEO_UPGRADE_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+        let mut temporary_name = file_name.to_os_string();
+        temporary_name.push(format!(".gongbi-upgrade-{}-{id}.tmp", std::process::id()));
+        let temporary = parent.join(temporary_name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => break (temporary, file),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("无法创建目标临时文件：{error}")),
+        }
+    };
+    drop(file);
+    if let Err(error) = write_frontmatter(&temporary, frontmatter, body) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    if let Err(error) = move_file_new(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("无法创建目标文件 {}：{error}", path.display()));
+    }
+    Ok(())
 }
 
 fn parse_legacy_geography(raw: &str, path: &Path) -> Result<(Mapping, String), String> {
@@ -1554,10 +1682,10 @@ mod tests {
     use super::{
         arrange_map_canvas, confirm_geo_upgrade, delete_place, edit_map_relation,
         geo_upgrade_preview, map_background_reference, map_workspace, read_map_canvas_layout,
-        read_map_structure, save_map, save_map_canvas_layout, save_map_structure,
-        save_map_transitions, save_region, set_region_containment, GeoUpgradeTarget,
-        MapCanvasPlacement, MapContainment, MapDraft, MapRelation, MapStructure, MapTransition,
-        RegionDraft, RegionRelation,
+        read_map_structure, restore_geo_source, save_map, save_map_canvas_layout,
+        save_map_structure, save_map_transitions, save_region, set_region_containment,
+        write_frontmatter_new, GeoUpgradeTarget, MapCanvasPlacement, MapContainment, MapDraft,
+        MapRelation, MapStructure, MapTransition, RegionDraft, RegionRelation,
     };
     use crate::project::{check_project_arrangement, ArrangementItem};
 
@@ -1599,7 +1727,7 @@ mod tests {
     }
 
     #[test]
-    fn 地理词条预览后发生变化_旧预览不能确认() {
+    fn 地图升级预览后源内容变化_旧预览不能确认() {
         let root = tempdir().unwrap();
         let project = root.path().join("项目/《山河》");
         let source = project.join("构思/世界观/京城.md");
@@ -1611,7 +1739,10 @@ mod tests {
         fs::write(&source, changed).unwrap();
 
         let error = confirm_geo_upgrade(&project, &preview).unwrap_err();
-        assert!(error.contains("在预览后已变化"), "应明确要求重新预览：{error}");
+        assert!(
+            error.contains("在预览后已变化"),
+            "应明确要求重新预览：{error}"
+        );
         assert_eq!(fs::read_to_string(&source).unwrap(), changed);
         assert!(!preview.target_path.exists(), "过期预览不能创建目标文件");
         assert!(!preview.backup_path.exists(), "过期预览不能创建备份");
@@ -1633,6 +1764,29 @@ mod tests {
         assert_eq!(fs::read_to_string(&source).unwrap(), original);
         assert!(!preview.backup_path.exists(), "失败后旧词条已恢复");
         assert!(!preview.target_path.exists());
+    }
+
+    #[test]
+    fn 回滚遇到同名新文件_不覆盖新文件() {
+        let root = tempdir().unwrap();
+        let source = root.path().join("京城.md");
+        let backup = root.path().join("京城.backup.md");
+        fs::write(&source, "新文件内容").unwrap();
+        fs::write(&backup, "旧文件内容").unwrap();
+
+        assert!(restore_geo_source(&source, &backup).is_err());
+        assert_eq!(fs::read_to_string(&source).unwrap(), "新文件内容");
+        assert_eq!(fs::read_to_string(&backup).unwrap(), "旧文件内容");
+    }
+
+    #[test]
+    fn 目标文件在发布时出现_不覆盖现有内容() {
+        let root = tempdir().unwrap();
+        let target = root.path().join("京城.md");
+        fs::write(&target, "并发创建的文件").unwrap();
+
+        assert!(write_frontmatter_new(&target, Mapping::new(), "升级内容").is_err());
+        assert_eq!(fs::read_to_string(target).unwrap(), "并发创建的文件");
     }
 
     #[test]
