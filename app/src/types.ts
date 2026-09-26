@@ -163,6 +163,8 @@ export interface MapDraft {
   organizations: string[];
   units: string[];
   milestones: string[];
+  /** 项目「附件」内的地图背景引用；图片本体不复制。 */
+  backgroundImage: string | null;
   body: string;
 }
 
@@ -183,12 +185,15 @@ export function emptyMapDraft(): MapDraft {
     organizations: [],
     units: [],
     milestones: [],
+    backgroundImage: null,
     body: "",
   };
 }
 
 export interface MapEntry extends MapDraft {
   path: string;
+  /** 可用的本地附件背景路径；失效引用仍保存在 backgroundImage。 */
+  backgroundImagePath: string | null;
   /** 待打磨中：frontmatter 布尔键派生，随档案文件保存。 */
   pending: boolean;
 }
@@ -285,6 +290,19 @@ export interface MapStructure {
   contains: MapContainment[];
   transitions: MapTransition[];
   layout: Record<string, unknown>;
+  fingerprint: string | null;
+}
+
+export interface MapCanvasPlacement {
+  name: string;
+  x: number;
+  y: number;
+  pinned: boolean;
+}
+
+export interface MapCanvasLayout {
+  placements: MapCanvasPlacement[];
+  fingerprint: string | null;
 }
 
 export interface GeoUpgradePreview {

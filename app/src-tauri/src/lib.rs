@@ -35,8 +35,9 @@ use inspiration::{CardDraft, ImportEntry, InspirationCard, LinkedChapter};
 use ideation::IdeationOverview;
 use library::BookEntry;
 use map::{
-    GeoUpgradePreview, GeoUpgradeTarget, MapDraft, MapEntry, MapStructure, MapTransition,
-    MapWorkspace, RegionDraft, RegionEntry,
+    GeoUpgradePreview, GeoUpgradeTarget, MapCanvasLayout, MapCanvasPlacement, MapDraft, MapEntry,
+    MapRelation, MapStructure, MapTransition, MapWorkspace, RegionDraft, RegionEntry,
+    RegionRelation,
 };
 use pending::PendingLine;
 use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, Outline};
@@ -383,6 +384,69 @@ fn read_map_structure(project: String) -> Result<MapStructure, String> {
 #[tauri::command]
 fn save_map_structure(project: String, table: MapStructure) -> Result<(), String> {
     map::save_map_structure(Path::new(&project), &table)
+}
+
+#[tauri::command]
+fn read_map_canvas_layout(
+    project: String,
+    map_name: Option<String>,
+) -> Result<MapCanvasLayout, String> {
+    map::read_map_canvas_layout(Path::new(&project), map_name.as_deref())
+}
+
+#[tauri::command]
+fn save_map_canvas_layout(
+    project: String,
+    map_name: Option<String>,
+    placements: Vec<MapCanvasPlacement>,
+    expected: Option<String>,
+) -> Result<MapCanvasLayout, String> {
+    map::save_map_canvas_layout(
+        Path::new(&project),
+        map_name.as_deref(),
+        &placements,
+        expected.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn arrange_map_canvas(
+    project: String,
+    map_name: Option<String>,
+    all: bool,
+    expected: Option<String>,
+) -> Result<MapCanvasLayout, String> {
+    map::arrange_map_canvas(
+        Path::new(&project),
+        map_name.as_deref(),
+        all,
+        expected.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn edit_map_relation(
+    project: String,
+    index: Option<usize>,
+    next: Option<MapRelation>,
+    expected: Option<String>,
+) -> Result<MapStructure, String> {
+    map::edit_map_relation(Path::new(&project), index, next.as_ref(), expected.as_deref())
+}
+
+#[tauri::command]
+fn edit_region_relation(
+    project: String,
+    index: Option<usize>,
+    next: Option<RegionRelation>,
+    expected: Option<String>,
+) -> Result<MapStructure, String> {
+    map::edit_region_relation(Path::new(&project), index, next.as_ref(), expected.as_deref())
+}
+
+#[tauri::command]
+fn map_background_reference(project: String, image_path: String) -> Result<String, String> {
+    map::map_background_reference(Path::new(&project), Path::new(&image_path))
 }
 
 /// 迁移预览是只读的：UI 必须先展示目标/备份位置，用户确认后再调执行接口。
@@ -1083,6 +1147,12 @@ pub fn run() {
             save_map_transitions,
             read_map_structure,
             save_map_structure,
+            read_map_canvas_layout,
+            save_map_canvas_layout,
+            arrange_map_canvas,
+            edit_map_relation,
+            edit_region_relation,
+            map_background_reference,
             preview_geo_upgrade,
             confirm_geo_upgrade,
             read_outline,

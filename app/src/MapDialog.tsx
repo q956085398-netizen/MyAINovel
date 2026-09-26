@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { MapDraft, MapEntry } from "./types";
 import { PLACE_SCALES } from "./types";
 import { errMsg, splitList } from "./util";
@@ -42,6 +43,7 @@ export default function MapDialog({
   const [orgsText, setOrgsText] = useState(initial.organizations.join("、"));
   const [unitsText, setUnitsText] = useState(initial.units.join("、"));
   const [milestonesText, setMilestonesText] = useState(initial.milestones.join("、"));
+  const [backgroundImage, setBackgroundImage] = useState(initial.backgroundImage);
   const [body, setBody] = useState(initial.body);
   const [busy, setBusy] = useState(false);
 
@@ -63,6 +65,7 @@ export default function MapDialog({
       organizations: splitList(orgsText),
       units: splitList(unitsText),
       milestones: splitList(milestonesText),
+      backgroundImage,
       body,
     };
     if (!draft.name) {
@@ -77,6 +80,29 @@ export default function MapDialog({
       window.alert(`地图保存失败：${errMsg(e)}`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function chooseBackground() {
+    if (busy) return;
+    let selected: string | null;
+    try {
+      selected = await open({
+        directory: false,
+        multiple: false,
+        defaultPath: `${project}\\附件`,
+        filters: [{ name: "地图背景图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
+      });
+    } catch (e) {
+      window.alert(`打开附件选择器失败：${errMsg(e)}`);
+      return;
+    }
+    if (typeof selected !== "string") return;
+    try {
+      const reference = await invoke<string>("map_background_reference", { project, imagePath: selected });
+      setBackgroundImage(reference);
+    } catch (e) {
+      window.alert(`无法使用这张图片：${errMsg(e)}。请将图片放入项目根目录的「附件」文件夹。`);
     }
   }
 
@@ -235,6 +261,17 @@ export default function MapDialog({
               placeholder="如：封印松动"
             />
           </label>
+        </div>
+        <div className="map-background-picker">
+          <div>
+            <strong>地图背景图</strong>
+            <p className="hint">只引用当前项目根目录的「附件」文件夹中的图片；不会复制外部图片。</p>
+            {backgroundImage && <p className="field-line">当前引用：{backgroundImage}</p>}
+          </div>
+          <div className="page-actions">
+            <button className="btn small" type="button" disabled={busy} onClick={() => void chooseBackground()}>选择附件图片</button>
+            {backgroundImage && <button className="btn small" type="button" disabled={busy} onClick={() => setBackgroundImage(null)}>清除</button>}
+          </div>
         </div>
         <label>
           正文（氛围、来历、尚未解决的问题……）

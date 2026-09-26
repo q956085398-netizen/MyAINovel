@@ -37,6 +37,7 @@ export default function TransitionDialog({
   const [returnCondition, setReturnCondition] = useState(initial?.returnCondition ?? "");
   const [unitsText, setUnitsText] = useState((initial?.units ?? []).join("、"));
   const [busy, setBusy] = useState(false);
+  const endpointNames = [...new Set([...mapNames, ...(initial ? [initial.from, initial.to] : [])])];
 
   async function save() {
     if (busy) return;
@@ -104,7 +105,7 @@ export default function TransitionDialog({
           <label>
             起地图
             <select value={from} onChange={(e) => setFrom(e.target.value)}>
-              {mapNames.map((m) => (
+              {endpointNames.map((m) => (
                 <option key={m} value={m}>
                   {m}
                 </option>
@@ -114,7 +115,7 @@ export default function TransitionDialog({
           <label>
             止地图
             <select value={to} onChange={(e) => setTo(e.target.value)}>
-              {mapNames.map((m) => (
+              {endpointNames.map((m) => (
                 <option key={m} value={m}>
                   {m}
                 </option>
