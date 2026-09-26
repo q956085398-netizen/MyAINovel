@@ -1,6 +1,7 @@
 import { registerSearchNavigationGuard } from "./globalSearchNavigation";
 import { useDialogKeyboard } from "./useDialogKeyboard";
 import type { InspirationCard } from "./types";
+import { chapterInspirationLink } from "./chapterInspirationLink";
 import { useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, Prec, type Extension, type Range } from "@codemirror/state";
 import {
@@ -475,6 +476,7 @@ export default function WritingPage({
       });
       setQuickNoteText("");
       setNotesRevision((revision) => revision + 1);
+      window.dispatchEvent(new CustomEvent("gongbi:inspirations-changed", { detail: { root: libraryPath } }));
       setQuickNoteOpen(false);
       viewRef.current?.focus();
     } catch (e) {
@@ -1229,12 +1231,12 @@ export default function WritingPage({
     setChapterNotesError(null);
     if (!active || !libraryPath || !current) return;
     const projectName = project.dir.split(/[\\/]/).pop();
-    const target = `${projectName}/${current.fileName}`;
+    const fileName = current.fileName;
     void invoke<InspirationCard[]>("scan_inspirations", { root: libraryPath }).then((cards) => {
       if (cancelled) return;
       setChapterNotes(cards.filter((card) => card.links.some((link) => {
-        if (!link.startsWith("章:")) return false;
-        try { return decodeURIComponent(link.slice(2)) === target; } catch { return false; }
+        const chapter = chapterInspirationLink(link);
+        return chapter !== null && chapter.project === projectName && chapter.fileName === fileName;
       })));
     }).catch((error) => {
       if (!cancelled) setChapterNotesError(`关联便笺读取失败：${errMsg(error)}`);
@@ -1945,7 +1947,10 @@ export default function WritingPage({
                   <strong>{card.chapter.title || "未命名章节"}</strong>
                   <span className="chapter-card-meta">{card.chapter.status} · {formatCount(card.chapter.wordCount)} 字</span>
                   <span className="chapter-card-intent">
-                    {card.summary ? `摘要 · ${card.summary}` : card.intent ? `本章意图 · ${card.intent}` : "尚无摘要或本章意图"}
+                    {card.summary && <span>摘要 · {card.summary}</span>}
+                    {card.summary && card.intent && <br />}
+                    {card.intent && <span>本章意图 · {card.intent}</span>}
+                    {!card.summary && !card.intent && "尚无摘要或本章意图"}
                   </span>
                 </button>
               ))}
@@ -2131,12 +2136,18 @@ export default function WritingPage({
           nonModal
           onClose={() => { setProofOpen(false); returnToWriting(); }}
           onJump={(issue: ProofIssue) => {
-            if (dirtyRef.current || issue.fingerprint !== fingerprintRef.current) {
-              window.alert("正文在校对后已经变化，请重新校对本章后再定位。");
-              return;
-            }
-            setProofOpen(false);
-            locateAtLine(issue.line, issue.word, issue.occurrence);
+            void (async () => {
+              if (issue.path !== currentRef.current?.path) {
+                const entry = chapters.find((chapter) => chapter.path === issue.path);
+                if (!entry || !(await openChapter(entry))) return;
+              }
+              if (dirtyRef.current || issue.fingerprint !== fingerprintRef.current) {
+                window.alert("正文在校对后已经变化，请重新校对后再定位。");
+                return;
+              }
+              setProofOpen(false);
+              locateAtLine(issue.line, issue.word, issue.occurrence);
+            })();
           }}
         />
       )}

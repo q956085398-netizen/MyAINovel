@@ -66,7 +66,7 @@ export function ExportDialog({
   const [templates, setTemplates] = useState<ExportTemplate[]>([]);
   const [form, setForm] = useState<ExportTemplate>(defaultExportTemplate());
   const [prefix, setPrefix] = useState<string | null>(null);
-  const [rangeMode, setRangeMode] = useState<"all" | "range">(initialChapter ? "range" : "all");
+  const [rangeMode, setRangeMode] = useState<"all" | "range" | "current">(initialPath ? "current" : initialChapter ? "range" : "all");
   const [from, setFrom] = useState(String(initialChapter ?? 1));
   const [to, setTo] = useState(String(initialChapter ?? (chapterCount || 1)));
   const [busy, setBusy] = useState(false);
@@ -165,7 +165,7 @@ export function ExportDialog({
           project: projectDir,
           range,
           options: proofOptions,
-          chapterPath: initialPath ?? null,
+          chapterPath: rangeMode === "current" ? initialPath ?? null : null,
         }),
       );
     });
@@ -215,7 +215,10 @@ export function ExportDialog({
         <div className="subtabs export-tabs">
           <button
             className={`subtab ${tab === "export" ? "active" : ""}`}
-            onClick={() => setTab("export")}
+            onClick={() => {
+              if (rangeMode === "current") setRangeMode("all");
+              setTab("export");
+            }}
           >
             导出
           </button>
@@ -232,8 +235,9 @@ export function ExportDialog({
             范围
             <select
               value={rangeMode}
-              onChange={(e) => setRangeMode(e.target.value as "all" | "range")}
+              onChange={(e) => setRangeMode(e.target.value as "all" | "range" | "current")}
             >
+              {initialPath && tab === "proof" && <option value="current">本章</option>}
               <option value="all">全书</option>
               <option value="range">章节区间</option>
             </select>

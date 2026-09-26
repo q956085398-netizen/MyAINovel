@@ -1,4 +1,5 @@
 import { useSearchDestination } from "./globalSearchNavigation";
+import { chapterInspirationLink } from "./chapterInspirationLink";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -32,19 +33,8 @@ import {
 
 const INSPIRATION_SURFACE = "inspiration";
 
-function chapterLink(link: string): { project: string; fileName: string } | null {
-  if (!link.startsWith("章:")) return null;
-  const segments = link.slice(2).split("/");
-  if (segments.length !== 2) return null;
-  try {
-    return { project: decodeURIComponent(segments[0]), fileName: decodeURIComponent(segments[1]) };
-  } catch {
-    return null;
-  }
-}
-
 function linkLabel(link: string): string {
-  const chapter = chapterLink(link);
+  const chapter = chapterInspirationLink(link);
   return chapter ? `${chapter.project} / ${chapter.fileName}` : link;
 }
 
@@ -286,6 +276,15 @@ export default function InspirationLibrary({
 
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);
+  }, [libraryPath, scan]);
+
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const change = event as CustomEvent<{ root: string }>;
+      if (libraryPath && change.detail?.root === libraryPath) void scan(libraryPath);
+    };
+    window.addEventListener("gongbi:inspirations-changed", onChanged);
+    return () => window.removeEventListener("gongbi:inspirations-changed", onChanged);
   }, [libraryPath, scan]);
 
   /** 待打磨切换（工单 #64）：成功后重扫灵感库。 */
