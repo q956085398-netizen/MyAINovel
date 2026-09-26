@@ -82,12 +82,20 @@ fn children(dir: &Path, directories: bool, report: &mut GlobalSearchReport) -> V
 fn matches(text: &str, field: &str, line: u32, needle: &str) -> Option<GlobalSearchMatch> {
     let lower = text.to_lowercase();
     let byte = lower.find(needle)?;
-    let start = lower[..byte].chars().count();
-    let length = needle.chars().count();
     let chars: Vec<char> = text.chars().collect();
+    // İ 等字母的 lowercase 可展开为多个字符，必须映射回原文坐标。
+    let original_indices: Vec<_> = chars
+        .iter()
+        .enumerate()
+        .flat_map(|(index, ch)| ch.to_lowercase().map(move |_| index))
+        .collect();
+    let folded_start = lower[..byte].chars().count();
+    let folded_end = folded_start + needle.chars().count();
+    let start = *original_indices.get(folded_start)?;
+    let end = original_indices.get(folded_end - 1)? + 1;
     let from = start.saturating_sub(25);
-    let to = (start + length + 55).min(chars.len());
-    let quote = chars.iter().skip(start).take(length).collect();
+    let to = (end + 55).min(chars.len());
+    let quote = chars[start..end].iter().collect();
     let snippet = format!(
         "{}{}{}",
         if from > 0 { "…" } else { "" },
@@ -369,6 +377,9 @@ pub fn search(root: &Path, query: &str) -> Result<GlobalSearchReport, String> {
             .unwrap()
             .to_string_lossy()
             .into_owned();
+        if ["导出", "附件", "缓存"].contains(&category.as_str()) {
+            continue;
+        }
         for path in children(&category_dir, false, &mut report) {
             if has_md_extension(&path) {
                 let title = path.file_stem().unwrap().to_string_lossy().into_owned();
@@ -561,6 +572,9 @@ mod tests {
             "项目/甲/附件/说明.md",
             ".gongbi/缓存.md",
             "灵感库/故事卡/.旧.md",
+            "灵感库/导出/产物.md",
+            "灵感库/附件/说明.md",
+            "灵感库/缓存/结果.md",
         ] {
             write(root.path(), path, "不该检索");
             assert!(preview(root.path(), &root.path().join(path), "").is_err());
@@ -578,5 +592,18 @@ mod tests {
         let result = search(root.path(), "命中词").unwrap();
         assert_eq!(result.hits.len(), MAX_RESULTS);
         assert!(result.truncated);
+    }
+
+    #[test]
+    fn 大小写折叠改变字符数时仍返回原文命中() {
+        let root = TempDir::new().unwrap();
+        write(
+            root.path(),
+            "项目/甲/正文/0001 章.md",
+            &format!("{}NeEdLe", "İ".repeat(100)),
+        );
+        let result = search(root.path(), "needle").unwrap();
+        assert_eq!(result.hits[0].matches[0].quote, "NeEdLe");
+        assert!(result.hits[0].matches[0].snippet.contains("NeEdLe"));
     }
 }
