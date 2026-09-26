@@ -29,7 +29,11 @@ export interface AppSettings {
   firstLineIndent: number;
   autosaveSec: number;
   chapterPrefix: string;
+  assistantPrompt: string;
 }
+
+export const DEFAULT_ASSISTANT_PROMPT =
+  "你是「工笔」（个人网文创作工具）里的写作助手，帮用户拆书、找灵感、构思剧情。回答用中文，简明直接，多用要点。";
 
 export const BUILTIN_BACKGROUNDS: BuiltinBackground[] = [
   "素纸",
@@ -51,6 +55,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   firstLineIndent: 2,
   autosaveSec: 3,
   chapterPrefix: "第{n}章",
+  assistantPrompt: DEFAULT_ASSISTANT_PROMPT,
 };
 
 const PALETTES = new Set<ThemePalette>(["cinnabar", "bamboo", "indigo"]);
@@ -117,6 +122,10 @@ export function normalizeSettings(value: unknown): AppSettings {
       typeof source.chapterPrefix === "string"
         ? source.chapterPrefix
         : DEFAULT_SETTINGS.chapterPrefix,
+    assistantPrompt:
+      typeof source.assistantPrompt === "string" && source.assistantPrompt.trim()
+        ? source.assistantPrompt
+        : DEFAULT_SETTINGS.assistantPrompt,
   };
 }
 

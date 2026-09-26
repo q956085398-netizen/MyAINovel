@@ -121,12 +121,12 @@ export default function NoteDialog({
 
   return (
     <div
-      className="dialog-overlay"
+      className="dialog-overlay detail-panel-overlay"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="dialog wide">
+      <div className="dialog wide detail-panel">
         <h2>
           {prevPath ? "编辑" : "新建"}
           {kind}

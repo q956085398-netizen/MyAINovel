@@ -8,8 +8,8 @@ import ContentSurface from "./ContentSurface";
 import {
   CONTENT_SURFACE_STORAGE_KEY,
   readCollapsedCardPaths,
-  serializeCollapsedCardPaths,
   shouldExpandContentCard,
+  toggleCollapsedCardPath,
 } from "./contentSurfaceState";
 
 const BRIDGE_CARD_SURFACE = "bridges";
@@ -54,20 +54,9 @@ export default function BridgeLibrary({ project, units, onChanged }: BridgeLibra
   );
 
   function toggleCollapsed(path: string) {
-    setCollapsedCards((current) => {
-      const next = new Set(current);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      localStorage.setItem(
-        CONTENT_SURFACE_STORAGE_KEY,
-        serializeCollapsedCardPaths(
-          localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY),
-          BRIDGE_CARD_SURFACE,
-          next,
-        ),
-      );
-      return next;
-    });
+    setCollapsedCards((current) =>
+      toggleCollapsedCardPath(current, path, BRIDGE_CARD_SURFACE),
+    );
   }
 
   async function arrange(bridge: Bridge, unit: string) {
@@ -315,8 +304,8 @@ function BridgeDialog({
   }
 
   return (
-    <div className="dialog-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="dialog wide bridge-dialog">
+    <div className="dialog-overlay detail-panel-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dialog wide detail-panel bridge-dialog">
         <h2>{prevPath ? "编辑桥段" : "新建桥段草案"}</h2>
         <label>桥段名<input autoFocus value={draft.name} onChange={(e) => set("name", e.target.value)} placeholder="如：夜探旧宅" /></label>
         <label>情绪曲线<input value={draft.emotionCurve ?? ""} onChange={(e) => set("emotionCurve", e.target.value || null)} placeholder="如：压抑 → 犹疑 → 痛快" /></label>

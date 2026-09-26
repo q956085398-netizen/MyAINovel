@@ -10,8 +10,8 @@ import { usePendingToggle } from "./pendingToggle";
 import {
   CONTENT_SURFACE_STORAGE_KEY,
   readCollapsedCardPaths,
-  serializeCollapsedCardPaths,
   shouldExpandContentCard,
+  toggleCollapsedCardPath,
 } from "./contentSurfaceState";
 
 const NOTE_CARD_SURFACE = "ideation-notes";
@@ -196,20 +196,9 @@ export default function NoteList({
       : normal;
 
   function toggleCollapsed(path: string) {
-    setCollapsedCards((current) => {
-      const next = new Set(current);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      localStorage.setItem(
-        CONTENT_SURFACE_STORAGE_KEY,
-        serializeCollapsedCardPaths(
-          localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY),
-          NOTE_CARD_SURFACE,
-          next,
-        ),
-      );
-      return next;
-    });
+    setCollapsedCards((current) =>
+      toggleCollapsedCardPath(current, path, NOTE_CARD_SURFACE),
+    );
   }
 
   function isExpanded(note: NoteEntry) {

@@ -705,6 +705,22 @@ body {
   background: var(--surface-hover);
 }
 
+.hit-row.is-expanded {
+  align-items: flex-start;
+  background: var(--surface);
+}
+
+.hit-expand {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-sub);
+  cursor: pointer;
+}
+
 .hit-book {
   font-weight: 500;
   flex-shrink: 0;
@@ -726,6 +742,13 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.hit-row.is-expanded .hit-snippet {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
 }
 
 .hit-snippet mark {
@@ -1865,6 +1888,21 @@ button.save-chip {
   margin: var(--sp-2) 0 0;
 }
 
+.settings-prompt {
+  display: block;
+  width: 100%;
+  min-height: 132px;
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  color: var(--ink);
+  background: var(--paper);
+  font: inherit;
+  line-height: 1.6;
+}
+
 .provider-settings-form .provider-fieldset {
   background: var(--surface);
 }
@@ -1955,6 +1993,42 @@ button.save-chip {
 
 .dialog.wide {
   width: 780px;
+}
+
+.detail-panel-overlay {
+  justify-content: flex-end;
+  align-items: stretch;
+  background: color-mix(in srgb, var(--ink) 32%, transparent);
+}
+
+.dialog.detail-panel {
+  width: min(760px, 52vw);
+  max-width: 760px;
+  max-height: none;
+  height: 100%;
+  margin: 0;
+  border-radius: var(--r-dialog) 0 0 var(--r-dialog);
+  overflow-y: auto;
+  animation: slide-in-right var(--dur) var(--ease);
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(24px); opacity: 0.7; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (max-width: 760px) {
+  .dialog.detail-panel {
+    width: 100%;
+    max-width: none;
+    border-radius: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog.detail-panel {
+    animation: none;
+  }
 }
 
 /* ---------- 桥段标注弹窗 ---------- */

@@ -25,8 +25,8 @@ import {
   CONTENT_SURFACE_STORAGE_KEY,
   contentCardDomId,
   readCollapsedCardPaths,
-  serializeCollapsedCardPaths,
   shouldExpandContentCard,
+  toggleCollapsedCardPath,
 } from "./contentSurfaceState";
 
 const INSPIRATION_SURFACE = "inspiration";
@@ -412,20 +412,9 @@ export default function InspirationLibrary({
   }, [listed, polishing, unclassified, searchMatches]);
 
   function toggleCollapsed(path: string) {
-    setCollapsedCards((current) => {
-      const next = new Set(current);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      localStorage.setItem(
-        CONTENT_SURFACE_STORAGE_KEY,
-        serializeCollapsedCardPaths(
-          localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY),
-          INSPIRATION_SURFACE,
-          next,
-        ),
-      );
-      return next;
-    });
+    setCollapsedCards((current) =>
+      toggleCollapsedCardPath(current, path, INSPIRATION_SURFACE),
+    );
   }
 
   return (

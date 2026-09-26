@@ -91,12 +91,12 @@ export default function CardDialog({
 
   return (
     <div
-      className="dialog-overlay"
+      className="dialog-overlay detail-panel-overlay"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="dialog wide">
+      <div className="dialog wide detail-panel">
         <h2>{prevPath ? "编辑卡片" : "新建卡片"}</h2>
         <label>
           标题

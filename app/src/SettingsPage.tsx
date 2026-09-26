@@ -20,7 +20,7 @@ import {
   type ThemeMode,
   type ThemePalette,
 } from "./settings";
-import { settingsTabForEntry, type SettingsTab } from "./settingsState";
+import { DEFAULT_ASSISTANT_PROMPT, settingsTabForEntry, type SettingsTab } from "./settingsState";
 import type { AiConfig } from "./types";
 import { errMsg } from "./util";
 
@@ -120,6 +120,15 @@ export default function SettingsPage({
       update({ background: { kind: "image", path: picked } });
     } catch (error) {
       window.alert(`选背景图失败：${errMsg(error)}`);
+    }
+  }
+
+  async function openLibraryFolder() {
+    if (!libraryPath) return;
+    try {
+      await invoke("reveal_path", { path: libraryPath });
+    } catch (error) {
+      window.alert(`打开库文件夹失败：${errMsg(error)}`);
     }
   }
 
@@ -284,7 +293,7 @@ export default function SettingsPage({
               </section>
 
               <section className="settings-section">
-                <h2>保存与章节</h2>
+                <h2>写作行为与保存</h2>
                 <div className="settings-field settings-field-stacked">
                   <span className="settings-label">自动保存</span>
                   <div className="display-toggle" role="radiogroup" aria-label="自动保存间隔">
@@ -304,13 +313,26 @@ export default function SettingsPage({
 
           {tab === "ai" && (
             <section className="settings-section">
+              <div className="settings-note settings-assistant-preset">
+                <h3>默认助手预设</h3>
+                <p className="hint">普通对话使用这段提示词；拆书、构思等固定命令继续使用各自的专用提示。</p>
+                <textarea
+                  className="settings-prompt"
+                  aria-label="默认助手预设"
+                  value={settings.assistantPrompt}
+                  onChange={(event) => update({ assistantPrompt: event.target.value })}
+                  rows={5}
+                />
+                <button className="btn small" onClick={() => update({ assistantPrompt: DEFAULT_ASSISTANT_PROMPT })}>
+                  恢复默认预设
+                </button>
+              </div>
               {aiConfig && <ProviderSettingsForm initial={aiConfig} onSaved={setAiConfig} />}
               {!aiConfig && !aiError && <p className="hint">正在读取供应商设置…</p>}
               {aiError && <div className="error-box">读取供应商设置失败：{aiError}</div>}
               <div className="settings-note">
                 <h3>上下文与隐私</h3>
                 <p>普通对话只在你主动勾选时携带当前文档；固定 AI 命令只发送命令所需材料。供应商会收到你明确发送的内容。</p>
-                <p className="hint">AI 助手预设将在后续工单中加入本页，不会重新放回对话侧栏。</p>
               </div>
             </section>
           )}
@@ -328,6 +350,13 @@ export default function SettingsPage({
               <div className="settings-note">
                 <h3>数据边界</h3>
                 <p>创作内容仍以 Markdown、YAML 与附件为唯一来源；界面配色、编辑器背景和页签位置只保存在本机应用状态。</p>
+              </div>
+              <div className="settings-note">
+                <h3>检索与备份</h3>
+                <p>全文搜索按需扫描 Markdown 与 YAML，没有需要维护的本地搜索索引。备份时复制整个库文件夹，可一并保留正文、设定和附件。</p>
+                <button className="btn small" disabled={!libraryPath} onClick={() => void openLibraryFolder()}>
+                  在文件管理器中打开库
+                </button>
               </div>
             </section>
           )}

@@ -125,20 +125,26 @@ export default function RailProjectPanel({
               <p className="rail-flyout-hint">没有超期的伏笔与期待线。</p>
             )}
             {pending !== null &&
-              pending.slice(0, MAX_TITLES).map((line) => (
-                <button
-                  key={`${line.board}:${line.name}`}
-                  className="rail-pending-item"
-                  title={`${line.board}「${line.name}」已 ${line.lag} 章未推进，去构思看板处理`}
-                  onClick={() => onOpenBoard(project, BOARD_META[line.board].tab)}
-                >
-                  <span className={`rail-pending-badge ${BOARD_META[line.board].badge}`}>
-                    {line.board}
-                  </span>
-                  <span className="rail-pending-name">{line.name}</span>
-                  <span className="rail-pending-lag">超 {line.lag} 章</span>
-                </button>
-              ))}
+              pending.slice(0, MAX_TITLES).map((line) => {
+                const meta = (BOARD_META as Partial<Record<string, (typeof BOARD_META)[PendingLine["board"]]>>)[line.board];
+                return (
+                  <button
+                    key={`${line.board}:${line.name}`}
+                    className="rail-pending-item"
+                    title={meta
+                      ? `${line.board}「${line.name}」已 ${line.lag} 章未推进，去构思看板处理`
+                      : `${line.board}「${line.name}」尚无可用看板`}
+                    disabled={!meta}
+                    onClick={() => meta && onOpenBoard(project, meta.tab)}
+                  >
+                    <span className={`rail-pending-badge ${meta?.badge ?? "unknown"}`}>
+                      {line.board}
+                    </span>
+                    <span className="rail-pending-name">{line.name}</span>
+                    <span className="rail-pending-lag">超 {line.lag} 章</span>
+                  </button>
+                );
+              })}
             {pending !== null && pending.length > MAX_TITLES && (
               <p className="rail-flyout-hint sub">……还有 {pending.length - MAX_TITLES} 条。</p>
             )}
