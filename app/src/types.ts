@@ -310,6 +310,7 @@ export interface GeoUpgradePreview {
   targetPath: string;
   backupPath: string;
   target: GeoUpgradeTarget;
+  sourceFingerprint: string;
 }
 
 /** 构思/大纲.md：自由纸面，首次保存可采用轻模板。 */

@@ -288,6 +288,7 @@ pub struct GeoUpgradePreview {
     pub target_path: PathBuf,
     pub backup_path: PathBuf,
     pub target: GeoUpgradeTarget,
+    pub source_fingerprint: String,
 }
 
 /// 现扫地图档案；目录缺失是合法的空项目，单个损坏的 Markdown 仍以原文
@@ -1369,7 +1370,7 @@ pub fn geo_upgrade_preview(
     source: &Path,
     target: GeoUpgradeTarget,
 ) -> Result<GeoUpgradePreview, String> {
-    let source_name = legacy_geography_name(project, source)?;
+    let (source_name, source_raw) = legacy_geography_name(project, source)?;
     let target_path = project
         .join(project::CONCEPT_DIR)
         .join(target.dir_name())
@@ -1399,19 +1400,25 @@ pub fn geo_upgrade_preview(
         target_path,
         backup_path,
         target,
+        source_fingerprint: content_fingerprint(source_raw.as_bytes()).to_string(),
     })
 }
 
-/// 执行已确认的升级：先写不可覆盖的备份与新实体，再删除旧词条。每个新
-/// 文件都经原子写；任何失败都会保留旧来源或兼容备份，不会静默丢内容。
+/// 执行已确认的升级：先核对预览快照，再写不可覆盖的备份与新实体，最后
+/// 删除旧词条。每个新文件都经原子写；过期预览拒绝执行。
 pub fn confirm_geo_upgrade(
     project: &Path,
-    source: &Path,
-    target: GeoUpgradeTarget,
+    preview: &GeoUpgradePreview,
 ) -> Result<MapWorkspace, String> {
-    let preview = geo_upgrade_preview(project, source, target)?;
-    let raw = read_text(source)?;
-    let (mut frontmatter, body) = parse_legacy_geography(&raw, source)?;
+    let current = geo_upgrade_preview(project, &preview.source_path, preview.target)?;
+    if current != *preview {
+        return Err("旧地理词条在预览后已变化，请关闭升级窗口并重新打开，再次预览。".into());
+    }
+    let raw = read_text(&preview.source_path)?;
+    if content_fingerprint(raw.as_bytes()).to_string() != preview.source_fingerprint {
+        return Err("旧地理词条在预览后已变化，请关闭升级窗口并重新打开，再次预览。".into());
+    }
+    let (mut frontmatter, body) = parse_legacy_geography(&raw, &preview.source_path)?;
 
     // 「类别: 地理」是旧模型的分类键，不复制为新实体的业务字段；其余
     // 手补键和正文原样进新文件，同时整份旧文件进入兼容备份以便恢复。
@@ -1425,18 +1432,18 @@ pub fn confirm_geo_upgrade(
         fs::create_dir_all(parent).map_err(|e| {
             format!(
                 "无法创建{}目录 {}：{e}",
-                target.dir_name(),
+                preview.target.dir_name(),
                 parent.display()
             )
         })?;
     }
     write_frontmatter(&preview.target_path, frontmatter, &body)?;
-    fs::remove_file(source)
-        .map_err(|e| format!("新{}已创建，旧词条未能移入备份：{e}", target.dir_name()))?;
+    fs::remove_file(&preview.source_path)
+        .map_err(|e| format!("新{}已创建，旧词条未能移入备份：{e}", preview.target.dir_name()))?;
     map_workspace(project)
 }
 
-fn legacy_geography_name(project: &Path, source: &Path) -> Result<String, String> {
+fn legacy_geography_name(project: &Path, source: &Path) -> Result<(String, String), String> {
     let expected_dir = project
         .join(project::CONCEPT_DIR)
         .join(NoteKind::Worldview.name());
@@ -1449,7 +1456,7 @@ fn legacy_geography_name(project: &Path, source: &Path) -> Result<String, String
         .file_stem()
         .and_then(|name| name.to_str())
         .ok_or_else(|| format!("无法读取词条名：{}", source.display()))?;
-    sanitize_file_name(name)
+    Ok((sanitize_file_name(name)?, raw))
 }
 
 fn parse_legacy_geography(raw: &str, path: &Path) -> Result<(Mapping, String), String> {
@@ -1502,7 +1509,7 @@ mod tests {
         assert!(source.exists(), "预览绝不能改写旧词条");
         assert!(!preview.target_path.exists(), "预览绝不能创建目标文件");
 
-        let workspace = confirm_geo_upgrade(&project, &source, GeoUpgradeTarget::Map).unwrap();
+        let workspace = confirm_geo_upgrade(&project, &preview).unwrap();
         let map = workspace
             .maps
             .iter()
@@ -1520,6 +1527,25 @@ mod tests {
             "---\n类别: 地理\n自定义键: 保留我\n---\n旧城的自由正文。\n"
         );
         assert_eq!(map_workspace(&project).unwrap().maps.len(), 1);
+    }
+
+    #[test]
+    fn 地理词条预览后发生变化_旧预览不能确认() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《山河》");
+        let source = project.join("构思/世界观/京城.md");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "---\n类别: 地理\n---\n预览时的正文。\n").unwrap();
+
+        let preview = geo_upgrade_preview(&project, &source, GeoUpgradeTarget::Map).unwrap();
+        let changed = "---\n类别: 地理\n---\n预览后新增的正文。\n";
+        fs::write(&source, changed).unwrap();
+
+        let error = confirm_geo_upgrade(&project, &preview).unwrap_err();
+        assert!(error.contains("在预览后已变化"), "应明确要求重新预览：{error}");
+        assert_eq!(fs::read_to_string(&source).unwrap(), changed);
+        assert!(!preview.target_path.exists(), "过期预览不能创建目标文件");
+        assert!(!preview.backup_path.exists(), "过期预览不能创建备份");
     }
 
     #[test]

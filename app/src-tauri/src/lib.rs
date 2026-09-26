@@ -462,10 +462,9 @@ fn preview_geo_upgrade(
 #[tauri::command]
 fn confirm_geo_upgrade(
     project: String,
-    source: String,
-    target: GeoUpgradeTarget,
+    preview: GeoUpgradePreview,
 ) -> Result<MapWorkspace, String> {
-    map::confirm_geo_upgrade(Path::new(&project), Path::new(&source), target)
+    map::confirm_geo_upgrade(Path::new(&project), &preview)
 }
 
 /// 大纲纸面（工单 #41）：自由 Markdown，缺失文件即空状态。

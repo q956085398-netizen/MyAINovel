@@ -46,10 +46,11 @@ export default function GeoUpgradeDialog({
     if (!preview || busy) return;
     setBusy(true);
     try {
-      await invoke("confirm_geo_upgrade", { project, source: source.path, target });
+      await invoke("confirm_geo_upgrade", { project, preview });
       onUpgraded();
     } catch (reason) {
       setError(`升级失败：${errMsg(reason)}`);
+      setPreview(null);
       setBusy(false);
     }
   }
