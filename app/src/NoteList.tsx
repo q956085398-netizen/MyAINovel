@@ -23,6 +23,7 @@ interface NoteListProps {
   onChat?: (name: string) => void;
   /** 首页进入力量体系时按类别筛看；仍编辑同一份世界观词条。 */
   worldviewCategory?: string;
+  onWorldviewCategoryChange?: (category: string) => void;
 }
 
 const KIND_HEADINGS: Record<NoteKind, string> = {
@@ -103,8 +104,9 @@ export default function NoteList({
   onAiCommand,
   onChat,
   worldviewCategory,
+  onWorldviewCategoryChange,
 }: NoteListProps) {
-  const [categoryFilter, setCategoryFilter] = useState(worldviewCategory ?? "");
+  const categoryFilter = kind === "世界观" ? worldviewCategory ?? "" : "";
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -205,8 +207,8 @@ export default function NoteList({
 
       {kind === "世界观" && (
         <div className="subtabs">
-          <button className={`subtab ${!categoryFilter ? "active" : ""}`} onClick={() => setCategoryFilter("")}>全部词条</button>
-          <button className={`subtab ${powerSystem ? "active" : ""}`} onClick={() => setCategoryFilter(POWER_SYSTEM_CATEGORY)}>力量体系</button>
+          <button className={`subtab ${!categoryFilter ? "active" : ""}`} onClick={() => onWorldviewCategoryChange?.("")}>全部词条</button>
+          <button className={`subtab ${powerSystem ? "active" : ""}`} onClick={() => onWorldviewCategoryChange?.(POWER_SYSTEM_CATEGORY)}>力量体系</button>
         </div>
       )}
 

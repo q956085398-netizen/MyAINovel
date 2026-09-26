@@ -93,7 +93,7 @@ export default function ProjectPage({
   onAiCommand,
 }: ProjectPageProps) {
   const [tab, setTab] = useState<Tab>(initialTab ?? "大纲");
-  const [powerSystemView, setPowerSystemView] = useState(false);
+  const [worldviewCategory, setWorldviewCategory] = useState("");
   const [meta, setMeta] = useState<ProjectMeta>(emptyProjectMeta());
   const [metaWarning, setMetaWarning] = useState<string | undefined>();
   const [metaOpen, setMetaOpen] = useState(false);
@@ -278,7 +278,7 @@ export default function ProjectPage({
                   key={t}
                   className={`nav-item ${tab === t ? "active" : ""}`}
                   onClick={() => {
-                    setPowerSystemView(false);
+                    setWorldviewCategory("");
                     setTab(t);
                   }}
                 >
@@ -321,7 +321,7 @@ export default function ProjectPage({
         <div className="project-content" key={`${tab}-${reloadKey}`}>
           {tab === "首页" && (
             <PowerSystemHome project={project.dir} onOpen={() => {
-              setPowerSystemView(true);
+              setWorldviewCategory("力量体系");
               setTab("世界观");
             }} />
           )}
@@ -339,7 +339,8 @@ export default function ProjectPage({
             <NoteList
               project={project.dir}
               kind={tab}
-              worldviewCategory={tab === "世界观" && powerSystemView ? "力量体系" : undefined}
+              worldviewCategory={tab === "世界观" ? worldviewCategory : undefined}
+              onWorldviewCategoryChange={setWorldviewCategory}
               vocab={vocab}
               onChanged={refreshAll}
               onPromoted={() => setTab("单元")}
