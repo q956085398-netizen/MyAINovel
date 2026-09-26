@@ -832,6 +832,8 @@ export interface LegendItem {
 
 /** 一条关系（边）：起→止 只表示有向边的方向，不表示归属——关系网是一张网。 */
 export interface Relationship {
+  /** 新社会网的版本与来源条目；编辑时原样带回以保留手补字段。 */
+  sourceRow?: string | null;
   from: string;
   to: string;
   /** 类型，按名引用图例项（图例外照画兜底样式，只提示）。 */

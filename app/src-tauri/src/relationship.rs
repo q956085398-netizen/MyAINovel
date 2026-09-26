@@ -60,6 +60,9 @@ pub struct LegendItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Relationship {
+    /// 新社会网的载入版本与条目位置，编辑端点时仍能归还该条目的未知键。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_row: Option<String>,
     pub from: String,
     pub to: String,
     /// 类型，按名引用图例项（图例外照画缺省样式，只提示）。
@@ -156,9 +159,17 @@ pub fn read_table(project: &Path) -> Result<RelationshipTable, String> {
             }));
         }
     }
+    let mut edges = edges_from(&map, &path)?;
+    if path == crate::social::graph_path(project) {
+        let raw = std::fs::read(&path).map_err(|e|e.to_string())?;
+        let version = crate::book_file::content_fingerprint(&raw);
+        for (index, edge) in edges.iter_mut().enumerate() {
+            edge.source_row = Some(format!("{version}:{index}"));
+        }
+    }
     Ok(RelationshipTable {
         legend: legend_from(&map, &path)?,
-        edges: edges_from(&map, &path)?,
+        edges,
     })
 }
 
@@ -168,6 +179,7 @@ pub fn read_table(project: &Path) -> Result<RelationshipTable, String> {
 /// 整张网换成空表。所以先按读路径校验一遍——语法坏、形状坏都不写。
 /// 条目内不认的键会被丢弃（应用受管，与伏笔.yaml 同一条纪律）。
 pub fn save_table(project: &Path, table: &RelationshipTable) -> Result<(), String> {
+    crate::social::ensure_idle(project)?;
     let legend = normalize_legend(&table.legend)?;
     let edges = normalize_edges(&table.edges)?;
     let path = relationship_path(project);
@@ -254,6 +266,7 @@ fn edges_from(map: &Mapping, path: &Path) -> Result<Vec<Relationship>, String> {
                 }
             };
             Ok(Relationship {
+                source_row: None,
                 from: required("起")?,
                 to: required("止")?,
                 kind: required("类型")?,
@@ -306,6 +319,7 @@ fn normalize_edges(edges: &[Relationship]) -> Result<Vec<Relationship>, String> 
                 return Err("关系要选一个类型".to_string());
             }
             Ok(Relationship {
+                source_row: edge.source_row.clone(),
                 from: from.to_string(),
                 to: to.to_string(),
                 kind: kind.to_string(),
@@ -570,6 +584,7 @@ mod tests {
 
     fn edge(from: &str, to: &str, kind: &str) -> Relationship {
         Relationship {
+            source_row: None,
             from: from.to_string(),
             to: to.to_string(),
             kind: kind.to_string(),
@@ -598,6 +613,7 @@ mod tests {
         let p = project(tmp.path());
         let mut table = read_table(&p).unwrap();
         table.edges.push(Relationship {
+            source_row: None,
             from: "张三".into(),
             to: "李四".into(),
             kind: "师徒".into(),
@@ -826,6 +842,7 @@ mod tests {
         person(&p, "王五", "敌方");
         let mut table = read_table(&p).unwrap();
         table.edges.push(Relationship {
+            source_row: None,
             from: "张三".into(),
             to: "李四".into(),
             kind: "师徒".into(),
@@ -833,6 +850,7 @@ mod tests {
             secret: true,
         });
         table.edges.push(Relationship {
+            source_row: None,
             from: "李四".into(),
             to: "王五".into(),
             kind: "敌对".into(),
@@ -841,6 +859,7 @@ mod tests {
         });
         // 选中集之外的边不进预填。
         table.edges.push(Relationship {
+            source_row: None,
             from: "王五".into(),
             to: "赵六".into(),
             kind: "私情".into(),
@@ -909,6 +928,7 @@ mod tests {
         // 连边：图例用缺省四类种子，加一条秘密边。
         let mut table = read_table(&p).unwrap();
         table.edges.push(Relationship {
+            source_row: None,
             from: "张三".into(),
             to: "李四".into(),
             kind: "师徒".into(),

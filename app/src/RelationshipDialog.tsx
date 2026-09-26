@@ -41,7 +41,7 @@ export default function RelationshipDialog({
     setBusy(true);
     setError(null);
     try {
-      await onSubmit({ from, to, kind, note: note.trim() || null, secret });
+      await onSubmit({ sourceRow: initial?.sourceRow, from, to, kind, note: note.trim() || null, secret });
     } catch (e) {
       setError(errMsg(e));
       setBusy(false);

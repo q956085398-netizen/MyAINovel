@@ -109,7 +109,7 @@ fn assert_version(path: &Path, expected: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn ensure_idle(p: &Path) -> Result<(), String> {
+pub(crate) fn ensure_idle(p: &Path) -> Result<(), String> {
     if journal_path(p).exists() {
         Err("上次社会关系升级未完成，请先恢复升级".into())
     } else {
@@ -241,6 +241,13 @@ fn validate_graph(map: &Mapping) -> Result<(), String> {
                     return Err("图例项应为映射".into());
                 };
                 required(m, "名")?;
+                for k in ["色", "方向"] {
+                    if let Some(value) = m.get(key(k)) {
+                        if !value.is_null() && !value.is_string() {
+                            return Err(format!("图例的「{k}」应为文字"));
+                        }
+                    }
+                }
             }
         }
     }
@@ -357,7 +364,9 @@ pub fn save_person_relationships(
         node_kind(r, "起类").as_deref() == Ok("人物")
             && node_kind(r, "止类").as_deref() == Ok("人物")
     };
-    let mut remaining: Vec<Mapping> = old.iter().filter(|r| person_edge(r)).cloned().collect();
+    let original: Vec<Mapping> = old.iter().filter(|r| person_edge(r)).cloned().collect();
+    let version = version(&read_optional(&graph_path(p))?);
+    let mut used = std::collections::HashSet::new();
     let mut next: Vec<Value> = old
         .iter()
         .filter(|r| !person_edge(r))
@@ -365,12 +374,29 @@ pub fn save_person_relationships(
         .map(Value::Mapping)
         .collect();
     for e in edges {
-        let found = remaining.iter().position(|r| {
-            map_scalar(r, "起").as_deref() == Some(&e.from)
-                && map_scalar(r, "止").as_deref() == Some(&e.to)
-                && map_scalar(r, "类型").as_deref() == Some(&e.kind)
-        });
-        let mut r = found.map(|i| remaining.remove(i)).unwrap_or_default();
+        let found = if let Some(source) = &e.source_row {
+            let (base, index) = source.split_once(':').ok_or("关系来源标识损坏，请刷新")?;
+            if base != version {
+                return Err("社会关系在载入后已改变，请刷新画布".into());
+            }
+            let index: usize = index.parse().map_err(|_| "关系来源标识损坏，请刷新")?;
+            if index >= original.len() || !used.insert(index) {
+                return Err("关系来源条目失效，请刷新".into());
+            }
+            Some(index)
+        } else {
+            original.iter().enumerate().position(|(i, r)| {
+                !used.contains(&i) && {
+                    map_scalar(r, "起").as_deref() == Some(&e.from)
+                        && map_scalar(r, "止").as_deref() == Some(&e.to)
+                        && map_scalar(r, "类型").as_deref() == Some(&e.kind)
+                }
+            })
+        };
+        if let Some(i) = found {
+            used.insert(i);
+        }
+        let mut r = found.map(|i| original[i].clone()).unwrap_or_default();
         for (k, v) in [("起", &e.from), ("止", &e.to), ("类型", &e.kind)] {
             r.insert(key(k), key(v));
         }
@@ -486,6 +512,11 @@ pub fn preview_upgrade(p: &Path) -> Result<UpgradePreview, String> {
             content_fingerprint(raw.as_bytes()).to_string(),
         ));
         let (mut map, body) = strict_md(&raw)?;
+        if let Some(group) = map.get(key("分组")) {
+            if !group.is_null() && !group.is_string() {
+                return Err(format!("{} 的「分组」应为文字，拒绝升级", n.path.display()));
+            }
+        }
         let Some(group) = map_scalar(&map, "分组").filter(|s| !s.trim().is_empty()) else {
             continue;
         };
@@ -783,6 +814,12 @@ mod tests {
         fs::remove_file(legacy).unwrap();
         fs::write(p.join("构思/人物/甲.md"), "---\n分组: [错误\n---\n小传").unwrap();
         assert!(preview_upgrade(p).is_err());
+        fs::write(
+            p.join("构思/人物/甲.md"),
+            "---\n分组: [不能忽略]\n---\n小传",
+        )
+        .unwrap();
+        assert!(preview_upgrade(p).is_err());
         assert!(!graph_path(p).exists());
     }
 
@@ -797,10 +834,17 @@ mod tests {
         let preview = preview_upgrade(p).unwrap();
         confirm_upgrade(p, &preview).unwrap();
         assert_eq!(fs::read_to_string(&legacy).unwrap(), raw);
-        let table = crate::relationship::read_table(p).unwrap();
+        let mut table = crate::relationship::read_table(p).unwrap();
         assert_eq!(table.edges.len(), 1);
+        table.edges[0].to = "丙".into();
+        table.edges[0].kind = "旧识".into();
         crate::relationship::save_table(p, &table).unwrap();
         let written = fs::read_to_string(graph_path(p)).unwrap();
+        assert!(written.contains("止: 丙") && written.contains("类型: 旧识"));
+        assert!(
+            crate::relationship::save_table(p, &table).is_err(),
+            "过期来源版本不能再次整表保存"
+        );
         for expected in ["图例保留", "关系保留", "组织保留", "布局:", "备注: 保存"]
         {
             assert!(written.contains(expected), "{written}");
@@ -851,6 +895,12 @@ mod tests {
         }
         assert!(workspace(p).unwrap().recovery_needed);
         assert!(preview_upgrade(p).is_err());
+        let table = crate::relationship::read_table(p).unwrap();
+        assert!(
+            crate::relationship::save_table(p, &table).is_err(),
+            "新社会网尚未发布也必须拦截旧画布保存"
+        );
+        assert!(!p.join("构思/人物关系.yaml").exists());
         fs::write(&person, "外部新增文字").unwrap();
         assert!(recover_upgrade(p).is_err());
         assert_eq!(fs::read_to_string(&person).unwrap(), "外部新增文字");
