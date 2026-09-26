@@ -643,7 +643,7 @@ interface PromoteDialogProps {
 }
 
 /** 选中数人「提为矛盾」（工单 #8 §6.1）：只预填人名与边，不生成剧情内容。 */
-function PromoteDialog({ names, project, onClose, onDone }: PromoteDialogProps) {
+export function PromoteDialog({ names, project, onClose, onDone }: PromoteDialogProps) {
   const [name, setName] = useState(names.join("·"));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

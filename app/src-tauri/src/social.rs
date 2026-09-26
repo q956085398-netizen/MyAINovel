@@ -21,6 +21,239 @@ pub fn graph_path(p: &Path) -> PathBuf {
 fn journal_path(p: &Path) -> PathBuf {
     p.join(".gongbi/社会升级.json")
 }
+
+#[cfg(test)]
+mod canvas_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn manual_layout_reopens_and_arrangement_preserves_pins() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path();
+        fs::create_dir_all(p.join("构思/人物")).unwrap();
+        fs::write(
+            p.join("构思/人物/同名.md"),
+            "---\n一句话身份: 流亡者\n---\n小传",
+        )
+        .unwrap();
+        save_organization(
+            p,
+            &OrganizationDraft {
+                name: "同名".into(),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        fs::write(graph_path(p), "关系: []\n手补: 保留\n").unwrap();
+        let view = canvas_view(p).unwrap();
+        assert_eq!(view.nodes.len(), 2);
+        let mut placements = view.placements.clone();
+        placements[0].x = 670.0;
+        placements[0].y = 410.0;
+        placements[0].pinned = true;
+        let saved = save_canvas_layout(p, &placements, &view.fingerprint).unwrap();
+        assert_eq!(canvas_view(p).unwrap().placements, saved.placements);
+        let tidy = arrange_canvas(p, false, &saved.fingerprint).unwrap();
+        assert_eq!(tidy.placements[0], placements[0]);
+        let again = arrange_canvas(p, false, &tidy.fingerprint).unwrap();
+        assert_eq!(again.placements, tidy.placements);
+        let all = arrange_canvas(p, true, &again.fingerprint).unwrap();
+        assert_ne!(all.placements[0].x, 670.0);
+        assert!(all.placements[0].pinned);
+        let undo = save_canvas_layout(p, &again.placements, &all.fingerprint).unwrap();
+        assert_eq!(undo.placements, again.placements);
+        assert_eq!(
+            map_scalar(&read_graph(p).unwrap(), "手补").as_deref(),
+            Some("保留")
+        );
+        assert_eq!(
+            fs::read_to_string(p.join("构思/人物/同名.md")).unwrap(),
+            "---\n一句话身份: 流亡者\n---\n小传"
+        );
+    }
+
+    #[test]
+    fn typed_edges_edit_without_losing_missing_references_or_unknown_fields() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path();
+        fs::create_dir_all(p.join("构思/人物")).unwrap();
+        fs::write(p.join("构思/人物/甲.md"), "人物小传").unwrap();
+        for name in ["甲", "乙"] {
+            save_organization(
+                p,
+                &OrganizationDraft {
+                    name: name.into(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+        }
+        fs::write(graph_path(p), "关系:\n- 起: 失效人名\n  止: 甲\n  类型: 师徒\n  手补: 原样\n图例:\n- 名: 师徒\n  方向: 有向\n布局:\n  旧键: [1, 2]\n备注: 不动\n").unwrap();
+        let mut view = canvas_view(p).unwrap();
+        assert!(view.edges[0].directed);
+        for (from_kind, to_kind, from, to) in [
+            ("人物", "人物", "甲", "甲"),
+            ("人物", "组织", "甲", "甲"),
+            ("组织", "组织", "甲", "乙"),
+        ] {
+            let edge = SocialEdge {
+                from: SocialNode {
+                    kind: from_kind.into(),
+                    name: from.into(),
+                },
+                to: SocialNode {
+                    kind: to_kind.into(),
+                    name: to.into(),
+                },
+                kind: "秘密盟友".into(),
+                directed: false,
+                secret: true,
+                note: Some("同盟说明".into()),
+            };
+            view = edit_canvas_edge(p, None, Some(&edge), &view.fingerprint).unwrap();
+        }
+        assert_eq!(view.edges.len(), 4);
+        assert!(view.edges[3].secret);
+        assert!(!view.edges[3].directed);
+        let mut edited = view.edges[0].clone();
+        edited.note = Some("修改描述".into());
+        view = edit_canvas_edge(p, Some(0), Some(&edited), &view.fingerprint).unwrap();
+        let map = read_graph(p).unwrap();
+        assert_eq!(
+            map_scalar(&rows(&map).unwrap()[0], "手补").as_deref(),
+            Some("原样")
+        );
+        assert_eq!(
+            layout_map(&map)
+                .unwrap()
+                .get(key("旧键"))
+                .unwrap()
+                .as_sequence()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(view.edges[0].from.name, "失效人名");
+        let after = edit_canvas_edge(p, Some(3), None, &view.fingerprint).unwrap();
+        assert_eq!(after.edges.len(), 3);
+        assert_eq!(
+            canvas_view(p).unwrap().edges[0].note.as_deref(),
+            Some("修改描述")
+        );
+    }
+
+    #[test]
+    fn stale_or_broken_canvas_and_interrupted_upgrade_never_overwrite_files() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path();
+        fs::create_dir_all(p.join("构思")).unwrap();
+        fs::write(graph_path(p), "关系: []\n").unwrap();
+        let initial = canvas_view(p).unwrap();
+        for raw in [
+            "关系: []\n备注: 外部修改\n",
+            "关系: 错误\n",
+            "布局: []\n",
+            "布局: {人物: {x: 2}}\n关系: []\n",
+            "布局: {'人物:甲': {x: .nan, y: 100}}\n",
+        ] {
+            fs::write(graph_path(p), raw).unwrap();
+            assert!(save_canvas_layout(p, &[], &initial.fingerprint).is_err());
+            assert_eq!(fs::read_to_string(graph_path(p)).unwrap(), raw);
+        }
+        fs::write(graph_path(p), "布局: {'人物:甲': {x: .nan, y: 100}}\n").unwrap();
+        let expected = version(&read_optional(&graph_path(p)).unwrap());
+        assert!(arrange_canvas(p, true, &expected).is_err());
+        fs::write(graph_path(p), "关系: []\n").unwrap();
+        fs::create_dir_all(p.join(".gongbi")).unwrap();
+        fs::write(journal_path(p), "{}").unwrap();
+        assert!(arrange_canvas(p, true, &initial.fingerprint).is_err());
+        assert_eq!(fs::read_to_string(graph_path(p)).unwrap(), "关系: []\n");
+    }
+
+    #[test]
+    fn legacy_canvas_stays_read_only_until_explicit_upgrade_and_new_archives_refresh() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path();
+        fs::create_dir_all(p.join("构思/人物")).unwrap();
+        fs::write(p.join("构思/人物/甲.md"), "旧小传").unwrap();
+        fs::write(p.join("构思/人物关系.yaml"), "关系: []\n").unwrap();
+        let before = canvas_view(p).unwrap();
+        assert!(!before.upgraded);
+        assert!(save_canvas_layout(p, &before.placements, &before.fingerprint).is_err());
+        assert!(!graph_path(p).exists());
+        let preview = preview_upgrade(p).unwrap();
+        confirm_upgrade(p, &preview).unwrap();
+        assert!(canvas_view(p).unwrap().upgraded);
+        fs::write(p.join("构思/人物/乙.md"), "新小传").unwrap();
+        assert_eq!(canvas_view(p).unwrap().nodes.len(), 2);
+        let raw = fs::read_to_string(graph_path(p)).unwrap();
+        assert!(!raw.contains("小传"));
+        assert_eq!(
+            fs::read_to_string(p.join("构思/人物关系.yaml")).unwrap(),
+            "关系: []\n"
+        );
+    }
+
+    #[test]
+    fn legend_colors_and_compatibility_remain_shared_with_person_canvas() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path();
+        fs::create_dir_all(p.join("构思")).unwrap();
+        fs::write(graph_path(p), "图例:\n- 名: 旧识\n  色: '#123456'\n  方向: 单相思\n  手补: 保留\n关系:\n- 起: 失效甲\n  止: 失效乙\n  类型: 旧识\n").unwrap();
+        let before = canvas_view(p).unwrap();
+        assert_eq!(before.legend[0].color, "#123456");
+        assert!(!before.edges[0].directed); // 旧图例未知方向仍按原契约兼容。
+        let mut legend = before.legend.clone();
+        legend[0].color = "#abcdef".into();
+        legend[0].directed = true;
+        let after = save_canvas_legend(p, &legend, &[Some(0)], &before.fingerprint).unwrap();
+        assert_eq!(after.legend[0].color, "#abcdef");
+        assert!(after.edges[0].directed);
+        assert_eq!(
+            map_scalar(
+                read_graph(p)
+                    .unwrap()
+                    .get(key("图例"))
+                    .unwrap()
+                    .as_sequence()
+                    .unwrap()[0]
+                    .as_mapping()
+                    .unwrap(),
+                "手补"
+            )
+            .as_deref(),
+            Some("保留")
+        );
+        assert_eq!(after.edges[0].from.name, "失效甲");
+        let mut added = after.legend.clone();
+        added.push(crate::relationship::LegendItem {
+            name: "新关系".into(),
+            color: "#010203".into(),
+            directed: false,
+        });
+        let saved = save_canvas_legend(p, &added, &[Some(0), None], &after.fingerprint).unwrap();
+        let mut renamed = saved.legend.clone();
+        renamed[0].name = "改名旧识".into();
+        renamed.swap(0, 1);
+        let reopened =
+            save_canvas_legend(p, &renamed, &[Some(1), Some(0)], &saved.fingerprint).unwrap();
+        let graph = read_graph(p).unwrap();
+        let row = graph.get(key("图例")).unwrap().as_sequence().unwrap()[1]
+            .as_mapping()
+            .unwrap();
+        assert_eq!(map_scalar(row, "手补").as_deref(), Some("保留"));
+        assert_eq!(reopened.legend[1].name, "改名旧识");
+        assert_eq!(reopened.edges[0].kind, "旧识"); // 改名不静默改边的按名引用。
+        let raw = "关系:\n- 起: 甲\n  止: 乙\n  类型: 旧识\n  方向: 双向\n";
+        fs::write(graph_path(p), raw).unwrap();
+        let expected = version(&read_optional(&graph_path(p)).unwrap());
+        assert!(save_canvas_legend(p, &legend, &[Some(0)], &expected).is_err());
+        assert_eq!(fs::read_to_string(graph_path(p)).unwrap(), raw);
+    }
+}
 fn org_dir(p: &Path) -> PathBuf {
     p.join("构思/组织")
 }
@@ -63,6 +296,309 @@ pub struct SocialWorkspace {
     pub fingerprint: String,
     pub upgraded: bool,
     pub recovery_needed: bool,
+}
+
+/// 带类型的身份；同名人物与组织在关系和布局中始终独立。
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct SocialNode {
+    pub kind: String,
+    pub name: String,
+}
+impl SocialNode {
+    fn id(&self) -> String {
+        format!("{}:{}", self.kind, self.name)
+    }
+    fn validate(&self) -> Result<(), String> {
+        if (self.kind != "人物" && self.kind != "组织") || self.name.trim().is_empty() {
+            return Err("节点必须是具名的人物或组织".into());
+        }
+        Ok(())
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Placement {
+    pub node: SocialNode,
+    pub x: f64,
+    pub y: f64,
+    pub pinned: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SocialEdge {
+    pub from: SocialNode,
+    pub to: SocialNode,
+    pub kind: String,
+    pub directed: bool,
+    pub note: Option<String>,
+    pub secret: bool,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SocialCanvas {
+    pub nodes: Vec<SocialNode>,
+    pub placements: Vec<Placement>,
+    pub edges: Vec<SocialEdge>,
+    pub legend: Vec<crate::relationship::LegendItem>,
+    pub fingerprint: String,
+    pub upgraded: bool,
+    pub recovery_needed: bool,
+}
+
+fn layout_map(map: &Mapping) -> Result<Mapping, String> {
+    match map.get(key("布局")) {
+        None | Some(Value::Null) => Ok(Mapping::new()),
+        Some(Value::Mapping(m)) => Ok(m.clone()),
+        _ => Err("社会画布布局应为映射，拒绝覆盖".into()),
+    }
+}
+fn read_placements(map: &Mapping) -> Result<Vec<Placement>, String> {
+    let mut out = vec![];
+    for (id, value) in layout_map(map)? {
+        let Some((kind, name)) = id.as_str().and_then(|s| s.split_once(':')) else {
+            continue;
+        };
+        if kind != "人物" && kind != "组织" {
+            continue;
+        }
+        let Value::Mapping(row) = value else {
+            return Err("社会画布节点布局损坏，拒绝覆盖".into());
+        };
+        let x = row
+            .get(key("x"))
+            .and_then(Value::as_f64)
+            .ok_or("画布横坐标损坏")?;
+        let y = row
+            .get(key("y"))
+            .and_then(Value::as_f64)
+            .ok_or("画布纵坐标损坏")?;
+        let placement = Placement {
+            node: SocialNode {
+                kind: kind.into(),
+                name: name.into(),
+            },
+            x,
+            y,
+            pinned: boolean(&row, "固定")?,
+        };
+        validate_placement(&placement)?;
+        out.push(placement);
+    }
+    Ok(out)
+}
+fn validate_placement(p: &Placement) -> Result<(), String> {
+    p.node.validate()?;
+    if !p.x.is_finite()
+        || !p.y.is_finite()
+        || p.x < 60.0
+        || p.y < 60.0
+        || p.x > 100_000.0
+        || p.y > 100_000.0
+    {
+        return Err("画布坐标应在 60 到 100000 之间".into());
+    }
+    Ok(())
+}
+
+pub fn canvas_view(p: &Path) -> Result<SocialCanvas, String> {
+    let workspace = workspace(p)?;
+    let map = read_graph(p)?;
+    let mut nodes: Vec<SocialNode> = workspace
+        .persons
+        .into_iter()
+        .map(|name| SocialNode {
+            kind: "人物".into(),
+            name,
+        })
+        .chain(workspace.organizations.into_iter().map(|o| SocialNode {
+            kind: "组织".into(),
+            name: o.draft.name,
+        }))
+        .collect();
+    nodes.sort();
+    let mut placements = read_placements(&map)?;
+    // 新节点补空位；失效身份的位置保留，重建同名档案可恢复布局。
+    for node in &nodes {
+        if !placements.iter().any(|p| &p.node == node) {
+            let (x, y) = free_slot(&placements);
+            placements.push(Placement {
+                node: node.clone(),
+                x,
+                y,
+                pinned: false,
+            });
+        }
+    }
+    let legend = crate::relationship::legend_from(&map, &graph_path(p))?;
+    let edges = rows(&map)?
+        .iter()
+        .map(|r| {
+            let kind = required(r, "类型")?;
+            let directed = match r.get(key("方向")) {
+                Some(Value::String(s)) if s == "有向" => true,
+                Some(Value::String(s)) if s == "无向" => false,
+                Some(Value::Null) | None => legend
+                    .iter()
+                    .find(|item| item.name == kind)
+                    .map(|item| item.directed)
+                    .unwrap_or(true),
+                _ => return Err("关系方向应为有向或无向".into()),
+            };
+            Ok(SocialEdge {
+                from: SocialNode {
+                    kind: node_kind(r, "起类")?,
+                    name: required(r, "起")?,
+                },
+                to: SocialNode {
+                    kind: node_kind(r, "止类")?,
+                    name: required(r, "止")?,
+                },
+                kind,
+                directed,
+                note: map_scalar(r, "描述"),
+                secret: boolean(r, "秘密")?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(SocialCanvas {
+        nodes,
+        placements,
+        edges,
+        legend,
+        fingerprint: workspace.fingerprint,
+        upgraded: workspace.upgraded,
+        recovery_needed: workspace.recovery_needed,
+    })
+}
+
+/// 稳定格点，避开已占位置；排序与格点均不依赖文件枚举次序或随机数。
+fn free_slot(occupied: &[Placement]) -> (f64, f64) {
+    for i in 0.. {
+        let x = 110.0 + (i % 4) as f64 * 200.0;
+        let y = 100.0 + (i / 4) as f64 * 150.0;
+        if occupied
+            .iter()
+            .all(|p| (p.x - x).abs() >= 170.0 || (p.y - y).abs() >= 130.0)
+        {
+            return (x, y);
+        }
+    }
+    unreachable!()
+}
+fn writable_graph(p: &Path, expected: &str) -> Result<Mapping, String> {
+    ensure_idle(p)?;
+    if !graph_path(p).exists() {
+        return Err("请先在组织与归属中预览并确认升级社会关系".into());
+    }
+    assert_version(&graph_path(p), expected)?;
+    let map = read_graph(p)?;
+    // 布局、方向也必须完整可读，不能只检查将写的那一块。
+    canvas_view(p)?;
+    Ok(map)
+}
+pub fn save_canvas_layout(
+    p: &Path,
+    placements: &[Placement],
+    expected: &str,
+) -> Result<SocialCanvas, String> {
+    let mut map = writable_graph(p, expected)?;
+    let mut layout = layout_map(&map)?;
+    let mut seen = std::collections::HashSet::new();
+    for placement in placements {
+        validate_placement(placement)?;
+        if !seen.insert(placement.node.id()) {
+            return Err("画布位置包含重复身份".into());
+        }
+        let id = key(&placement.node.id());
+        let mut row = layout
+            .get(&id)
+            .and_then(Value::as_mapping)
+            .cloned()
+            .unwrap_or_default();
+        row.insert(
+            key("x"),
+            serde_yaml::to_value(placement.x).map_err(|e| e.to_string())?,
+        );
+        row.insert(
+            key("y"),
+            serde_yaml::to_value(placement.y).map_err(|e| e.to_string())?,
+        );
+        row.insert(key("固定"), Value::Bool(placement.pinned));
+        layout.insert(id, Value::Mapping(row));
+    }
+    map.insert(key("布局"), Value::Mapping(layout));
+    crate::book_file::write_yaml_mapping(&graph_path(p), map)?;
+    canvas_view(p)
+}
+pub fn arrange_canvas(p: &Path, all: bool, expected: &str) -> Result<SocialCanvas, String> {
+    writable_graph(p, expected)?;
+    let view = canvas_view(p)?;
+    let mut occupied: Vec<Placement> = view
+        .placements
+        .iter()
+        .filter(|item| !view.nodes.contains(&item.node) || (!all && item.pinned))
+        .cloned()
+        .collect();
+    let mut next = view.placements.clone();
+    for node in &view.nodes {
+        let placement = next.iter_mut().find(|item| &item.node == node).unwrap();
+        if !all && placement.pinned {
+            continue;
+        }
+        (placement.x, placement.y) = free_slot(&occupied);
+        occupied.push(placement.clone());
+    }
+    save_canvas_layout(p, &next, expected)
+}
+
+/// 每次只改一个已载入条目；未知字段、其他边及失效引用原样保留。
+pub fn edit_canvas_edge(
+    p: &Path,
+    index: Option<usize>,
+    next: Option<&SocialEdge>,
+    expected: &str,
+) -> Result<SocialCanvas, String> {
+    let mut map = writable_graph(p, expected)?;
+    let mut edges = rows(&map)?;
+    if index.is_some_and(|i| i >= edges.len()) {
+        return Err("关系已失效，请刷新".into());
+    }
+    if let Some(edge) = next {
+        edge.from.validate()?;
+        edge.to.validate()?;
+        if edge.kind.trim().is_empty() {
+            return Err("关系类型不能为空".into());
+        }
+        let mut row = index.map(|i| edges[i].clone()).unwrap_or_default();
+        for (k, v) in [
+            ("起类", &edge.from.kind),
+            ("起", &edge.from.name),
+            ("止类", &edge.to.kind),
+            ("止", &edge.to.name),
+            ("类型", &edge.kind),
+        ] {
+            row.insert(key(k), key(v));
+        }
+        row.insert(
+            key("方向"),
+            key(if edge.directed { "有向" } else { "无向" }),
+        );
+        row.insert(key("秘密"), Value::Bool(edge.secret));
+        set_map_scalar(&mut row, "描述", edge.note.as_deref());
+        if let Some(i) = index {
+            edges[i] = row;
+        } else {
+            edges.push(row);
+        }
+    } else if let Some(i) = index {
+        edges.remove(i);
+    } else {
+        return Err("未选择关系".into());
+    }
+    map.insert(
+        key("关系"),
+        Value::Sequence(edges.into_iter().map(Value::Mapping).collect()),
+    );
+    crate::book_file::write_yaml_mapping(&graph_path(p), map)?;
+    canvas_view(p)
 }
 
 fn read_optional(path: &Path) -> Result<Option<String>, String> {
@@ -411,29 +947,69 @@ pub fn save_person_relationships(
         set_map_scalar(&mut r, "描述", e.note.as_deref());
         next.push(Value::Mapping(r));
     }
+    map.insert(key("关系"), Value::Sequence(next));
+    merge_legend(&mut map, legend, None)?;
+    crate::book_file::write_yaml_mapping(&graph_path(p), map)
+}
+
+fn merge_legend(
+    map: &mut Mapping,
+    legend: &[crate::relationship::LegendItem],
+    sources: Option<&[Option<usize>]>,
+) -> Result<(), String> {
     let old_legend = map
         .get(key("图例"))
         .and_then(Value::as_sequence)
         .cloned()
         .unwrap_or_default();
+    if let Some(sources) = sources {
+        if sources.len() != legend.len() {
+            return Err("图例来源数量不符，请刷新".into());
+        }
+        let mut used = std::collections::HashSet::new();
+        let source_count = old_legend.len();
+        for index in sources.iter().flatten() {
+            if *index >= source_count || !used.insert(*index) {
+                return Err("图例来源条目失效，请刷新".into());
+            }
+        }
+    }
     let legend = legend
         .iter()
-        .map(|l| {
-            let mut r = old_legend
-                .iter()
-                .filter_map(Value::as_mapping)
-                .find(|r| map_scalar(r, "名").as_deref() == Some(&l.name))
-                .cloned()
-                .unwrap_or_default();
+        .enumerate()
+        .map(|(index, l)| {
+            let original = if let Some(sources) = sources {
+                sources[index]
+                    .and_then(|i| old_legend.get(i))
+                    .and_then(Value::as_mapping)
+            } else {
+                old_legend
+                    .iter()
+                    .filter_map(Value::as_mapping)
+                    .find(|r| map_scalar(r, "名").as_deref() == Some(&l.name))
+            };
+            let mut r = original.cloned().unwrap_or_default();
             r.insert(key("名"), key(&l.name));
             r.insert(key("色"), key(&l.color));
             r.insert(key("方向"), key(if l.directed { "有向" } else { "无向" }));
             Value::Mapping(r)
         })
         .collect();
-    map.insert(key("关系"), Value::Sequence(next));
     map.insert(key("图例"), Value::Sequence(legend));
-    crate::book_file::write_yaml_mapping(&graph_path(p), map)
+    Ok(())
+}
+
+pub fn save_canvas_legend(
+    p: &Path,
+    legend: &[crate::relationship::LegendItem],
+    sources: &[Option<usize>],
+    expected: &str,
+) -> Result<SocialCanvas, String> {
+    let mut map = writable_graph(p, expected)?;
+    let legend = crate::relationship::normalize_legend(legend)?;
+    merge_legend(&mut map, &legend, Some(sources))?;
+    crate::book_file::write_yaml_mapping(&graph_path(p), map)?;
+    canvas_view(p)
 }
 pub fn edit_membership(
     p: &Path,

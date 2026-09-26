@@ -518,6 +518,26 @@ fn read_social_workspace(project: String) -> Result<social::SocialWorkspace, Str
     social::workspace(Path::new(&project))
 }
 #[tauri::command]
+fn read_social_canvas(project: String) -> Result<social::SocialCanvas, String> {
+    social::canvas_view(Path::new(&project))
+}
+#[tauri::command]
+fn save_social_layout(project: String, placements: Vec<social::Placement>, expected: String) -> Result<social::SocialCanvas, String> {
+    social::save_canvas_layout(Path::new(&project), &placements, &expected)
+}
+#[tauri::command]
+fn arrange_social_canvas(project: String, all: bool, expected: String) -> Result<social::SocialCanvas, String> {
+    social::arrange_canvas(Path::new(&project), all, &expected)
+}
+#[tauri::command]
+fn edit_social_edge(project: String, index: Option<usize>, next: Option<social::SocialEdge>, expected: String) -> Result<social::SocialCanvas, String> {
+    social::edit_canvas_edge(Path::new(&project), index, next.as_ref(), &expected)
+}
+#[tauri::command]
+fn save_social_legend(project: String, legend: Vec<relationship::LegendItem>, sources: Vec<Option<usize>>, expected: String) -> Result<social::SocialCanvas, String> {
+    social::save_canvas_legend(Path::new(&project), &legend, &sources, &expected)
+}
+#[tauri::command]
 fn save_organization(project: String, draft: social::OrganizationDraft, expected: Option<String>) -> Result<social::Organization,String> {
     social::save_organization(Path::new(&project), &draft, expected.as_deref())
 }
@@ -1052,6 +1072,11 @@ pub fn run() {
             transmute_character_card,
             read_relationships,
             read_social_workspace,
+            read_social_canvas,
+            save_social_layout,
+            arrange_social_canvas,
+            edit_social_edge,
+            save_social_legend,
             save_organization,
             delete_organization,
             edit_membership,

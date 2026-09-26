@@ -6,7 +6,7 @@ import { errMsg, moveItem } from "./util";
 interface RelationshipLegendDialogProps {
   legend: LegendItem[];
   /** 保存整份图例（顺序即列表顺序）；返回后由上层重读画布。 */
-  onSave: (legend: LegendItem[]) => Promise<void>;
+  onSave: (legend: LegendItem[], sources: (number | null)[]) => Promise<void>;
   onClose: () => void;
 }
 
@@ -17,7 +17,7 @@ export default function RelationshipLegendDialog({
   onSave,
   onClose,
 }: RelationshipLegendDialogProps) {
-  const [items, setItems] = useState<LegendItem[]>(legend);
+  const [items, setItems] = useState<(LegendItem & { source: number | null })[]>(legend.map((item, source) => ({ ...item, source })));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -30,7 +30,7 @@ export default function RelationshipLegendDialog({
     setBusy(true);
     setError(null);
     try {
-      await onSave(items);
+      await onSave(items.map(({ source: _source, ...item }) => item), items.map((item) => item.source));
     } catch (e) {
       setError(errMsg(e));
       setBusy(false);
@@ -120,7 +120,7 @@ export default function RelationshipLegendDialog({
         <div className="page-actions">
           <button
             className="btn"
-            onClick={() => setItems([...items, emptyLegendItem(items.length)])}
+            onClick={() => setItems([...items, { ...emptyLegendItem(items.length), source: null }])}
           >
             加一项
           </button>

@@ -3,27 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { errMsg } from "./util";
 import ContentSurface from "./ContentSurface";
-import MarkdownEditor from "./MarkdownEditor";
-import { dirName } from "./editorRender";
+import OrganizationDialog from "./OrganizationDialog";
+import { ORG_FIELDS, type OrganizationDraft, type SocialWorkspace as Workspace } from "./socialCanvasTypes";
 import { membershipSummary, type Membership } from "./characterProfile";
 
-interface OrganizationDraft {
-  name: string;
-  purpose: string | null;
-  location: string | null;
-  conflict: string | null;
-  secret: string | null;
-  body: string;
-}
-interface Organization { path: string; draft: OrganizationDraft; fingerprint: string }
-interface Workspace {
-  organizations: Organization[];
-  persons: string[];
-  memberships: Membership[];
-  fingerprint: string;
-  upgraded: boolean;
-  recoveryNeeded: boolean;
-}
 interface UpgradePreview {
   organizations: string[];
   changes: { path: string; before: string | null; after: string }[];
@@ -32,12 +15,9 @@ interface UpgradePreview {
 const EMPTY_ORGANIZATION: OrganizationDraft = {
   name: "", purpose: null, location: null, conflict: null, secret: null, body: "",
 };
-const ORG_FIELDS = [
-  ["purpose", "目的"], ["location", "所在地"], ["conflict", "矛盾"], ["secret", "秘密"],
-] as const;
 
 /** 复用现有完整卡片和宽编辑框；社会网只保存关系，档案仍是一文件一实体。 */
-export default function SocialView({ project, onChanged }: { project: string; onChanged: () => void }) {
+export default function SocialView({ project, onChanged, onRelations }: { project: string; onChanged: () => void; onRelations?: (name: string) => void }) {
   const [data, setData] = useState<Workspace | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -107,7 +87,7 @@ export default function SocialView({ project, onChanged }: { project: string; on
             <ContentSurface key={org.path} identity={org.path} title={org.draft.name}
               expanded={!collapsed.has(org.path)} onToggleExpanded={() => toggle(org.path)}
               onEdit={() => setOrganization({ draft: { ...org.draft }, expected: org.fingerprint })}>
-              <button className="btn small" onClick={() => document.getElementById("organization-memberships")?.scrollIntoView({ block: "start" })}>组织关系</button>
+              <button className="btn small" onClick={() => onRelations ? onRelations(org.draft.name) : document.getElementById("organization-memberships")?.scrollIntoView({ block: "start" })}>组织关系</button>
               {ORG_FIELDS.map(([field, label]) => org.draft[field] && <p className="field-line" key={field}><span className="field-label">{label}</span>{org.draft[field]}</p>)}
               {data.memberships.filter((m) => m.organization === org.draft.name).map((m, index) => <p className="field-line" key={index}><span className="field-label">成员关系</span>{membershipSummary(m, "person")}</p>)}
               {org.draft.body && <div className="card-body">{org.draft.body}</div>}
@@ -125,19 +105,9 @@ export default function SocialView({ project, onChanged }: { project: string; on
         </div>
       </>}
 
-      {organization && <div className="dialog-overlay"><form className="dialog wide" onSubmit={(e) => { e.preventDefault(); void perform(() => invoke("save_organization", { project, ...organization })); }}>
-        <h2>{organization.expected ? "编辑组织" : "新建组织"}</h2>
-        {error && <div className="error-box" role="alert">{error}</div>}
-        <label>组织名<input autoFocus required disabled={busy || !!organization.expected} value={organization.draft.name} onChange={(e) => setOrganization({ ...organization, draft: { ...organization.draft, name: e.target.value } })} /></label>
-        {ORG_FIELDS.map(([field, label]) => <label key={field}>{label}<input disabled={busy} value={organization.draft[field] ?? ""} onChange={(e) => setOrganization({ ...organization, draft: { ...organization.draft, [field]: e.target.value || null } })} /></label>)}
-        <label>正文<MarkdownEditor value={organization.draft.body} onChange={(body) => setOrganization((old) => old && ({ ...old, draft: { ...old.draft, body } }))} resolveDir={organization.expected ? dirName(data?.organizations.find((org) => org.draft.name === organization.draft.name)?.path ?? "") : undefined} height="240px" /></label>
-        <p className="hint">所有说明都可留空。保存为 构思/组织/组织名.md；编辑时保留手补字段。</p>
-        <div className="dialog-actions">
-          {organization.expected && <button type="button" className="btn danger" disabled={busy} onClick={() => { if (window.confirm(`删除组织「${organization.draft.name}」？关系引用会保留，正文文件将删除。`)) void perform(() => invoke("delete_organization", { project, name: organization.draft.name, expected: organization.expected })); }}>删除</button>}
-          <button type="button" className="btn" disabled={busy} onClick={() => setOrganization(null)}>取消</button><button className="btn primary" disabled={busy}>保存</button>
-        </div>
-      </form></div>}
-
+      {organization && <OrganizationDialog project={project} initial={organization.draft} expected={organization.expected}
+        path={data?.organizations.find((org) => org.draft.name === organization.draft.name)?.path}
+        onClose={() => setOrganization(null)} onSaved={() => { setOrganization(null); void load(); onChanged(); }} />}
       {member && data && <div className="dialog-overlay"><form className="dialog" onSubmit={(e) => { e.preventDefault(); void perform(() => invoke("edit_membership", { project, ...member, expected: data.fingerprint })); }}>
         <h2>{member.previous ? "编辑组织关系" : "添加组织关系"}</h2>
         {error && <div className="error-box" role="alert">{error}</div>}

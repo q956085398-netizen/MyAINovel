@@ -21,7 +21,7 @@ import ForeshadowBoard from "./ForeshadowBoard";
 import MapsView from "./MapsView";
 import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
-import RelationshipCanvas from "./RelationshipCanvas";
+import SocialCanvas from "./SocialCanvas";
 import SocialView from "./SocialView";
 import PlanningView from "./PlanningView";
 import BridgeLibrary from "./BridgeLibrary";
@@ -386,10 +386,11 @@ export default function ProjectPage({
                     onOrganizations={() => setCharacterView("组织与归属")}
                   />
                 ) : characterView === "组织与归属" ? (
-                  <SocialView project={project.dir} onChanged={refreshAll} />
+                  <SocialView project={project.dir} onChanged={refreshAll} onRelations={(name) => { setRelationFocus(`组织:${name}`); setCharacterView("画布"); }} />
                 ) : (
-                  <RelationshipCanvas
+                  <SocialCanvas
                     project={project.dir}
+                    onUpgrade={() => setCharacterView("组织与归属")}
                     focusName={relationFocus}
                     onAiCommand={(names) => void runAiCommand("人物关系梳理", names)}
                     onChat={(name) => void chatWith(name)}

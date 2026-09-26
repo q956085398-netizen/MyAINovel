@@ -203,7 +203,7 @@ pub fn save_table(project: &Path, table: &RelationshipTable) -> Result<(), Strin
     write_yaml_mapping(&path, map)
 }
 
-fn legend_from(map: &Mapping, path: &Path) -> Result<Vec<LegendItem>, String> {
+pub(crate) fn legend_from(map: &Mapping, path: &Path) -> Result<Vec<LegendItem>, String> {
     let Some(value) = map.get(Value::String("图例".into())) else {
         return Ok(Vec::new());
     };
@@ -284,7 +284,7 @@ fn edges_from(map: &Mapping, path: &Path) -> Result<Vec<Relationship>, String> {
 }
 
 /// 落盘前的收口：名称非空、图例不重名、两端不是同一个人（列表项本身可以重复）。
-fn normalize_legend(legend: &[LegendItem]) -> Result<Vec<LegendItem>, String> {
+pub(crate) fn normalize_legend(legend: &[LegendItem]) -> Result<Vec<LegendItem>, String> {
     let mut out: Vec<LegendItem> = Vec::new();
     for item in legend {
         let name = item.name.trim();
