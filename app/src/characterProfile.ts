@@ -31,8 +31,8 @@ export interface Membership {
   note: string | null;
 }
 
-export function membershipSummary(member: Membership): string {
-  return [member.organization, member.kind, member.role, member.status, member.secret ? "秘密" : "公开", member.note].filter(Boolean).join(" · ");
+export function membershipSummary(member: Membership, endpoint: "person" | "organization" = "organization"): string {
+  return [member[endpoint], member.kind, member.role, member.status, member.secret ? "秘密" : "公开", member.note].filter(Boolean).join(" · ");
 }
 
 export function characterDetailRows(profile?: CharacterProfile): [string, string][] {

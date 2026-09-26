@@ -5,6 +5,7 @@ import { errMsg } from "./util";
 import ContentSurface from "./ContentSurface";
 import MarkdownEditor from "./MarkdownEditor";
 import { dirName } from "./editorRender";
+import { membershipSummary, type Membership } from "./characterProfile";
 
 interface OrganizationDraft {
   name: string;
@@ -15,15 +16,6 @@ interface OrganizationDraft {
   body: string;
 }
 interface Organization { path: string; draft: OrganizationDraft; fingerprint: string }
-interface Membership {
-  person: string;
-  organization: string;
-  kind: string;
-  role: string | null;
-  status: string;
-  secret: boolean;
-  note: string | null;
-}
 interface Workspace {
   organizations: Organization[];
   persons: string[];
@@ -117,7 +109,7 @@ export default function SocialView({ project, onChanged }: { project: string; on
               onEdit={() => setOrganization({ draft: { ...org.draft }, expected: org.fingerprint })}>
               <button className="btn small" onClick={() => document.getElementById("organization-memberships")?.scrollIntoView({ block: "start" })}>组织关系</button>
               {ORG_FIELDS.map(([field, label]) => org.draft[field] && <p className="field-line" key={field}><span className="field-label">{label}</span>{org.draft[field]}</p>)}
-              {data.memberships.filter((m) => m.organization === org.draft.name).map((m, index) => <p className="field-line" key={index}><span className="field-label">成员关系</span>{`${m.person} · ${m.kind}${m.role ? ` · ${m.role}` : ""} · ${m.status} · ${m.secret ? "秘密" : "公开"}${m.note ? ` · ${m.note}` : ""}`}</p>)}
+              {data.memberships.filter((m) => m.organization === org.draft.name).map((m, index) => <p className="field-line" key={index}><span className="field-label">成员关系</span>{membershipSummary(m, "person")}</p>)}
               {org.draft.body && <div className="card-body">{org.draft.body}</div>}
             </ContentSurface>
           ))}

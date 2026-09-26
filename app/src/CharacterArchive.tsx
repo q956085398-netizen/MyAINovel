@@ -41,7 +41,7 @@ export default function CharacterArchive(props: Props) {
   function cards(items: NoteEntry[]) {
     return <div className="card-list">{items.map((note) => (
       <ContentSurface key={note.path} identity={note.path} title={note.name} pending={note.pending}
-        expanded={note.pending || !collapsed.has(note.path)} onToggleExpanded={() => toggle(note.path)}
+        expanded={!collapsed.has(note.path)} onToggleExpanded={() => toggle(note.path)}
         onEdit={() => onEdit(note)}
         badges={note.aliases.map((a) => <span key={a} className="tag">别名：{a}</span>)}
         actions={<>

@@ -587,10 +587,11 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
         body: String::new(),
         pending: false,
     };
-    let Ok(raw) = read_text(path) else {
+    let Ok(bytes) = fs::read(path) else {
         return entry;
     };
-    entry.fingerprint = content_fingerprint(raw.as_bytes()).to_string();
+    entry.fingerprint = content_fingerprint(&bytes).to_string();
+    let raw = String::from_utf8_lossy(&bytes).into_owned();
     let raw = strip_bom(&raw);
     let Some((yaml_text, body)) = split_frontmatter(raw) else {
         entry.body = raw.to_string();
@@ -644,8 +645,8 @@ pub fn save_note(
 
     let base = prev_path.filter(|p| *p != path).unwrap_or(&path);
     if let Some(expected) = &draft.fingerprint {
-        let current = read_text(base)?;
-        if &content_fingerprint(current.as_bytes()).to_string() != expected {
+        let current = fs::read(base).map_err(|e| format!("无法读取笔记 {}：{e}", base.display()))?;
+        if &content_fingerprint(&current).to_string() != expected {
             return Err("笔记在载入后已改变，未覆盖外部修改；请重新打开核对".into());
         }
     }
@@ -1297,6 +1298,20 @@ mod tests {
         fs::write(&saved.path, "外部改写的小传").unwrap();
         assert!(save_note(temp.path(), &d, Some(&saved.path)).is_err());
         assert_eq!(fs::read_to_string(saved.path).unwrap(), "外部改写的小传");
+    }
+
+    #[test]
+    fn 人物指纹核对原始字节而不是有损解码文本() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("构思/人物/甲.md");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, [0xff]).unwrap();
+        let entry = scan_notes(temp.path(), NoteKind::Character).unwrap().remove(0);
+        let mut d = NoteDraft::new(NoteKind::Character, "甲");
+        d.fingerprint = Some(entry.fingerprint);
+        fs::write(&path, [0xfe]).unwrap();
+        assert!(save_note(temp.path(), &d, Some(&path)).is_err());
+        assert_eq!(fs::read(path).unwrap(), vec![0xfe]);
     }
 
     #[test]
