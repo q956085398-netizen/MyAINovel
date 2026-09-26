@@ -1138,6 +1138,34 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    #[test]
+    fn 力量体系提示删改留空后可重开且旧世界观未知字段保留() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path();
+        let legacy = project.join("构思/世界观/旧修炼体系.md");
+        write(&legacy, "---\n类别: 力量体系\n自定义境界: [听潮, 观海]\n---\n原有设定，不要求等级。\n");
+        let original = fs::read(&legacy).unwrap();
+        let old = scan_notes(project, NoteKind::Worldview).unwrap();
+        assert_eq!(old[0].body.trim(), "原有设定，不要求等级。");
+        assert_eq!(fs::read(&legacy).unwrap(), original);
+
+        let mut draft = NoteDraft::new(NoteKind::Worldview, "旧修炼体系");
+        draft.body = "## 我改写的提示\n\n力量来自承诺，无固定等级。".into();
+        let saved = save_note(project, &draft, Some(&legacy)).unwrap();
+        let reopened = scan_notes(project, NoteKind::Worldview).unwrap();
+        assert_eq!(reopened[0], saved);
+        assert_eq!(reopened[0].category, None);
+        assert_eq!(reopened[0].body, draft.body);
+        let raw = fs::read_to_string(&legacy).unwrap();
+        assert!(raw.contains("自定义境界"));
+        assert!(raw.contains("听潮"));
+
+        draft.body.clear();
+        save_note(project, &draft, Some(&legacy)).unwrap();
+        assert_eq!(scan_notes(project, NoteKind::Worldview).unwrap()[0].body, "");
+        assert_eq!(fs::read_dir(project.join("构思/世界观")).unwrap().count(), 1);
+    }
+
     fn write(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();

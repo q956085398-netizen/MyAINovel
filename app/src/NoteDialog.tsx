@@ -292,6 +292,9 @@ export default function NoteDialog({
             resolveDir={prevPath ? dirName(prevPath) : undefined}
           />
         </label>
+        {kind === "世界观" && (
+          <p className="hint">正文里的思考提示和标题都可删除、留空或改写，类别也可留空；无需填写等级结构。</p>
+        )}
         <p className="hint">
           保存写入 构思/{kind}/{name.trim() || "标题"}.md；同名自动续号，
           在 Obsidian 里手补的字段不会丢。

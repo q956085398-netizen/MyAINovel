@@ -23,11 +23,13 @@ import ProjectMetaDialog from "./ProjectMetaDialog";
 import RelationshipCanvas from "./RelationshipCanvas";
 import PlanningView from "./PlanningView";
 import BridgeLibrary from "./BridgeLibrary";
+import PowerSystemHome from "./PowerSystemHome";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 // 「三线」拆为「期待感」「目标」两页签（工单 #36）：名字自解释，
 // 数据模型不动（三线.yaml 的类别枚举仍是 期待｜目标），只按类别过滤复用看板。
 const TABS = [
+  "首页",
   "大纲",
   "类型圈",
   "矛盾",
@@ -43,6 +45,7 @@ const TABS = [
   "开头",
 ] as const;
 const NAV_GROUPS = [
+  { step: "", label: "", tabs: ["首页"] },
   { step: "第一步", label: "定书", tabs: ["大纲", "类型圈", "人物", "世界观", "地图", "开头"] },
   { step: "第二步", label: "生情节", tabs: ["矛盾", "桥段库", "单元", "排布"] },
   { step: "第三步", label: "织张力", tabs: ["伏笔", "期待感", "目标"] },
@@ -90,6 +93,7 @@ export default function ProjectPage({
   onAiCommand,
 }: ProjectPageProps) {
   const [tab, setTab] = useState<Tab>(initialTab ?? "大纲");
+  const [powerSystemView, setPowerSystemView] = useState(false);
   const [meta, setMeta] = useState<ProjectMeta>(emptyProjectMeta());
   const [metaWarning, setMetaWarning] = useState<string | undefined>();
   const [metaOpen, setMetaOpen] = useState(false);
@@ -273,7 +277,10 @@ export default function ProjectPage({
                 <button
                   key={t}
                   className={`nav-item ${tab === t ? "active" : ""}`}
-                  onClick={() => setTab(t)}
+                  onClick={() => {
+                    setPowerSystemView(false);
+                    setTab(t);
+                  }}
                 >
                   {t}
                   {t === "矛盾" && project.contradictionCount > 0 && (
@@ -312,6 +319,12 @@ export default function ProjectPage({
         </nav>
 
         <div className="project-content" key={`${tab}-${reloadKey}`}>
+          {tab === "首页" && (
+            <PowerSystemHome project={project.dir} onOpen={() => {
+              setPowerSystemView(true);
+              setTab("世界观");
+            }} />
+          )}
           {tab === "大纲" && <PlanningView project={project.dir} unitNames={units.map((unit) => unit.name)} />}
           {tab === "类型圈" && <CircleView project={project.dir} vocab={vocab} />}
           {tab === "地图" && <MapsView project={project.dir} onChanged={refreshAll} />}
@@ -326,6 +339,7 @@ export default function ProjectPage({
             <NoteList
               project={project.dir}
               kind={tab}
+              worldviewCategory={tab === "世界观" && powerSystemView ? "力量体系" : undefined}
               vocab={vocab}
               onChanged={refreshAll}
               onPromoted={() => setTab("单元")}

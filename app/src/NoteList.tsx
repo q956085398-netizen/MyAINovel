@@ -7,6 +7,7 @@ import NoteDialog from "./NoteDialog";
 import GeoUpgradeDialog from "./GeoUpgradeDialog";
 import PendingZone from "./PendingZone";
 import { usePendingToggle } from "./pendingToggle";
+import { createPowerSystemDraft, POWER_SYSTEM_CATEGORY } from "./powerSystem";
 
 interface NoteListProps {
   project: string;
@@ -20,6 +21,8 @@ interface NoteListProps {
   onAiCommand?: () => void;
   /** 人物页专属：「跟 TA 聊」进人物对话（工单 #16）。 */
   onChat?: (name: string) => void;
+  /** 首页进入力量体系时按类别筛看；仍编辑同一份世界观词条。 */
+  worldviewCategory?: string;
 }
 
 const KIND_HEADINGS: Record<NoteKind, string> = {
@@ -34,7 +37,7 @@ const KIND_HINTS: Record<NoteKind, string> = {
   矛盾: "构思期尚模糊的剧情种子：一句话核心＋类型，展开后提为单元（矛盾留档、状态改「已成单元」）。",
   单元: "矛盾展开后的形态：约 4~5 个桥段的完整故事，桥段清单写在正文（自由文本）。",
   人物: "一人一文件、文件名即人名；小传写在这里，关系连在「画布」视图（类型/方向/秘密）。",
-  世界观: "设定词条：类别（力量体系/地理/势力/其他）；地图＝「地理」类词条，排布按名引用。",
+  世界观: "自由设定词条，类别只作提示；力量体系可从可删提示或空白正文开始。地图与地域在「地图」页编辑。",
   开头: "开篇构思的多版本形态：每版一文件，标「备选/选定」；多份「选定」应用会提醒你。",
 };
 
@@ -99,7 +102,9 @@ export default function NoteList({
   onPromoted,
   onAiCommand,
   onChat,
+  worldviewCategory,
 }: NoteListProps) {
+  const [categoryFilter, setCategoryFilter] = useState(worldviewCategory ?? "");
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -157,8 +162,10 @@ export default function NoteList({
     }
   }
 
-  const polishing = notes.filter((n) => n.pending);
-  const normal = notes.filter((n) => !n.pending);
+  const visibleNotes = notes.filter((n) => !categoryFilter || n.category === categoryFilter);
+  const polishing = visibleNotes.filter((n) => n.pending);
+  const normal = visibleNotes.filter((n) => !n.pending);
+  const powerSystem = kind === "世界观" && categoryFilter === POWER_SYSTEM_CATEGORY;
 
   const selectedStatus =
     kind === "开头" && notes.filter((n) => n.status === "选定").length > 1
@@ -169,7 +176,7 @@ export default function NoteList({
     <div className="note-pane">
       <div className="pane-head">
         <div>
-          <h2>{KIND_HEADINGS[kind]}</h2>
+          <h2>{powerSystem ? "力量体系／修炼体系" : KIND_HEADINGS[kind]}</h2>
           <p className="hint">{KIND_HINTS[kind]}</p>
         </div>
         <div className="page-actions">
@@ -182,14 +189,26 @@ export default function NoteList({
               AI 矛盾梳理
             </button>
           )}
+          {powerSystem && (
+            <button className="btn" onClick={() => setEditing({ draft: createPowerSystemDraft(false), prevPath: null })}>
+              从空白正文开始
+            </button>
+          )}
           <button
             className="btn primary"
-            onClick={() => setEditing({ draft: emptyNoteDraft(kind), prevPath: null })}
+            onClick={() => setEditing({ draft: powerSystem ? createPowerSystemDraft(true) : emptyNoteDraft(kind), prevPath: null })}
           >
-            新建{kind}
+            {powerSystem ? "新建力量体系（带可删提示）" : `新建${kind}`}
           </button>
         </div>
       </div>
+
+      {kind === "世界观" && (
+        <div className="subtabs">
+          <button className={`subtab ${!categoryFilter ? "active" : ""}`} onClick={() => setCategoryFilter("")}>全部词条</button>
+          <button className={`subtab ${powerSystem ? "active" : ""}`} onClick={() => setCategoryFilter(POWER_SYSTEM_CATEGORY)}>力量体系</button>
+        </div>
+      )}
 
       <PendingZone
         label={`待打磨的${kind}`}
@@ -238,9 +257,9 @@ export default function NoteList({
       {error && <div className="error-box">{error}</div>}
       {loading && <p className="hint">正在读取……</p>}
 
-      {!loading && !error && notes.length === 0 && (
+      {!loading && !error && visibleNotes.length === 0 && (
         <div className="empty-state">
-          <p>还没有{kind}。</p>
+          <p>还没有{powerSystem ? "力量体系词条" : kind}。</p>
           <p className="hint">新建一篇，或直接在 Obsidian 里往 构思/{kind}/ 丢 .md 文件。</p>
         </div>
       )}
