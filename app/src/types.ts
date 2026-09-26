@@ -845,12 +845,14 @@ export interface Relationship {
 
 /** 关系表（构思/人物关系.yaml，应用受管、整表重写）。 */
 export interface RelationshipTable {
+  fingerprint?: string | null;
   legend: LegendItem[];
   edges: Relationship[];
 }
 
 /** 画布数据（派生，只读）。 */
 export interface RelationshipView {
+  fingerprint?: string | null;
   legend: LegendItem[];
   /** 文件里的**全部**边，保文件次序——**保存时的唯一底稿**：失效引用的边
    *  也在里面，整表写回才不会把它们悄悄丢掉（画布只画两端都在的那些）。 */

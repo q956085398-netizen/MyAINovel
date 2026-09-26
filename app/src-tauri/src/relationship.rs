@@ -75,6 +75,8 @@ pub struct Relationship {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelationshipTable {
+    #[serde(default)]
+    pub fingerprint: Option<String>,
     pub legend: Vec<LegendItem>,
     pub edges: Vec<Relationship>,
 }
@@ -83,6 +85,7 @@ pub struct RelationshipTable {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelationshipView {
+    pub fingerprint: Option<String>,
     pub legend: Vec<LegendItem>,
     /// 文件里的**全部**边，保文件次序——**保存时的唯一底稿**：
     /// 失效引用的边也在里面，整表写回才不会把它们悄悄丢掉。
@@ -144,6 +147,7 @@ pub fn read_table(project: &Path) -> Result<RelationshipTable, String> {
     let path = relationship_path(project);
     if !path.is_file() {
         return Ok(RelationshipTable {
+            fingerprint: None,
             legend: default_legend(),
             edges: Vec::new(),
         });
@@ -160,14 +164,16 @@ pub fn read_table(project: &Path) -> Result<RelationshipTable, String> {
         }
     }
     let mut edges = edges_from(&map, &path)?;
-    if path == crate::social::graph_path(project) {
+    let fingerprint = if path == crate::social::graph_path(project) {
         let raw = std::fs::read(&path).map_err(|e|e.to_string())?;
         let version = crate::book_file::content_fingerprint(&raw);
         for (index, edge) in edges.iter_mut().enumerate() {
             edge.source_row = Some(format!("{version}:{index}"));
         }
-    }
+        Some(version.to_string())
+    } else { None };
     Ok(RelationshipTable {
+        fingerprint,
         legend: legend_from(&map, &path)?,
         edges,
     })
@@ -184,7 +190,7 @@ pub fn save_table(project: &Path, table: &RelationshipTable) -> Result<(), Strin
     let edges = normalize_edges(&table.edges)?;
     let path = relationship_path(project);
     if path == crate::social::graph_path(project) {
-        return crate::social::save_person_relationships(project, &legend, &edges);
+        return crate::social::save_person_relationships(project, &legend, &edges, table.fingerprint.as_deref());
     }
     read_table(project)?;
     if let Some(parent) = path.parent() {
@@ -396,6 +402,7 @@ pub fn relationship_view(project: &Path) -> RelationshipView {
                 }
             }
             RelationshipView {
+                fingerprint: table.fingerprint,
                 legend: table.legend,
                 edges: table.edges,
                 missing,
@@ -404,6 +411,7 @@ pub fn relationship_view(project: &Path) -> RelationshipView {
             }
         }
         Err(e) => RelationshipView {
+            fingerprint: None,
             legend: default_legend(),
             edges: Vec::new(),
             missing: Vec::new(),
@@ -692,6 +700,7 @@ mod tests {
             let err = save_table(
                 &p,
                 &RelationshipTable {
+                    fingerprint: view.fingerprint,
                     legend: view.legend,
                     edges: view.edges,
                 },
@@ -775,6 +784,7 @@ mod tests {
         let view = relationship_view(&p);
         // 画布存回用的就是 view.edges——失效引用必须留在里面，不然一次保存就没了。
         save_table(&p, &RelationshipTable {
+            fingerprint: view.fingerprint,
             legend: view.legend,
             edges: view.edges,
         })

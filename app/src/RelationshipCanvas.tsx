@@ -187,12 +187,15 @@ export default function RelationshipCanvas({
    *  保存不会把画不出来的边悄悄丢掉。 */
   const save = useCallback(
     async (table: RelationshipTable) => {
-      const nextView = await invoke<RelationshipView>("save_relationships", { project, table });
+      const nextView = await invoke<RelationshipView>("save_relationships", {
+        project,
+        table: { ...table, fingerprint: view?.fingerprint ?? null },
+      });
       setView(nextView);
       onChanged();
       return nextView;
     },
-    [project, onChanged],
+    [project, onChanged, view?.fingerprint],
   );
 
   const layoutData = useMemo(() => layout(persons), [persons]);

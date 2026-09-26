@@ -356,8 +356,13 @@ pub fn save_person_relationships(
     p: &Path,
     legend: &[crate::relationship::LegendItem],
     edges: &[crate::relationship::Relationship],
+    expected: Option<&str>,
 ) -> Result<(), String> {
     ensure_idle(p)?;
+    assert_version(
+        &graph_path(p),
+        expected.ok_or("缺少社会关系版本，请刷新画布")?,
+    )?;
     let mut map = read_graph(p)?;
     let old = rows(&map)?;
     let person_edge = |r: &Mapping| {
@@ -931,5 +936,38 @@ mod tests {
         recover_upgrade(p).unwrap();
         confirm_upgrade(p, &preview_upgrade(p).unwrap()).unwrap();
         assert_eq!(workspace(p).unwrap().memberships.len(), 1);
+    }
+
+    #[test]
+    fn 过期画布删除最后一条关系_不得清空外部新增关系() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path();
+        confirm_upgrade(p, &preview_upgrade(p).unwrap()).unwrap();
+        let mut first = crate::relationship::read_table(p).unwrap();
+        first.edges.push(crate::relationship::Relationship {
+            source_row: None,
+            from: "甲".into(),
+            to: "乙".into(),
+            kind: "师徒".into(),
+            note: None,
+            secret: false,
+        });
+        crate::relationship::save_table(p, &first).unwrap();
+        let mut stale = crate::relationship::read_table(p).unwrap();
+        let mut concurrent = crate::relationship::read_table(p).unwrap();
+        concurrent.edges.push(crate::relationship::Relationship {
+            source_row: None,
+            from: "甲".into(),
+            to: "丙".into(),
+            kind: "旧识".into(),
+            note: None,
+            secret: false,
+        });
+        crate::relationship::save_table(p, &concurrent).unwrap();
+        stale.edges.clear();
+        let before = fs::read_to_string(graph_path(p)).unwrap();
+        assert!(crate::relationship::save_table(p, &stale).is_err());
+        assert_eq!(fs::read_to_string(graph_path(p)).unwrap(), before);
+        assert_eq!(crate::relationship::read_table(p).unwrap().edges.len(), 2);
     }
 }
