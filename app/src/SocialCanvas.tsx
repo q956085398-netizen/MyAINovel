@@ -3,7 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Confluence, NoteEntry } from "./types";
 import { relationStyle } from "./types";
-import { characterDetailRows } from "./characterProfile";
+import { characterDetailRows, membershipSummary, type Membership } from "./characterProfile";
+import CharacterImage from "./CharacterImage";
 import { nodeId, nodeLabel, ORG_FIELDS, type Placement, type SocialCanvasData, type SocialEdge, type SocialWorkspace, type Organization } from "./socialCanvasTypes";
 import { errMsg, oneLinePreview } from "./util";
 import NoteDialog from "./NoteDialog";
@@ -27,6 +28,7 @@ export default function SocialCanvas(props: Props) {
   const [data, setData] = useState<SocialCanvasData | null>(null);
   const [persons, setPersons] = useState<NoteEntry[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [memberships, setMemberships] = useState<Membership[]>([]);
   const [selected, setSelected] = useState<string[]>(focusName ? [focusName.startsWith("组织:") ? focusName : `人物:${focusName}`] : []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -51,7 +53,7 @@ export default function SocialCanvas(props: Props) {
         invoke<NoteEntry[]>("scan_notes", { project, kind: "人物" }),
         invoke<SocialWorkspace>("read_social_workspace", { project }),
       ]);
-      setData(next); setPersons(notes); setOrganizations(workspace.organizations);
+      setData(next); setPersons(notes); setOrganizations(workspace.organizations); setMemberships(workspace.memberships);
       setSelected((current) => current.filter((id) => next.nodes.some((node) => nodeId(node) === id)));
       setUndo(null); setError(null);
     } catch (e) { setData(null); setError(`读取社会画布失败：${errMsg(e)}`); }
@@ -180,6 +182,8 @@ export default function SocialCanvas(props: Props) {
               const note = node.kind === "人物" ? persons.find((item) => item.name === node.name) : undefined;
               const org = node.kind === "组织" ? organizations.find((item) => item.draft.name === node.name) : undefined;
               const summary = note?.character?.identity ?? org?.draft.purpose ?? "";
+              const tags = node.kind === "人物" ? note?.character?.traits ?? []
+                : [...new Set(data.edges.filter((edge) => nodeId(edge.from) === id || nodeId(edge.to) === id).map((edge) => edge.kind))];
               const editArchive = () => {
                 if (busy || data.recoveryNeeded) return;
                 setSelected((old) => old.includes(id) ? old : [...old, id]);
@@ -195,10 +199,11 @@ export default function SocialCanvas(props: Props) {
                   const delta: Record<string, [number, number]> = { ArrowLeft: [-20, 0], ArrowRight: [20, 0], ArrowUp: [0, -20], ArrowDown: [0, 20] };
                   if (writable && delta[e.key]) { e.preventDefault(); const [dx, dy] = delta[e.key]; run(savePositions(data.placements.map((item) => nodeId(item.node) === id ? { ...item, x: Math.min(100000, Math.max(60, item.x + dx)), y: Math.min(100000, Math.max(60, item.y + dy)) } : item))); }
                 }}>
-                <title>{nodeLabel(node)}{summary ? `：${summary}` : ""}。方向键移动，空格选中，双击或 F2 编辑档案。</title>
+                <title>{nodeLabel(node)}{summary ? `：${summary}` : ""}{tags.length ? ` · ${tags.join("、")}` : ""}。方向键移动，空格选中，双击或 F2 编辑档案。</title>
                 {node.kind === "人物" ? <circle r="34" /> : <rect x="-40" y="-30" width="80" height="60" rx="8" />}
                 <text textAnchor="middle" dominantBaseline="middle">{oneLinePreview(node.name, 5)}</text>
                 <text className="social-node-caption" textAnchor="middle" y="53">{oneLinePreview(summary || node.name, 14)}</text>
+                {tags.length > 0 && <text className="social-node-caption" textAnchor="middle" y="71">{oneLinePreview(tags.join(" · "), 14)}</text>}
                 {p.pinned && <text className="social-node-pin" x="28" y="-32">固定</text>}
               </g>;
             })}
@@ -215,7 +220,14 @@ export default function SocialCanvas(props: Props) {
               {person && onChat && <button className="btn small" onClick={() => onChat(person.name)}>跟 TA 聊</button>}
             </div>
               {person && characterDetailRows(person.character).map(([label, value]) => <p className="field-line" key={label}><span className="field-label">{label}</span>{value}</p>)}
+              {person && <CharacterImage image={person.character?.image} path={person.path} name={person.name} />}
+              {person?.aliases.length ? <p className="field-line"><span className="field-label">别名</span>{person.aliases.join("、")}</p> : null}
               {org && ORG_FIELDS.map(([field, label]) => org.draft[field] && <p className="field-line" key={field}><span className="field-label">{label}</span>{org.draft[field]}</p>)}
+              {memberships.filter((m) => person ? m.person === person.name : m.organization === org?.draft.name).map((m, index) => <p className="field-line" key={`membership-${index}`}>
+                <span className="field-label">{person ? "组织关系" : "成员关系"}</span>{membershipSummary(m, person ? "organization" : "person")}
+                {(!persons.some((p) => p.name === m.person) || !organizations.some((o) => o.draft.name === m.organization)) && <span className="hint">（档案引用已失效，关系仍保留）</span>}
+              </p>)}
+              {person?.group && <p className="hint">旧分组：{person.group}（组织关系以上述社会网为准）</p>}
               <div className="card-body">{person?.body ?? org?.draft.body}</div>
               <ul className="rel-side-edges">{data.edges.map((edge, index) => (nodeId(edge.from) === id || nodeId(edge.to) === id) && <li key={index}>
                 <button className="link-like" disabled={!writable} onClick={() => setEdgeDialog({ index, edge })}>{nodeLabel(edge.from)} {edge.directed ? "→" : "—"} {nodeLabel(edge.to)} · {edge.kind}{edge.secret ? " · 秘密" : ""}</button>
@@ -235,8 +247,8 @@ export default function SocialCanvas(props: Props) {
       </div>
     </>}
     {edgeDialog && data && <SocialEdgeDialog initial={edgeDialog.edge} nodes={data.nodes} onClose={() => setEdgeDialog(null)}
-      onSave={async (next) => { await mutate(() => invoke("edit_social_edge", { project, index: edgeDialog.index, next, expected: data.fingerprint })); setEdgeDialog(null); }}
-      onDelete={edgeDialog.index === null ? undefined : async () => { await mutate(() => invoke("edit_social_edge", { project, index: edgeDialog.index, next: null, expected: data.fingerprint })); setEdgeDialog(null); }} />}
+      onSave={async (next) => { await mutate(() => invoke("edit_social_edge", { project, index: edgeDialog.index, next, expected: data.fingerprint })); setEdgeDialog(null); await load(); }}
+      onDelete={edgeDialog.index === null ? undefined : async () => { await mutate(() => invoke("edit_social_edge", { project, index: edgeDialog.index, next: null, expected: data.fingerprint })); setEdgeDialog(null); await load(); }} />}
     {legendOpen && data && <RelationshipLegendDialog legend={data.legend} onClose={() => setLegendOpen(false)} onSave={async (legend, sources) => {
       await mutate(() => invoke("save_social_legend", { project, legend, sources, expected: data.fingerprint })); setLegendOpen(false);
     }} />}
