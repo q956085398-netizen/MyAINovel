@@ -12,10 +12,10 @@ import type { GlobalSearchReport } from "../src/globalSearchNavigation.tsx";
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const LIBRARY_KEY = "gongbi.libraryPath";
-const A = "C:/整合验收/旧库副本";
-const B = "C:/整合验收/另一库";
-const bookPath = `${A}/《拆书样本》/拆书.md`;
-const projectDir = `${B}/项目/《构思样本》`;
+const originalLibrary = "C:/整合验收/旧库副本";
+const otherLibrary = "C:/整合验收/另一库";
+const bookPath = `${originalLibrary}/《拆书样本》/拆书.md`;
+const projectDir = `${otherLibrary}/项目/《构思样本》`;
 
 function button(container: ParentNode, text: string): HTMLButtonElement {
   const found = Array.from(container.querySelectorAll("button"))
@@ -65,7 +65,7 @@ function editor(container: HTMLElement) {
 
 test("整合流程：切库保存新增文字、待打磨编辑与搜索、迟到结果隔离、切回重读", async () => {
   sharedWin.localStorage.clear();
-  sharedWin.localStorage.setItem(LIBRARY_KEY, A);
+  sharedWin.localStorage.setItem(LIBRARY_KEY, originalLibrary);
   sharedWin.localStorage.setItem("gongbi.lastBook", bookPath);
   const disk = new Map([[bookPath, "旧库原稿"]]);
   const book = {
@@ -90,7 +90,7 @@ test("整合流程：切库保存新增文字、待打磨编辑与搜索、迟�
   };
   const saveGate = deferred();
   const lateSearch = deferred<GlobalSearchReport>();
-  const picked = [B, A, B];
+  const picked = [otherLibrary, originalLibrary, otherLibrary];
   const saved: { path: string; content: string }[] = [];
   let version = 1;
   const ipc = new MockIpc(async (cmd, args) => {
@@ -99,8 +99,8 @@ test("整合流程：切库保存新增文字、待打磨编辑与搜索、迟�
       case "plugin:event|listen": return 1;
       case "plugin:event|unlisten":
       case "grant_asset_scope": return null;
-      case "scan_library": return args.root === A ? [book] : [];
-      case "scan_projects": return args.root === B ? [project] : [];
+      case "scan_library": return args.root === originalLibrary ? [book] : [];
+      case "scan_projects": return args.root === otherLibrary ? [project] : [];
       case "scan_inspirations":
       case "list_chat_sessions":
       case "scan_notes":
@@ -125,15 +125,15 @@ test("整合流程：切库保存新增文字、待打磨编辑与搜索、迟�
       case "load_vocab": return { types: [], solutions: [] };
       case "global_search": {
         if (args.query === "迟到查询") return lateSearch.promise;
-        return { hits: args.root === B ? [pendingHit] : [{
+        return { hits: args.root === otherLibrary ? [pendingHit] : [{
           kind: "拆书", title: book.name, path: bookPath, projectDir: null,
           projectTitle: null, category: null, matches: [],
         }], warnings: [], truncated: false };
       }
       case "global_search_preview": {
-        const valid = args.root === B ? args.path === pendingHit.path : args.path === bookPath;
+        const valid = args.root === otherLibrary ? args.path === pendingHit.path : args.path === bookPath;
         assert.ok(valid, "搜索目的地必须属于当前库");
-        return args.root === B ? line.name : disk.get(bookPath);
+        return args.root === otherLibrary ? line.name : disk.get(bookPath);
       }
       case "expectation_board": {
         assert.equal(args.project, projectDir, "期待线从其所属库的项目重读");
@@ -173,11 +173,11 @@ test("整合流程：切库保存新增文字、待打磨编辑与搜索、迟�
     await interact(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "，切库前输入" } }));
     await changeLibrary(container);
     await waitFor(() => saved.length === 1, "切库保护发起保存");
-    assert.equal(sharedWin.localStorage.getItem(LIBRARY_KEY), A);
+    assert.equal(sharedWin.localStorage.getItem(LIBRARY_KEY), originalLibrary);
     await interact(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "，保存等待中又输入" } }));
     assert.equal(disk.get(bookPath), "旧库原稿", "保存等待中不提前宣称落盘");
     await interact(() => saveGate.release());
-    await waitFor(() => sharedWin.localStorage.getItem(LIBRARY_KEY) === B, "最新文字保存后进入另一库");
+    await waitFor(() => sharedWin.localStorage.getItem(LIBRARY_KEY) === otherLibrary, "最新文字保存后进入另一库");
     assert.equal(disk.get(bookPath), "旧库原稿，切库前输入，保存等待中又输入");
     assert.equal(container.querySelector(".editor-page"), null);
 
@@ -199,7 +199,7 @@ test("整合流程：切库保存新增文字、待打磨编辑与搜索、迟�
     await query(container, "迟到查询");
     await waitFor(() => ipc.calls.some((c) => c.cmd === "global_search" && c.args.query === "迟到查询"), "另一库搜索挂起");
     await changeLibrary(container);
-    await waitFor(() => sharedWin.localStorage.getItem(LIBRARY_KEY) === A, "切回原库");
+    await waitFor(() => sharedWin.localStorage.getItem(LIBRARY_KEY) === originalLibrary, "切回原库");
     await interact(() => lateSearch.release({ hits: [pendingHit], warnings: [], truncated: false }));
     assert.equal(container.querySelector(".exp-pending-note"), null, "旧库构思对象已退出");
     assert.equal(container.querySelector(".global-search"), null, "迟到搜索不重开旧目的地");
@@ -211,7 +211,7 @@ test("整合流程：切库保存新增文字、待打磨编辑与搜索、迟�
     assert.equal(editor(container).state.doc.toString(), "旧库原稿，切库前输入，保存等待中又输入");
 
     await changeLibrary(container);
-    await waitFor(() => sharedWin.localStorage.getItem(LIBRARY_KEY) === B, "再次进入期待线所在库");
+    await waitFor(() => sharedWin.localStorage.getItem(LIBRARY_KEY) === otherLibrary, "再次进入期待线所在库");
     await query(container, line.name);
     await waitFor(() => !!container.querySelector(".global-search-open"), "编辑后的期待线仍可搜索");
     await interact(() => container.querySelector<HTMLButtonElement>(".global-search-open")!.click());
