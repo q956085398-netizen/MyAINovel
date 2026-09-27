@@ -353,6 +353,8 @@ pub struct BridgeDraft {
     pub beat_plan: Option<String>,
     #[serde(default)]
     pub type_solutions: Vec<BridgeTypeSolution>,
+    #[serde(default)]
+    pub type_solutions_fingerprint: Option<String>,
     pub body: String,
 }
 
@@ -360,6 +362,20 @@ pub struct BridgeDraft {
 pub struct BridgeTypeSolution {
     pub kind: String,
     pub solution: String,
+    /// 只经 IPC 往返，不写入创作文件。编辑/删除后仍能找到原条目及未知键。
+    #[serde(default)]
+    pub source: Option<BridgePairSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BridgePairSource {
+    pub index: usize,
+    pub fingerprint: String,
+}
+
+fn pair_fingerprint(value: &Value) -> Result<String, String> {
+    let text = serde_yaml::to_string(value).map_err(|e| format!("无法读取类型解法条目：{e}"))?;
+    Ok(crate::book_file::content_fingerprint(text.as_bytes()).to_string())
 }
 
 impl BridgeDraft {
@@ -563,6 +579,7 @@ fn read_bridge(path: &Path) -> Bridge {
     draft.expectation_hook = crate::book_file::map_scalar(&map, "期待钩子");
     draft.beat_plan = crate::book_file::map_scalar(&map, "章节拍安排");
     draft.type_solutions = read_bridge_type_solutions(&map).unwrap_or_default();
+    draft.type_solutions_fingerprint = map.get(Value::String("类型解法".into())).and_then(|value| pair_fingerprint(value).ok());
     draft.body = body;
     Bridge {
         path: path.to_path_buf(),
@@ -596,15 +613,28 @@ pub fn save_bridge(
         }
     } else { Mapping::new() };
     read_bridge_type_solutions(&map)?;
+    if let Some(expected) = &draft.type_solutions_fingerprint {
+        let current = map.get(Value::String("类型解法".into())).ok_or("类型解法已被外部修改，请重新打开桥段")?;
+        if pair_fingerprint(current)? != *expected {
+            return Err("类型解法已被外部修改，请重新打开桥段".into());
+        }
+    }
     apply_bridge_draft(&mut map, draft);
     let previous_pairs = map.get(Value::String("类型解法".into())).and_then(Value::as_sequence).cloned().unwrap_or_default();
-    let pairs = draft.type_solutions.iter().enumerate().filter_map(|(index, pair)| {
-        if pair.kind.trim().is_empty() && pair.solution.trim().is_empty() { return None; }
-        let mut item = previous_pairs.get(index).and_then(Value::as_mapping).cloned().unwrap_or_default();
+    let mut pairs = Vec::new();
+    for pair in &draft.type_solutions {
+        if pair.kind.trim().is_empty() && pair.solution.trim().is_empty() { continue; }
+        let mut item = if let Some(source) = &pair.source {
+            let original = previous_pairs.get(source.index).ok_or("类型解法已被外部修改，请重新打开桥段")?;
+            if pair_fingerprint(original)? != source.fingerprint {
+                return Err("类型解法已被外部修改，请重新打开桥段".into());
+            }
+            original.as_mapping().cloned().ok_or("无法读取原类型解法条目")?
+        } else { Mapping::new() };
         item.insert(Value::String("类型".into()), Value::String(pair.kind.clone()));
         item.insert(Value::String("解法".into()), Value::String(pair.solution.clone()));
-        Some(Value::Mapping(item))
-    }).collect::<Vec<_>>();
+        pairs.push(Value::Mapping(item));
+    }
     if pairs.is_empty() { map.remove(Value::String("类型解法".into())); }
     else { map.insert(Value::String("类型解法".into()), Value::Sequence(pairs)); }
     if let Some(previous) = prev_path {
@@ -620,7 +650,7 @@ pub fn save_bridge(
 fn read_bridge_type_solutions(map: &Mapping) -> Result<Vec<BridgeTypeSolution>, String> {
     let Some(value) = map.get(Value::String("类型解法".into())) else { return Ok(Vec::new()); };
     let items = value.as_sequence().ok_or("桥段的类型解法应为列表，拒绝覆盖")?;
-    items.iter().map(|item| {
+    items.iter().enumerate().map(|(index, item)| {
         let fields = item.as_mapping().ok_or("桥段的类型解法条目应为对象，拒绝覆盖")?;
         let text = |key: &str| -> Result<String, String> {
             match fields.get(Value::String(key.into())) {
@@ -629,7 +659,7 @@ fn read_bridge_type_solutions(map: &Mapping) -> Result<Vec<BridgeTypeSolution>, 
                 _ => Err(format!("桥段类型解法的{key}应为文字，拒绝覆盖")),
             }
         };
-        Ok(BridgeTypeSolution { kind: text("类型")?, solution: text("解法")? })
+        Ok(BridgeTypeSolution { kind: text("类型")?, solution: text("解法")?, source: Some(BridgePairSource { index, fingerprint: pair_fingerprint(item)? }) })
     }).collect()
 }
 
@@ -739,10 +769,10 @@ mod tests {
         let draft: BridgeDraft = serde_json::from_value(input).unwrap();
         save_bridge(project, &draft, Some(&path)).unwrap();
         let reopened = serde_json::to_value(&scan_bridges(project).unwrap()[0]).unwrap();
-        assert_eq!(reopened["typeSolutions"], serde_json::json!([
-            {"kind": "自定义爽点", "solution": "借对手之口揭晓"},
-            {"kind": "掉马甲", "solution": ""}
-        ]));
+        assert_eq!(reopened["typeSolutions"][0]["kind"], "自定义爽点");
+        assert_eq!(reopened["typeSolutions"][0]["solution"], "借对手之口揭晓");
+        assert_eq!(reopened["typeSolutions"][1]["kind"], "掉马甲");
+        assert_eq!(reopened["typeSolutions"][1]["solution"], "");
         assert_eq!(reopened["pending"], true);
         assert_eq!(reopened["body"], "原正文");
         assert!(fs::read_to_string(&path).unwrap().contains("手补: 保留"));
@@ -769,6 +799,27 @@ mod tests {
             assert!(save_bridge(tmp.path(), &BridgeDraft::new("夜探"), Some(&path)).is_err());
             assert_eq!(fs::read_to_string(&path).unwrap(), original);
         }
+    }
+
+    #[test]
+    fn 删除首组类型解法_剩余条目保留自己的未知键() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("构思/桥段");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("夜探.md");
+        fs::write(&path, "---\n类型解法:\n- 类型: 甲\n  解法: 一\n  手补: 甲的字段\n- 类型: 乙\n  解法: 二\n  手补: 乙的字段\n---\n正文").unwrap();
+        let mut draft = scan_bridges(tmp.path()).unwrap()[0].draft.clone();
+        draft.type_solutions.remove(0);
+        save_bridge(tmp.path(), &draft, Some(&path)).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("乙的字段"));
+        assert!(!text.contains("甲的字段"));
+        let mut stale = scan_bridges(tmp.path()).unwrap()[0].draft.clone();
+        stale.type_solutions.clear();
+        let external = text.replace("乙的字段", "外部新增说明");
+        fs::write(&path, &external).unwrap();
+        assert!(save_bridge(tmp.path(), &stale, Some(&path)).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), external);
     }
     use std::fs;
     use tempfile::tempdir;

@@ -58,7 +58,7 @@ export default function BridgeLibrary({ project, units, vocab, onChanged }: Brid
   const shown = bridges.filter((bridge) =>
     filter === "全部" ? true : filter === "待安排" ? !bridge.unit : Boolean(bridge.unit),
   );
-  const polishing = shown.filter((bridge) => bridge.pending);
+  const polishing = bridges.filter((bridge) => bridge.pending);
   const normal = shown.filter((bridge) => !bridge.pending);
 
   function toggleExpanded(path: string) {
@@ -207,7 +207,7 @@ function BridgeCard({
         {bridge.expectationHook && <span>钩子：{bridge.expectationHook}</span>}
       </div>
       {bridge.beatPlan && <p className="bridge-summary">章节拍安排：{bridge.beatPlan}</p>}
-      {(bridge.typeSolutions ?? []).map((pair, index) => <p className="bridge-summary" key={index}>类型：{pair.kind || "（未填写）"}{pair.solution ? ` → 解法：${pair.solution}` : ""}</p>)}
+      {(bridge.typeSolutions ?? []).map((pair, index) => <p className="bridge-summary" key={index}>{pair.kind ? `类型：${pair.kind}` : ""}{pair.solution ? `${pair.kind ? " → " : ""}解法：${pair.solution}` : ""}</p>)}
       {(bridge.startChapter || bridge.endChapter) && <p className="hint">章节区间：{bridge.startChapter ?? "？"} ~ {bridge.endChapter ?? "？"}</p>}
       {warnings.map((warning) => <p className="soft-warning" key={warning}>{warning}</p>)}
       <div className="bridge-actions">

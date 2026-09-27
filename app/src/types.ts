@@ -359,7 +359,8 @@ export interface BridgeDraft {
   keyTurn: string | null;
   expectationHook: string | null;
   beatPlan: string | null;
-  typeSolutions: { kind: string; solution: string }[];
+  typeSolutions: { kind: string; solution: string; source?: { index: number; fingerprint: string } | null }[];
+  typeSolutionsFingerprint?: string | null;
   body: string;
 }
 

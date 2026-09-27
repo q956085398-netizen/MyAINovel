@@ -180,7 +180,7 @@ mod tests {
         let project = crate::project::create_project(tmp.path(), "新书").unwrap();
         let mut draft = crate::planning::BridgeDraft::new("夜探");
         draft.type_solutions.push(crate::planning::BridgeTypeSolution {
-            kind: "自创类型".into(), solution: "借对手之口".into(),
+            kind: "自创类型".into(), solution: "借对手之口".into(), source: None,
         });
         crate::planning::save_bridge(&project.dir, &draft, None).unwrap();
         load_vocab(tmp.path()).unwrap();
