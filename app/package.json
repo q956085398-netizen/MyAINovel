@@ -20,7 +20,9 @@
     "test:session-preset": "node --test tests/sessionPreset.test.ts",
     "test:ideation": "node --test tests/ideationGuidance.test.ts",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:safe-leave": "node --test tests/safeLeave.test.ts",
+    "test:save-nav": "node --test --import ./tests/helpers/register-tsx-loader.mjs tests/saveNavigation.page.test.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.0",

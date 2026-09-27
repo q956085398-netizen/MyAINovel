@@ -22,6 +22,7 @@ import { emptyBookMeta } from "./types";
 import { errMsg } from "./util";
 import { autosaveIntervalMs, chapterPrefixOrDefault } from "./settings";
 import { registerFlushSaver } from "./saveFlush";
+import { settleForLeave } from "./safeLeave";
 import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
 import { dirName, editorRender, parseBookHeaderValues, applyBookHeaderValues } from "./editorRender";
 import type { BookHeaderValues } from "./editorRender";
@@ -114,6 +115,8 @@ export default function EditorPage({
   /** 冲突未裁决期间自动保存暂停（与书写编辑器同一纪律），手动保存仍可裁决。 */
   const conflictRef = useRef(false);
   const savingRef = useRef(false);
+  /** 在途保存的 Promise（工单 #77）：离开结算是等它完成，不是被门闩弹回。 */
+  const saveInFlightRef = useRef<Promise<boolean> | null>(null);
   const autosaveRef = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const destination = useSearchDestination();
@@ -194,12 +197,31 @@ export default function EditorPage({
 
   /** 保存（门闩在此）：落定（保存成功/本无改动）返回 true。
    *  自动保存、手动保存、返回即存同走这一条链——指纹对账与冲突裁决不变。
-   *  quiet＝兜底路径（卸载/关窗）：不弹框，冲突时盘上为准（ADR 0004）。 */
-  useEffect(() => registerSearchNavigationGuard(async () => {
-    if (!dirtyRef.current) return true;
-    if (conflictRef.current) return false;
-    return save(false, true);
-  }));
+   *  quiet＝兜底路径（卸载/关窗）：不弹框，冲突时盘上为准（ADR 0004）。
+   *  返回 true 只证明本次请求的快照落盘；往返期间又输入的内容仍带脏标
+   *  ——导航放行与否看 settleNow（工单 #77）。 */
+  useEffect(() => registerSearchNavigationGuard(() => settleNow(true)));
+
+  /** 离开结算（工单 #77，safeLeave.ts）：返回书库/搜索跳转等会卸载编辑器
+   *  的导航先经此结算到「无未保存内容」再放行；失败/冲突/持续输入未收敛
+   *  → false，原稿与文字保持原样。 */
+  async function settleNow(quiet = false): Promise<boolean> {
+    const view = viewRef.current;
+    if (!view) return true;
+    return settleForLeave({
+      isDirty: () => dirtyRef.current,
+      inConflict: () => conflictRef.current,
+      inFlightSave: () => saveInFlightRef.current,
+      saveRound: async () => {
+        const inFlight = saveInFlightRef.current;
+        if (inFlight) {
+          await inFlight.catch(() => {});
+          return true;
+        }
+        return save(false, quiet);
+      },
+    });
+  }
 
   async function save(force = false, quiet = false): Promise<boolean> {
     if (quiet && (!dirtyRef.current || conflictRef.current)) return true;
@@ -208,19 +230,24 @@ export default function EditorPage({
     if (!force && !dirtyRef.current) return true;
     savingRef.current = true;
     if (!quiet) setSaveStatus("saving");
-    try {
-      return await persist(force, quiet);
-    } catch (e) {
-      if (quiet) {
-        console.error("拆书兜底保存失败：", e);
-      } else {
-        setSaveStatus("error");
-        window.alert(`保存失败：${errMsg(e)}`);
+    const round = (async () => {
+      try {
+        return await persist(force, quiet);
+      } catch (e) {
+        if (quiet) {
+          console.error("拆书兜底保存失败：", e);
+        } else {
+          setSaveStatus("error");
+          window.alert(`保存失败：${errMsg(e)}`);
+        }
+        return false;
+      } finally {
+        savingRef.current = false;
+        saveInFlightRef.current = null;
       }
-      return false;
-    } finally {
-      savingRef.current = false;
-    }
+    })();
+    saveInFlightRef.current = round;
+    return round;
   }
 
   /** 保存本体（门闩由 save 持有）：落盘或进入冲突裁决。
@@ -246,9 +273,12 @@ export default function EditorPage({
       }
       return true;
     }
-    if (quiet) return false;
-    // 指纹对不上：盘上被外部程序改过，交人裁决（既有两段确认）。
+    // 指纹对不上：盘上被外部程序改过。冲突状态无论路径都亮出来（胶囊转
+    // 「保存冲突」、自动保存暂停）；quiet（导航守卫/兜底）不弹框直接拦下，
+    // 常规路径弹既有两段确认交人裁决。
     conflictRef.current = true;
+    setSaveStatus("conflict");
+    if (quiet) return false;
     if (
       window.confirm(
         "保存被拦下：文件在保存前已被其他程序修改（可能是在 Obsidian 里编辑过）。\n\n" +
@@ -275,7 +305,6 @@ export default function EditorPage({
       return await persist(true);
     }
     // 两次裁决都取消：冲突挂着，自动保存暂停，状态胶囊亮「保存冲突」。
-    setSaveStatus("conflict");
     return false;
   }
 
@@ -318,10 +347,11 @@ export default function EditorPage({
     return true;
   }
 
-  /** 返回即存（工单 #28）：先落盘再退回书库——返回永远不丢内容；
-   *  保存遇冲突时弹既有裁决框，裁决没落定（取消）就留在编辑器。 */
+  /** 返回即存（工单 #28；工单 #77 起先结算）：先落盘到稳定版本再退回
+   *  书库——返回永远不丢内容；冲突裁决没落定（取消）或持续输入未收敛
+   *  就留在编辑器。 */
   async function handleBack() {
-    if (dirtyRef.current && !(await save(false))) return;
+    if (!(await settleNow())) return;
     onBack();
   }
 

@@ -49,6 +49,7 @@ import {
 import { errMsg, formatCount } from "./util";
 import { autosaveIntervalMs } from "./settings";
 import { registerFlushSaver } from "./saveFlush";
+import { settleForLeave } from "./safeLeave";
 import {
   chapterLabel,
   chapterHead,
@@ -232,6 +233,11 @@ export default function WritingPage({
   const baselineRef = useRef(0);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
+  /** 在途保存的 Promise（工单 #77）：离开结算是等它完成，不是被门闩弹回。 */
+  const saveInFlightRef = useRef<Promise<boolean> | null>(null);
+  /** 导航代次（工单 #77）：每次 openChapter 递增；迟到的读取/保存响应
+   *  对不上最新代次就不许回填编辑器（连续点击不同目标时只认最后一次）。 */
+  const navSeqRef = useRef(0);
   const conflictRef = useRef(false);
   const autosaveRef = useRef<number | null>(null);
   const countsTimerRef = useRef<number | null>(null);
@@ -714,13 +720,20 @@ export default function WritingPage({
     return true;
   }
 
+  /** 切章（工单 #77）：先结算保存（保存往返期间的新输入继续保存到稳定
+   *  版本），读取按请求代次约束——更新的导航已发起时丢弃迟到的读取；
+   *  读取期间又输入的，再结算一次才替换编辑器。结算失败/被取代 → 留在
+   *  原章，文字不动。 */
   async function openChapter(entry: ChapterEntry): Promise<boolean> {
-    if (currentRef.current && dirtyRef.current) {
-      const ok = await saveNow(false);
-      if (!ok) return false;
-    }
+    const generation = navSeqRef.current + 1;
+    navSeqRef.current = generation;
+    if (!(await settleNow())) return false;
+    if (navSeqRef.current !== generation) return false;
     try {
       const doc = await invoke<MdContent>("read_book_md", { path: entry.path });
+      if (navSeqRef.current !== generation) return false;
+      if (dirtyRef.current && !(await settleNow())) return false;
+      if (navSeqRef.current !== generation) return false;
       currentRef.current = entry;
       setCurrent(entry);
       fingerprintRef.current = doc.fingerprint;
@@ -749,12 +762,32 @@ export default function WritingPage({
   }
 
   /** 保存当前章（指纹闸）：成功 true；冲突 false（横幅交人裁决）。
-   *  quiet＝关窗兜底用：失败只记日志，不拿弹框拦关窗。 */
-  useEffect(() => registerSearchNavigationGuard(async () => {
-    if (!dirtyRef.current) return true;
-    if (conflictRef.current) return false;
-    return saveNow(false, true);
-  }));
+   *  quiet＝关窗兜底用：失败只记日志，不拿弹框拦关窗。
+   *  返回 true 只证明本次请求的快照落盘；往返期间又输入的内容仍带脏标
+   *  （由自动保存或离开结算接走）——导航放行与否看 settleNow。 */
+  useEffect(() => registerSearchNavigationGuard(() => settleNow(true)));
+
+  /** 离开结算（工单 #77，safeLeave.ts）：切章/返回/搜索跳转等会替换或
+   *  卸载编辑器的导航先经此结算到「无未保存内容」再放行；保存轮失败、
+   *  冲突未裁决或持续输入未收敛 → false，原编辑器与文字保持原样。 */
+  async function settleNow(quiet = false): Promise<boolean> {
+    const view = viewRef.current;
+    const entry = currentRef.current;
+    if (!view || !entry) return true;
+    return settleForLeave({
+      isDirty: () => dirtyRef.current,
+      inConflict: () => conflictRef.current,
+      inFlightSave: () => saveInFlightRef.current,
+      saveRound: async () => {
+        const inFlight = saveInFlightRef.current;
+        if (inFlight) {
+          await inFlight.catch(() => {});
+          return true;
+        }
+        return saveNow(false, quiet);
+      },
+    });
+  }
 
   async function saveNow(force: boolean, quiet = false): Promise<boolean> {
     const view = viewRef.current;
@@ -766,53 +799,62 @@ export default function WritingPage({
     if (conflictRef.current && !force) return false;
     savingRef.current = true;
     if (!quiet) setSaveStatus("saving");
-    try {
-      const content = view.state.doc.toString();
-      const result = await invoke<SaveResult>("save_chapter_md", {
-        project: project.dir,
-        path: entry.path,
-        content,
-        base: fingerprintRef.current,
-        force,
-      });
-      if (result.status === "conflict") {
-        conflictRef.current = true;
-        setConflict(true);
-        setSaveStatus("conflict");
+    const round = (async () => {
+      try {
+        const content = view.state.doc.toString();
+        const result = await invoke<SaveResult>("save_chapter_md", {
+          project: project.dir,
+          path: entry.path,
+          content,
+          base: fingerprintRef.current,
+          force,
+        });
+        // 保存响应绑定发起时的对象（工单 #77）：往返期间已换章的话，写盘
+        // 本身按旧路径完成/被拒，指纹/脏标/统计不得套到新章上。
+        if (currentRef.current?.path !== entry.path) return result.status === "saved";
+        if (result.status === "conflict") {
+          conflictRef.current = true;
+          setConflict(true);
+          setSaveStatus("conflict");
+          return false;
+        }
+        fingerprintRef.current = result.fingerprint;
+        conflictRef.current = false;
+        setConflict(false);
+        // 保存往返窗口里又打过字的不算干净：留着脏标让下一轮接走
+        // （自动保存或离开结算）。
+        if (viewRef.current?.state.doc.toString() === content) {
+          dirtyRef.current = false;
+          setSaveStatus("saved");
+        }
+        const s = chapterStats(content);
+        const delta = s.wordCount - baselineRef.current;
+        baselineRef.current = s.wordCount;
+        if (delta !== 0) addTodayWords(delta);
+        const statusNow = readChapterStatus(content);
+        setChapters((list) =>
+          list.map((c) =>
+            c.path === entry.path
+              ? { ...c, wordCount: s.wordCount, hanCount: s.hanCount, status: statusNow }
+              : c,
+          ),
+        );
+        return true;
+      } catch (e) {
+        if (quiet) {
+          console.error("关窗兜底保存失败：", e);
+        } else {
+          setSaveStatus("error");
+          window.alert(`保存失败：${errMsg(e)}`);
+        }
         return false;
+      } finally {
+        savingRef.current = false;
+        saveInFlightRef.current = null;
       }
-      fingerprintRef.current = result.fingerprint;
-      conflictRef.current = false;
-      setConflict(false);
-      // 保存往返窗口里又打过字的不算干净：留着脏标让下一轮自动保存接走。
-      if (view.state.doc.toString() === content) {
-        dirtyRef.current = false;
-        setSaveStatus("saved");
-      }
-      const s = chapterStats(content);
-      const delta = s.wordCount - baselineRef.current;
-      baselineRef.current = s.wordCount;
-      if (delta !== 0) addTodayWords(delta);
-      const statusNow = readChapterStatus(content);
-      setChapters((list) =>
-        list.map((c) =>
-          c.path === entry.path
-            ? { ...c, wordCount: s.wordCount, hanCount: s.hanCount, status: statusNow }
-            : c,
-        ),
-      );
-      return true;
-    } catch (e) {
-      if (quiet) {
-        console.error("关窗兜底保存失败：", e);
-      } else {
-        setSaveStatus("error");
-        window.alert(`保存失败：${errMsg(e)}`);
-      }
-      return false;
-    } finally {
-      savingRef.current = false;
-    }
+    })();
+    saveInFlightRef.current = round;
+    return round;
   }
 
   async function reloadFromDisk() {
@@ -844,10 +886,7 @@ export default function WritingPage({
   // ---------- 章节动作 ----------
 
   async function openNextChapter() {
-    if (currentRef.current && dirtyRef.current) {
-      const ok = await saveNow(false);
-      if (!ok) return;
-    }
+    if (!(await settleNow())) return;
     try {
       const created = await invoke<ChapterEntry>("create_chapter", {
         project: project.dir,
@@ -877,7 +916,7 @@ export default function WritingPage({
   async function renameCurrent(title: string) {
     const entry = currentRef.current;
     if (!entry) return;
-    if (dirtyRef.current && !(await saveNow(false))) return;
+    if (!(await settleNow())) return;
     try {
       const renamed = await invoke<ChapterEntry>("rename_chapter", {
         path: entry.path,
@@ -897,7 +936,7 @@ export default function WritingPage({
     const entry = currentRef.current;
     const view = viewRef.current;
     if (!entry || entry.ordinal === null || !view) return;
-    if (dirtyRef.current && !(await saveNow(false))) return;
+    if (!(await settleNow())) return;
     try {
       const preview = await invoke<ChapterSplitPreview>("preview_chapter_split", {
         project: project.dir,
@@ -971,7 +1010,7 @@ export default function WritingPage({
       return;
     }
     const entry = currentRef.current;
-    if (entry && dirtyRef.current && !(await saveNow(false))) return;
+    if (entry && !(await settleNow())) return;
     const numbered = chapters.filter((c) => c.ordinal !== null);
     const position = entry ? numbered.findIndex((c) => c.path === entry.path) : -1;
     try {
@@ -1067,7 +1106,7 @@ export default function WritingPage({
   }
 
   async function handleBack() {
-    if (dirtyRef.current && !(await saveNow(false))) return;
+    if (!(await settleNow())) return;
     onChanged();
     onBack();
   }
@@ -1083,12 +1122,12 @@ export default function WritingPage({
       window.alert("先打开一章再请 AI 陪看（章序按文件名前缀认，未编号章不参与）。");
       return;
     }
-    // 固定作者点击这一刻的正文；保存往返期间即使继续输入，本次陪看也不会悄悄读旧盘面。
-    const chapterContent = view.state.doc.toString();
-    if (dirtyRef.current && !(await saveNow(false))) {
+    // 先结算到稳定版本：陪看材料对照的盘面必须包含全部新输入。
+    if (!(await settleNow())) {
       window.alert("本章还有未落盘的修改（或保存冲突未裁决），先处理再请 AI 陪看。");
       return;
     }
+    const chapterContent = view.state.doc.toString();
     try {
       const text = await invoke<string>("build_ai_context", {
         kind: AI_CHAPTER_COMPANION,
@@ -1444,9 +1483,9 @@ export default function WritingPage({
                     label: "校对本章",
                     hint: "先落盘再校对",
                     disabled: !current,
-                    run: () => {
-                      void saveNow(false).then((saved) => saved && setProofOpen(true));
-                    },
+                  run: () => {
+                    void settleNow().then((saved) => saved && setProofOpen(true));
+                  },
                   },
                 ]}
               />
