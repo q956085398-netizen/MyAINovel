@@ -359,11 +359,13 @@ export interface BridgeDraft {
   keyTurn: string | null;
   expectationHook: string | null;
   beatPlan: string | null;
+  typeSolutions: { kind: string; solution: string }[];
   body: string;
 }
 
 export interface Bridge extends BridgeDraft {
   path: string;
+  pending: boolean;
 }
 
 export function emptyBridgeDraft(name = ""): BridgeDraft {
@@ -377,6 +379,7 @@ export function emptyBridgeDraft(name = ""): BridgeDraft {
     keyTurn: null,
     expectationHook: null,
     beatPlan: null,
+    typeSolutions: [],
     body: "",
   };
 }

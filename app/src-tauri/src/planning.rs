@@ -351,7 +351,15 @@ pub struct BridgeDraft {
     pub key_turn: Option<String>,
     pub expectation_hook: Option<String>,
     pub beat_plan: Option<String>,
+    #[serde(default)]
+    pub type_solutions: Vec<BridgeTypeSolution>,
     pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BridgeTypeSolution {
+    pub kind: String,
+    pub solution: String,
 }
 
 impl BridgeDraft {
@@ -367,6 +375,7 @@ impl BridgeDraft {
 #[serde(rename_all = "camelCase")]
 pub struct Bridge {
     pub path: std::path::PathBuf,
+    pub pending: bool,
     #[serde(flatten)]
     pub draft: BridgeDraft,
 }
@@ -524,6 +533,7 @@ fn read_bridge(path: &Path) -> Bridge {
     let Ok(raw) = crate::book_file::read_text(path) else {
         return Bridge {
             path: path.to_path_buf(),
+            pending: false,
             draft,
         };
     };
@@ -532,6 +542,7 @@ fn read_bridge(path: &Path) -> Bridge {
         draft.body = raw.to_string();
         return Bridge {
             path: path.to_path_buf(),
+            pending: false,
             draft,
         };
     };
@@ -539,6 +550,7 @@ fn read_bridge(path: &Path) -> Bridge {
         draft.body = raw.to_string();
         return Bridge {
             path: path.to_path_buf(),
+            pending: false,
             draft,
         };
     };
@@ -550,9 +562,11 @@ fn read_bridge(path: &Path) -> Bridge {
     draft.key_turn = crate::book_file::map_scalar(&map, "关键转折");
     draft.expectation_hook = crate::book_file::map_scalar(&map, "期待钩子");
     draft.beat_plan = crate::book_file::map_scalar(&map, "章节拍安排");
+    draft.type_solutions = read_bridge_type_solutions(&map).unwrap_or_default();
     draft.body = body;
     Bridge {
         path: path.to_path_buf(),
+        pending: crate::book_file::is_pending(&map),
         draft,
     }
 }
@@ -571,8 +585,28 @@ pub fn save_bridge(
     let base = prev_path
         .filter(|previous| *previous != path)
         .unwrap_or(&path);
-    let mut map = crate::book_file::frontmatter_mapping(base).unwrap_or_default();
+    let mut map = if base.exists() {
+        let raw = crate::book_file::read_text(base)?;
+        match crate::book_file::split_frontmatter(crate::book_file::strip_bom(&raw)) {
+            Some((yaml, _)) => match serde_yaml::from_str::<Value>(&yaml) {
+                Ok(Value::Mapping(map)) => map,
+                _ => return Err("桥段结构无法读取，拒绝覆盖".into()),
+            },
+            None => Mapping::new(),
+        }
+    } else { Mapping::new() };
+    read_bridge_type_solutions(&map)?;
     apply_bridge_draft(&mut map, draft);
+    let previous_pairs = map.get(Value::String("类型解法".into())).and_then(Value::as_sequence).cloned().unwrap_or_default();
+    let pairs = draft.type_solutions.iter().enumerate().filter_map(|(index, pair)| {
+        if pair.kind.trim().is_empty() && pair.solution.trim().is_empty() { return None; }
+        let mut item = previous_pairs.get(index).and_then(Value::as_mapping).cloned().unwrap_or_default();
+        item.insert(Value::String("类型".into()), Value::String(pair.kind.clone()));
+        item.insert(Value::String("解法".into()), Value::String(pair.solution.clone()));
+        Some(Value::Mapping(item))
+    }).collect::<Vec<_>>();
+    if pairs.is_empty() { map.remove(Value::String("类型解法".into())); }
+    else { map.insert(Value::String("类型解法".into()), Value::Sequence(pairs)); }
     if let Some(previous) = prev_path {
         if previous != path {
             fs::rename(previous, &path)
@@ -581,6 +615,22 @@ pub fn save_bridge(
     }
     crate::book_file::write_frontmatter(&path, map, &draft.body)?;
     Ok(read_bridge(&path))
+}
+
+fn read_bridge_type_solutions(map: &Mapping) -> Result<Vec<BridgeTypeSolution>, String> {
+    let Some(value) = map.get(Value::String("类型解法".into())) else { return Ok(Vec::new()); };
+    let items = value.as_sequence().ok_or("桥段的类型解法应为列表，拒绝覆盖")?;
+    items.iter().map(|item| {
+        let fields = item.as_mapping().ok_or("桥段的类型解法条目应为对象，拒绝覆盖")?;
+        let text = |key: &str| -> Result<String, String> {
+            match fields.get(Value::String(key.into())) {
+                None | Some(Value::Null) => Ok(String::new()),
+                Some(Value::String(value)) => Ok(value.clone()),
+                _ => Err(format!("桥段类型解法的{key}应为文字，拒绝覆盖")),
+            }
+        };
+        Ok(BridgeTypeSolution { kind: text("类型")?, solution: text("解法")? })
+    }).collect()
 }
 
 fn apply_bridge_draft(map: &mut Mapping, draft: &BridgeDraft) {
@@ -672,6 +722,54 @@ pub fn move_bridge(project: &Path, path: &Path, direction: i32) -> Result<Vec<Br
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn 桥段类型解法与待打磨_保存重开保持正文与未知键() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path();
+        let dir = project.join("构思/桥段");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("夜探.md");
+        fs::write(&path, "---\n待打磨: true\n手补: 保留\n---\n原正文").unwrap();
+        let mut input = serde_json::to_value(BridgeDraft::new("夜探")).unwrap();
+        input["body"] = serde_json::json!("原正文");
+        input["typeSolutions"] = serde_json::json!([
+            {"kind": "自定义爽点", "solution": "借对手之口揭晓"},
+            {"kind": "掉马甲", "solution": ""}
+        ]);
+        let draft: BridgeDraft = serde_json::from_value(input).unwrap();
+        save_bridge(project, &draft, Some(&path)).unwrap();
+        let reopened = serde_json::to_value(&scan_bridges(project).unwrap()[0]).unwrap();
+        assert_eq!(reopened["typeSolutions"], serde_json::json!([
+            {"kind": "自定义爽点", "solution": "借对手之口揭晓"},
+            {"kind": "掉马甲", "solution": ""}
+        ]));
+        assert_eq!(reopened["pending"], true);
+        assert_eq!(reopened["body"], "原正文");
+        assert!(fs::read_to_string(&path).unwrap().contains("手补: 保留"));
+        let before = fs::metadata(&path).unwrap().modified().unwrap();
+        crate::book_file::set_pending(&path, false).unwrap();
+        assert!(!scan_bridges(project).unwrap()[0].pending);
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before);
+        assert_eq!(scan_bridges(project).unwrap()[0].body, "原正文");
+        let mut cleared = draft.clone();
+        cleared.type_solutions.clear();
+        save_bridge(project, &cleared, Some(&path)).unwrap();
+        assert!(scan_bridges(project).unwrap()[0].type_solutions.is_empty());
+        assert!(!fs::read_to_string(&path).unwrap().contains("类型解法:"));
+    }
+
+    #[test]
+    fn 桥段类型解法损坏_保存拒绝覆盖() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("构思/桥段");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("夜探.md");
+        for original in ["---\n类型解法: 不是列表\n---\n保留正文", "---\n类型解法: [坏条目]\n---\n保留正文", "---\n类型解法: [\n---\n保留正文"] {
+            fs::write(&path, original).unwrap();
+            assert!(save_bridge(tmp.path(), &BridgeDraft::new("夜探"), Some(&path)).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        }
+    }
     use std::fs;
     use tempfile::tempdir;
 

@@ -2818,7 +2818,8 @@ button.save-chip {
 
 .bridge-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), min(100%, 440px)));
+  max-width: 900px;
   gap: var(--sp-4);
 }
 
@@ -2874,13 +2875,11 @@ button.save-chip {
 }
 
 .bridge-summary {
-  display: -webkit-box;
   margin: 0;
-  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--ink);
   line-height: 1.65;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
 }
 
 .bridge-meta {

@@ -344,6 +344,7 @@ export default function ProjectPage({
           {tab === "桥段库" && (
             <BridgeLibrary
               project={project.dir}
+              vocab={vocab}
               units={units}
               onChanged={refreshAll}
             />

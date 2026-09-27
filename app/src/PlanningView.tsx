@@ -385,6 +385,7 @@ function MilestoneCard({
       {missingUnits.length > 0 && (
         <p className="soft-warning">关联的单元暂未找到：{missingUnits.join("、")}。引用已保留，不会自动修复。</p>
       )}
+      {milestone.note && <p className="card-body">{milestone.note}</p>}
       <details>
         <summary>补充变化、感受与关联</summary>
         <div className="milestone-details">

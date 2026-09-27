@@ -123,6 +123,17 @@ fn harvest(root: &Path) -> (WordCounts, WordCounts) {
             count_trope(&mut type_counts, &mut solution_counts, &trope);
         }
     }
+    // 构思桥段与拆书共享提示；不修改词表，也不把其他项目字段当词汇。
+    for project in crate::project::scan_projects(root).unwrap_or_default() {
+        for bridge in crate::planning::scan_bridges(&project.dir).unwrap_or_default() {
+            for pair in &bridge.type_solutions {
+                let kind = pair.kind.trim();
+                let solution = pair.solution.trim();
+                if !kind.is_empty() { *type_counts.entry(kind.into()).or_insert(0) += 1; }
+                if !solution.is_empty() { *solution_counts.entry(solution.into()).or_insert(0) += 1; }
+            }
+        }
+    }
     (sort_by_count(type_counts), sort_by_count(solution_counts))
 }
 
@@ -162,6 +173,23 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn 构思桥段类型解法加入共享提示_不改词表() {
+        let tmp = TempDir::new().unwrap();
+        let project = crate::project::create_project(tmp.path(), "新书").unwrap();
+        let mut draft = crate::planning::BridgeDraft::new("夜探");
+        draft.type_solutions.push(crate::planning::BridgeTypeSolution {
+            kind: "自创类型".into(), solution: "借对手之口".into(),
+        });
+        crate::planning::save_bridge(&project.dir, &draft, None).unwrap();
+        load_vocab(tmp.path()).unwrap();
+        let before = fs::read(vocab_path(tmp.path())).unwrap();
+        let vocab = load_vocab(tmp.path()).unwrap();
+        assert!(vocab.types.contains(&"自创类型".into()));
+        assert!(vocab.solutions.contains(&"借对手之口".into()));
+        assert_eq!(fs::read(vocab_path(tmp.path())).unwrap(), before);
+    }
 
     fn write(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {

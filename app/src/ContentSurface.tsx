@@ -12,6 +12,7 @@ interface ContentSurfaceProps {
   searchMatched?: boolean;
   onEdit: () => void;
   onToggleExpanded: () => void;
+  canCollapse?: boolean;
   children: ReactNode;
   actions?: ReactNode;
 }
@@ -28,6 +29,7 @@ export default function ContentSurface({
   searchMatched = false,
   onEdit,
   onToggleExpanded,
+  canCollapse = true,
   children,
   actions,
 }: ContentSurfaceProps) {
@@ -56,7 +58,7 @@ export default function ContentSurface({
         {badges}
         <span className="card-title-spacer" />
         {trailing}
-        <button
+        {canCollapse && <button
           className="card-collapse"
           type="button"
           aria-expanded={expanded}
@@ -66,7 +68,7 @@ export default function ContentSurface({
           onClick={onToggleExpanded}
         >
           {searchMatched ? "搜索命中" : expanded ? "收起" : "展开"}
-        </button>
+        </button>}
       </div>
       {expanded && (
         <div id={`${contentCardDomId(identity)}-content`} className="content-card-content">
