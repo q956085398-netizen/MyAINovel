@@ -546,6 +546,8 @@ fn read_bridge(path: &Path) -> Bridge {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default(),
     );
+    // 无表也是一次载入状态，防止编辑期间外部新增表被空草稿抹掉。
+    draft.type_solutions_fingerprint = pair_fingerprint(&Value::Null).ok();
     let Ok(raw) = crate::book_file::read_text(path) else {
         return Bridge {
             path: path.to_path_buf(),
@@ -579,7 +581,9 @@ fn read_bridge(path: &Path) -> Bridge {
     draft.expectation_hook = crate::book_file::map_scalar(&map, "期待钩子");
     draft.beat_plan = crate::book_file::map_scalar(&map, "章节拍安排");
     draft.type_solutions = read_bridge_type_solutions(&map).unwrap_or_default();
-    draft.type_solutions_fingerprint = map.get(Value::String("类型解法".into())).and_then(|value| pair_fingerprint(value).ok());
+    if let Some(value) = map.get(Value::String("类型解法".into())) {
+        draft.type_solutions_fingerprint = pair_fingerprint(value).ok();
+    }
     draft.body = body;
     Bridge {
         path: path.to_path_buf(),
@@ -614,7 +618,7 @@ pub fn save_bridge(
     } else { Mapping::new() };
     read_bridge_type_solutions(&map)?;
     if let Some(expected) = &draft.type_solutions_fingerprint {
-        let current = map.get(Value::String("类型解法".into())).ok_or("类型解法已被外部修改，请重新打开桥段")?;
+        let current = map.get(Value::String("类型解法".into())).unwrap_or(&Value::Null);
         if pair_fingerprint(current)? != *expected {
             return Err("类型解法已被外部修改，请重新打开桥段".into());
         }
@@ -623,7 +627,7 @@ pub fn save_bridge(
     let previous_pairs = map.get(Value::String("类型解法".into())).and_then(Value::as_sequence).cloned().unwrap_or_default();
     let mut pairs = Vec::new();
     for pair in &draft.type_solutions {
-        if pair.kind.trim().is_empty() && pair.solution.trim().is_empty() { continue; }
+        if pair.source.is_none() && pair.kind.trim().is_empty() && pair.solution.trim().is_empty() { continue; }
         let mut item = if let Some(source) = &pair.source {
             let original = previous_pairs.get(source.index).ok_or("类型解法已被外部修改，请重新打开桥段")?;
             if pair_fingerprint(original)? != source.fingerprint {
@@ -819,6 +823,25 @@ mod tests {
         let external = text.replace("乙的字段", "外部新增说明");
         fs::write(&path, &external).unwrap();
         assert!(save_bridge(tmp.path(), &stale, Some(&path)).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), external);
+    }
+
+    #[test]
+    fn 桥段旧空类型解法保留手补_原无表时也保护外部新增() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("构思/桥段");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("夜探.md");
+        fs::write(&path, "---\n类型解法:\n- 手补: 待研究\n---\n正文").unwrap();
+        let mut draft = scan_bridges(tmp.path()).unwrap()[0].draft.clone();
+        draft.body = "新正文".into();
+        save_bridge(tmp.path(), &draft, Some(&path)).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("待研究"));
+        fs::write(&path, "旧桥段无表").unwrap();
+        let loaded = scan_bridges(tmp.path()).unwrap()[0].draft.clone();
+        let external = "---\n类型解法:\n- 类型: 外部新增\n---\n旧桥段无表";
+        fs::write(&path, external).unwrap();
+        assert!(save_bridge(tmp.path(), &loaded, Some(&path)).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), external);
     }
     use std::fs;
