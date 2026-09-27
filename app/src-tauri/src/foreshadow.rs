@@ -48,6 +48,9 @@ pub struct Foreshadow {
     pub name: String,
     /// 五态之一；缺省读作「待埋」。
     pub state: String,
+    /// 独立于伏笔业务状态的展示位置；旧数据缺键时为 false。
+    #[serde(default)]
+    pub pending: bool,
     pub planted: Vec<Anchor>,
     pub recovered: Vec<Payoff>,
 }
@@ -58,6 +61,7 @@ pub struct Foreshadow {
 pub struct ForeshadowView {
     pub name: String,
     pub state: String,
+    pub pending: bool,
     pub planted: Vec<AnchorView>,
     pub recovered: Vec<PayoffView>,
     /// 距当前最大章序已过多少章未收（仅已埋/部分收有值）。
@@ -72,50 +76,195 @@ pub fn foreshadow_path(project: &Path) -> PathBuf {
 
 // ---------- 读写 ----------
 
-pub fn read_foreshadows(project: &Path) -> Result<Vec<Foreshadow>, String> {
+#[derive(Debug, Clone)]
+struct ForeshadowRow {
+    raw: Mapping,
+    item: Foreshadow,
+}
+
+fn validate_optional_string(
+    map: &Mapping,
+    key: &str,
+    path: &Path,
+    location: &str,
+) -> Result<(), String> {
+    match map.get(Value::String(key.to_string())) {
+        None | Some(Value::Null | Value::String(_)) => Ok(()),
+        Some(_) => Err(format!("{} {location}的「{key}」应为文本", path.display())),
+    }
+}
+
+fn parse_foreshadow(map: &Mapping, path: &Path, index: usize) -> Result<Foreshadow, String> {
+    let name = map_scalar(map, "名")
+        .filter(|n| !n.trim().is_empty())
+        .ok_or_else(|| format!("{} 第 {index} 项缺「名」", path.display()))?;
+    validate_optional_string(map, "状态", path, &format!("第 {index} 项"))?;
+    let pending = match map.get(Value::String("待打磨".into())) {
+        None => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => {
+            return Err(format!(
+                "{} 第 {index} 项的「待打磨」应为布尔值",
+                path.display()
+            ));
+        }
+    };
+    for (record_index, row) in thread::map_rows(map, "埋设", path, index)?
+        .iter()
+        .enumerate()
+    {
+        let location = format!("第 {index} 项「埋设」第 {} 条", record_index + 1);
+        validate_optional_string(row, "引文", path, &location)?;
+    }
+    for (record_index, row) in thread::map_rows(map, "回收", path, index)?
+        .iter()
+        .enumerate()
+    {
+        let location = format!("第 {index} 项「回收」第 {} 条", record_index + 1);
+        for field in ["引文", "类型", "说明"] {
+            validate_optional_string(row, field, path, &location)?;
+        }
+    }
+    Ok(Foreshadow {
+        name,
+        state: map_scalar(map, "状态").unwrap_or_else(|| STATE_PENDING.to_string()),
+        pending,
+        planted: thread::map_anchors(map, "埋设", path, index)?,
+        recovered: thread::map_payoffs(map, "回收", path, index, RECOVERY_STAGE)?,
+    })
+}
+
+fn read_rows(project: &Path) -> Result<Vec<ForeshadowRow>, String> {
     thread::read_threads(
         &foreshadow_path(project),
-        "伏笔条目（名/状态/埋设/回收）",
+        "伏笔条目（名/状态/待打磨/埋设/回收）",
         |map, path, index| {
-            let name = map_scalar(map, "名")
-                .filter(|n| !n.trim().is_empty())
-                .ok_or_else(|| format!("{} 第 {index} 项缺「名」", path.display()))?;
-            Ok(Foreshadow {
-                name,
-                state: map_scalar(map, "状态").unwrap_or_else(|| STATE_PENDING.to_string()),
-                planted: thread::map_anchors(map, "埋设", path, index)?,
-                recovered: thread::map_payoffs(map, "回收", path, index, RECOVERY_STAGE)?,
+            Ok(ForeshadowRow {
+                raw: map.clone(),
+                item: parse_foreshadow(map, path, index)?,
             })
         },
     )
 }
 
-pub fn write_foreshadows(project: &Path, list: &[Foreshadow]) -> Result<(), String> {
-    thread::write_threads(&foreshadow_path(project), list, |item| {
-        let mut map = Mapping::new();
-        map.insert(
-            Value::String("名".into()),
-            Value::String(item.name.trim().to_string()),
+fn write_rows(project: &Path, rows: &[ForeshadowRow]) -> Result<(), String> {
+    let path = foreshadow_path(project);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("无法创建文件夹 {}：{e}", parent.display()))?;
+    }
+    let value = Value::Sequence(
+        rows.iter()
+            .map(|row| Value::Mapping(row.raw.clone()))
+            .collect(),
+    );
+    let text = serde_yaml::to_string(&value).map_err(|e| format!("无法生成伏笔 yaml：{e}"))?;
+    crate::book_file::write_text_atomic(&path, &text)
+}
+
+fn save_rows(project: &Path, rows: &[ForeshadowRow]) -> Result<Vec<Foreshadow>, String> {
+    write_rows(project, rows)?;
+    Ok(rows.iter().map(|row| row.item.clone()).collect())
+}
+
+fn optional_target_index(rows: &[ForeshadowRow], name: &str) -> Result<Option<usize>, String> {
+    let mut matches = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.item.name == name);
+    let Some((index, _)) = matches.next() else {
+        return Ok(None);
+    };
+    if matches.next().is_some() {
+        return Err(format!("伏笔「{name}」重名，无法安全修改"));
+    }
+    Ok(Some(index))
+}
+
+fn target_index(rows: &[ForeshadowRow], name: &str) -> Result<usize, String> {
+    optional_target_index(rows, name)?
+        .ok_or_else(|| format!("没有找到伏笔「{name}」，可能已被删除或改名"))
+}
+
+fn set_row_state(row: &mut ForeshadowRow, state: &str) {
+    row.raw.insert(
+        Value::String("状态".into()),
+        Value::String(state.to_string()),
+    );
+    row.item.state = state.to_string();
+}
+
+fn append_record(row: &mut ForeshadowRow, key: &str, value: Mapping) {
+    let key = Value::String(key.to_string());
+    let mut rows = match row.raw.remove(&key) {
+        Some(Value::Sequence(rows)) => rows,
+        _ => Vec::new(),
+    };
+    rows.push(Value::Mapping(value));
+    row.raw.insert(key, Value::Sequence(rows));
+}
+
+fn anchor_value(anchor: &Anchor) -> Mapping {
+    let mut row = Mapping::new();
+    row.insert(
+        Value::String("章".into()),
+        Value::Number(anchor.chapter.into()),
+    );
+    row.insert(
+        Value::String("引文".into()),
+        Value::String(anchor.quote.clone()),
+    );
+    row
+}
+
+fn payoff_value(payoff: &Payoff) -> Mapping {
+    let mut row = anchor_value(&Anchor {
+        chapter: payoff.chapter,
+        quote: payoff.quote.clone(),
+    });
+    row.insert(
+        Value::String("类型".into()),
+        Value::String(payoff.kind.clone()),
+    );
+    if let Some(note) = payoff.note.as_deref() {
+        row.insert(
+            Value::String("说明".into()),
+            Value::String(note.to_string()),
         );
-        let state = item.state.trim();
-        map.insert(
-            Value::String("状态".into()),
-            Value::String(if state.is_empty() { STATE_PENDING } else { state }.to_string()),
+    }
+    row
+}
+
+fn new_row(item: Foreshadow) -> ForeshadowRow {
+    let mut raw = Mapping::new();
+    raw.insert(Value::String("名".into()), Value::String(item.name.clone()));
+    raw.insert(
+        Value::String("状态".into()),
+        Value::String(item.state.clone()),
+    );
+    if item.pending {
+        raw.insert(Value::String("待打磨".into()), Value::Bool(true));
+    }
+    if !item.planted.is_empty() {
+        raw.insert(
+            Value::String("埋设".into()),
+            thread::anchors_value(&item.planted),
         );
-        if !item.planted.is_empty() {
-            map.insert(
-                Value::String("埋设".into()),
-                thread::anchors_value(&item.planted),
-            );
-        }
-        if !item.recovered.is_empty() {
-            map.insert(
-                Value::String("回收".into()),
-                thread::payoffs_value(&item.recovered),
-            );
-        }
-        Value::Mapping(map)
-    })
+    }
+    if !item.recovered.is_empty() {
+        raw.insert(
+            Value::String("回收".into()),
+            thread::payoffs_value(&item.recovered),
+        );
+    }
+    ForeshadowRow { raw, item }
+}
+
+pub fn read_foreshadows(project: &Path) -> Result<Vec<Foreshadow>, String> {
+    Ok(read_rows(project)?
+        .into_iter()
+        .map(|row| row.item)
+        .collect())
 }
 
 // ---------- 操作 ----------
@@ -127,18 +276,18 @@ pub fn add_pending_foreshadow(project: &Path, name: &str) -> Result<Vec<Foreshad
     if name.is_empty() {
         return Err("伏笔名不能为空".to_string());
     }
-    let mut list = read_foreshadows(project)?;
-    if list.iter().any(|f| f.name == name) {
+    let mut rows = read_rows(project)?;
+    if optional_target_index(&rows, name)?.is_some() {
         return Err(format!("已存在同名伏笔「{name}」"));
     }
-    list.push(Foreshadow {
+    rows.push(new_row(Foreshadow {
         name: name.to_string(),
         state: STATE_PENDING.to_string(),
+        pending: false,
         planted: Vec::new(),
         recovered: Vec::new(),
-    });
-    write_foreshadows(project, &list)?;
-    Ok(list)
+    }));
+    save_rows(project, &rows)
 }
 
 /// 设为伏笔：同名不存在→新建（已埋）；已存在→追加埋设（待埋→已埋）。
@@ -157,33 +306,36 @@ pub fn annotate_foreshadow(
     if quote.is_empty() {
         return Err("引文不能为空".to_string());
     }
-    let mut list = read_foreshadows(project)?;
+    let mut rows = read_rows(project)?;
     let anchor = Anchor {
         chapter,
         quote: quote.to_string(),
     };
-    match list.iter_mut().find(|f| f.name == name) {
-        Some(item) => {
-            let dup = item
+    match optional_target_index(&rows, name)? {
+        Some(index) => {
+            let row = &mut rows[index];
+            let dup = row
+                .item
                 .planted
                 .iter()
                 .any(|a| a.chapter == chapter && a.quote == anchor.quote);
             if !dup {
-                item.planted.push(anchor);
+                append_record(row, "埋设", anchor_value(&anchor));
+                row.item.planted.push(anchor);
             }
-            if item.state.trim().is_empty() || item.state == STATE_PENDING {
-                item.state = STATE_PLANTED.to_string();
+            if row.item.state.trim().is_empty() || row.item.state == STATE_PENDING {
+                set_row_state(row, STATE_PLANTED);
             }
         }
-        None => list.push(Foreshadow {
+        None => rows.push(new_row(Foreshadow {
             name: name.to_string(),
             state: STATE_PLANTED.to_string(),
+            pending: false,
             planted: vec![anchor],
             recovered: Vec::new(),
-        }),
+        })),
     }
-    write_foreshadows(project, &list)?;
-    Ok(list)
+    save_rows(project, &rows)
 }
 
 /// 回收伏笔：追加回收记录；终结→已收，阶段→部分收（弃用不覆盖）。
@@ -209,32 +361,31 @@ pub fn recover_foreshadow(
         other => return Err(format!("回收类型只能是「阶段」或「终结」，收到「{other}」")),
     };
     let note = note.map(str::trim).filter(|n| !n.is_empty());
-    let mut list = read_foreshadows(project)?;
-    let item = list
-        .iter_mut()
-        .find(|f| f.name == name)
-        .ok_or_else(|| format!("没有找到伏笔「{name}」"))?;
-    let dup = item.recovered.iter().any(|r| {
+    let mut rows = read_rows(project)?;
+    let index = target_index(&rows, name)?;
+    let row = &mut rows[index];
+    let payoff = Payoff {
+        chapter,
+        quote: quote.to_string(),
+        kind: kind.to_string(),
+        note: note.map(str::to_string),
+    };
+    let dup = row.item.recovered.iter().any(|r| {
         r.chapter == chapter && r.quote == quote && r.kind == kind && r.note.as_deref() == note
     });
     if !dup {
-        item.recovered.push(Payoff {
-            chapter,
-            quote: quote.to_string(),
-            kind: kind.to_string(),
-            note: note.map(str::to_string),
-        });
+        append_record(row, "回收", payoff_value(&payoff));
+        row.item.recovered.push(payoff);
     }
-    if item.state != STATE_DROPPED {
-        item.state = if kind == RECOVERY_FINAL {
+    if row.item.state != STATE_DROPPED {
+        let state = if kind == RECOVERY_FINAL {
             STATE_DONE
         } else {
             STATE_PARTIAL
-        }
-        .to_string();
+        };
+        set_row_state(row, state);
     }
-    write_foreshadows(project, &list)?;
-    Ok(list)
+    save_rows(project, &rows)
 }
 
 /// 改状态（看板）：五态任切，含弃用与恢复。
@@ -245,29 +396,54 @@ pub fn set_foreshadow_state(
 ) -> Result<Vec<Foreshadow>, String> {
     let state = state.trim();
     if !STATES.contains(&state) {
-        return Err(format!("未知状态「{state}」（待埋｜已埋｜部分收｜已收｜弃用）"));
+        return Err(format!(
+            "未知状态「{state}」（待埋｜已埋｜部分收｜已收｜弃用）"
+        ));
     }
     let name = name.trim();
-    let mut list = read_foreshadows(project)?;
-    let item = list
-        .iter_mut()
-        .find(|f| f.name == name)
-        .ok_or_else(|| format!("没有找到伏笔「{name}」"))?;
-    item.state = state.to_string();
-    write_foreshadows(project, &list)?;
-    Ok(list)
+    let mut rows = read_rows(project)?;
+    let index = target_index(&rows, name)?;
+    set_row_state(&mut rows[index], state);
+    save_rows(project, &rows)
+}
+
+/// 切换独立的待打磨展示状态；退出时移除键，其他字段原样保留。
+pub fn set_foreshadow_pending(
+    project: &Path,
+    name: &str,
+    pending: bool,
+) -> Result<Vec<Foreshadow>, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("伏笔名不能为空".to_string());
+    }
+    let mut rows = read_rows(project)?;
+    let index = target_index(&rows, name)?;
+    let row = &mut rows[index];
+    let key = Value::String("待打磨".into());
+    let changed = if pending {
+        let already_true = matches!(row.raw.get(&key), Some(Value::Bool(true)));
+        if !already_true {
+            row.raw.insert(key, Value::Bool(true));
+        }
+        !already_true
+    } else {
+        row.raw.remove(&key).is_some()
+    };
+    row.item.pending = pending;
+    if changed {
+        save_rows(project, &rows)
+    } else {
+        Ok(rows.into_iter().map(|row| row.item).collect())
+    }
 }
 
 pub fn delete_foreshadow(project: &Path, name: &str) -> Result<Vec<Foreshadow>, String> {
     let name = name.trim();
-    let mut list = read_foreshadows(project)?;
-    let before = list.len();
-    list.retain(|f| f.name != name);
-    if list.len() == before {
-        return Err(format!("没有找到伏笔「{name}」"));
-    }
-    write_foreshadows(project, &list)?;
-    Ok(list)
+    let mut rows = read_rows(project)?;
+    let index = target_index(&rows, name)?;
+    rows.remove(index);
+    save_rows(project, &rows)
 }
 
 // ---------- 看板（派生视图，现扫） ----------
@@ -290,6 +466,7 @@ pub fn foreshadow_board(project: &Path) -> Result<Vec<ForeshadowView>, String> {
             ForeshadowView {
                 name: f.name,
                 state: f.state,
+                pending: f.pending,
                 planted: texts.anchor_views(&f.planted),
                 recovered: texts.payoff_views(&f.recovered),
                 uncollected_chapters,
@@ -319,10 +496,7 @@ mod tests {
     }
 
     fn chapter(project: &Path, ordinal: u32, title: &str, body: &str) {
-        write(
-            &project.join(format!("正文/{ordinal:04} {title}.md")),
-            body,
-        );
+        write(&project.join(format!("正文/{ordinal:04} {title}.md")), body);
     }
 
     #[test]
@@ -385,17 +559,32 @@ mod tests {
         let p = project(tmp.path());
         annotate_foreshadow(&p, "黄铜钥匙", 1, "钥匙").unwrap();
 
-        let list =
-            recover_foreshadow(&p, "黄铜钥匙", 12, "钥匙又出现", RECOVERY_STAGE, Some("半露")).unwrap();
+        let list = recover_foreshadow(
+            &p,
+            "黄铜钥匙",
+            12,
+            "钥匙又出现",
+            RECOVERY_STAGE,
+            Some("半露"),
+        )
+        .unwrap();
         assert_eq!(list[0].state, STATE_PARTIAL);
         assert_eq!(list[0].recovered[0].note.as_deref(), Some("半露"));
 
         // 完全相同的一条不重复追加。
-        let list =
-            recover_foreshadow(&p, "黄铜钥匙", 12, "钥匙又出现", RECOVERY_STAGE, Some("半露")).unwrap();
+        let list = recover_foreshadow(
+            &p,
+            "黄铜钥匙",
+            12,
+            "钥匙又出现",
+            RECOVERY_STAGE,
+            Some("半露"),
+        )
+        .unwrap();
         assert_eq!(list[0].recovered.len(), 1);
 
-        let list = recover_foreshadow(&p, "黄铜钥匙", 30, "钥匙开了门", RECOVERY_FINAL, None).unwrap();
+        let list =
+            recover_foreshadow(&p, "黄铜钥匙", 30, "钥匙开了门", RECOVERY_FINAL, None).unwrap();
         assert_eq!(list[0].state, STATE_DONE);
         assert_eq!(list[0].recovered.len(), 2);
 
@@ -431,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn 读写_往返_未知键丢弃_损坏报错() {
+    fn 读写_旧格式默认普通对象_编辑保留未知键_损坏报错() {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
         write(
@@ -440,14 +629,18 @@ mod tests {
         );
         let list = read_foreshadows(&p).unwrap();
         assert_eq!(list.len(), 1);
-        write_foreshadows(&p, &list).unwrap();
+        assert!(!list[0].pending);
+        set_foreshadow_pending(&p, "钥匙", true).unwrap();
         let raw = fs::read_to_string(foreshadow_path(&p)).unwrap();
-        assert!(!raw.contains("私货"), "条目内未知键整表重写会丢：{raw}");
+        assert!(raw.contains("私货: 会丢"), "条目内未知键应保留：{raw}");
         assert!(raw.contains("名: 钥匙"));
+        assert!(read_foreshadows(&p).unwrap()[0].pending);
 
         write(&foreshadow_path(&p), "名: 不是列表\n");
         assert!(read_foreshadows(&p).is_err());
         write(&foreshadow_path(&p), "- 状态: 已埋\n");
+        assert!(read_foreshadows(&p).is_err());
+        write(&foreshadow_path(&p), "- 名: 错误布尔值\n  待打磨: 是\n");
         assert!(read_foreshadows(&p).is_err());
     }
 
@@ -464,6 +657,7 @@ mod tests {
         set_foreshadow_state(&p, "已收的", STATE_DONE).unwrap();
         annotate_foreshadow(&p, "待埋的", 1, "钥匙").unwrap();
         set_foreshadow_state(&p, "待埋的", STATE_PENDING).unwrap();
+        set_foreshadow_pending(&p, "待埋的", true).unwrap();
 
         let board = foreshadow_board(&p).unwrap();
         let key = board.iter().find(|v| v.name == "钥匙").unwrap();
@@ -482,6 +676,7 @@ mod tests {
 
         let pending = board.iter().find(|v| v.name == "待埋的").unwrap();
         assert_eq!(pending.state, STATE_PENDING);
+        assert!(pending.pending, "待打磨与业务状态分别呈现");
         assert_eq!(pending.uncollected_chapters, None);
     }
 
@@ -492,5 +687,112 @@ mod tests {
         annotate_foreshadow(&p, "钥匙", 7, "钥匙").unwrap();
         let board = foreshadow_board(&p).unwrap();
         assert!(board[0].planted[0].stale);
+    }
+
+    #[test]
+    fn 待打磨_往返只改原条目并保留未知字段与次序() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        write(
+            &foreshadow_path(&p),
+            "- 名: 黄铜钥匙\n  状态: 部分收\n  私货: 手写说明\n  埋设:\n  - 章: 1\n    引文: 钥匙出现\n    锚点备注: 留着\n  回收:\n  - 章: 2\n    引文: 阶段回收\n    类型: 阶段\n    说明: 只收一半\n    回收备注: 原样保留\n- 名: 玉佩\n  状态: 待埋\n",
+        );
+
+        let before = read_foreshadows(&p).unwrap();
+        assert!(!before[0].pending, "旧格式缺键时按普通伏笔读取");
+
+        // 初次读取后由外部工具补字段；切换操作必须重读最新表再合并。
+        let external = fs::read_to_string(foreshadow_path(&p))
+            .unwrap()
+            .replace("私货: 手写说明", "私货: 外部刚补");
+        write(&foreshadow_path(&p), &external);
+
+        let updated = set_foreshadow_pending(&p, "黄铜钥匙", true).unwrap();
+        assert!(updated[0].pending);
+        assert_eq!(updated[0].state, STATE_PARTIAL, "待打磨与业务状态独立");
+        assert_eq!(
+            updated
+                .iter()
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>(),
+            ["黄铜钥匙", "玉佩"]
+        );
+
+        let annotated = annotate_foreshadow(&p, "黄铜钥匙", 3, "后续埋设").unwrap();
+        assert!(annotated[0].pending);
+        let recovered = recover_foreshadow(
+            &p,
+            "黄铜钥匙",
+            4,
+            "继续回收",
+            RECOVERY_STAGE,
+            Some("留有余地"),
+        )
+        .unwrap();
+        assert!(recovered[0].pending);
+
+        let edited = set_foreshadow_state(&p, "黄铜钥匙", STATE_PLANTED).unwrap();
+        assert!(edited[0].pending, "编辑业务状态时保持待打磨");
+        assert_eq!(edited[0].state, STATE_PLANTED);
+
+        set_foreshadow_pending(&p, "黄铜钥匙", false).unwrap();
+        let restored = read_foreshadows(&p).unwrap();
+        assert!(!restored[0].pending);
+        assert_eq!(restored[0].state, STATE_PLANTED);
+        assert_eq!(
+            restored
+                .iter()
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>(),
+            ["黄铜钥匙", "玉佩"]
+        );
+
+        let raw = fs::read_to_string(foreshadow_path(&p)).unwrap();
+        assert!(
+            raw.contains("私货: 外部刚补"),
+            "待打磨切换保留外部新字段：{raw}"
+        );
+        assert!(
+            raw.contains("锚点备注: 留着"),
+            "待打磨切换保留嵌套未知键：{raw}"
+        );
+        assert!(
+            raw.contains("回收备注: 原样保留"),
+            "追加回收时保留未知键：{raw}"
+        );
+        let yaml: Value = serde_yaml::from_str(&raw).unwrap();
+        let Value::Sequence(rows) = yaml else {
+            panic!("伏笔表应保持列表形状")
+        };
+        let Value::Mapping(first) = &rows[0] else {
+            panic!("第一条应为映射")
+        };
+        assert!(
+            !first.contains_key(Value::String("待打磨".into())),
+            "退出待打磨应移除键"
+        );
+    }
+
+    #[test]
+    fn 待打磨_损坏表陈旧目标与重名均拒绝写入() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        write(
+            &foreshadow_path(&p),
+            "- 名: 钥匙\n  状态: 已埋\n- 名: 钥匙\n  状态: 待埋\n",
+        );
+        let duplicate = fs::read(foreshadow_path(&p)).unwrap();
+        assert!(set_foreshadow_pending(&p, "钥匙", true).is_err());
+        assert_eq!(fs::read(foreshadow_path(&p)).unwrap(), duplicate);
+
+        write(&foreshadow_path(&p), "- 名: 改名后的钥匙\n  状态: 已埋\n");
+        let renamed = fs::read(foreshadow_path(&p)).unwrap();
+        assert!(set_foreshadow_pending(&p, "钥匙", true).is_err());
+        assert_eq!(fs::read(foreshadow_path(&p)).unwrap(), renamed);
+
+        write(&foreshadow_path(&p), "这不是伏笔列表\n");
+        let damaged = fs::read(foreshadow_path(&p)).unwrap();
+        assert!(set_foreshadow_pending(&p, "改名后的钥匙", true).is_err());
+        assert_eq!(fs::read(foreshadow_path(&p)).unwrap(), damaged);
     }
 }

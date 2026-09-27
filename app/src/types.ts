@@ -702,11 +702,13 @@ export interface ForeshadowRecovery {
   note: string | null;
 }
 
-/** 伏笔条目（项目根 伏笔.yaml，应用受管、整表重写）。 */
+/** 伏笔条目（项目根 伏笔.yaml；原子读-合-写保留手写未知字段）。 */
 export interface Foreshadow {
   name: string;
   /** 待埋｜已埋｜部分收｜已收｜弃用（约定值只提示不校验）。 */
   state: string;
+  /** 独立的待打磨展示状态；旧版伏笔.yaml 缺键时为 false。 */
+  pending: boolean;
   planted: ForeshadowAnchor[];
   recovered: ForeshadowRecovery[];
 }
@@ -715,6 +717,7 @@ export interface Foreshadow {
 export interface ForeshadowView {
   name: string;
   state: string;
+  pending: boolean;
   planted: (ForeshadowAnchor & { stale: boolean })[];
   recovered: (ForeshadowRecovery & { stale: boolean })[];
   /** 距当前最大章序已过多少章未收（仅已埋/部分收有值）。 */

@@ -846,6 +846,15 @@ fn set_foreshadow_state(
 }
 
 #[tauri::command]
+fn set_foreshadow_pending(
+    project: String,
+    name: String,
+    pending: bool,
+) -> Result<Vec<Foreshadow>, String> {
+    foreshadow::set_foreshadow_pending(Path::new(&project), &name, pending)
+}
+
+#[tauri::command]
 fn delete_foreshadow(project: String, name: String) -> Result<Vec<Foreshadow>, String> {
     foreshadow::delete_foreshadow(Path::new(&project), &name)
 }
@@ -1210,6 +1219,7 @@ pub fn run() {
             annotate_foreshadow,
             recover_foreshadow,
             set_foreshadow_state,
+            set_foreshadow_pending,
             delete_foreshadow,
             read_expectations,
             expectation_board,

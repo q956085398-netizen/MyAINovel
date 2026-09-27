@@ -3,15 +3,10 @@ import { contentCardDomId } from "./contentSurfaceState";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ForeshadowView } from "./types";
-import {
-  FORESHADOW_OVERDUE_CHAPTERS,
-  FORESHADOW_STATES,
-  FORESHADOW_STATE_PLANTED,
-  FORESHADOW_STATE_PARTIAL,
-} from "./types";
-import { chapterHead } from "./chapterFile";
+import { FORESHADOW_OVERDUE_CHAPTERS } from "./types";
 import { errMsg } from "./util";
 import { ForeshadowNameDialog } from "./ForeshadowDialog";
+import ForeshadowBoardContent from "./ForeshadowBoardContent";
 
 interface ForeshadowBoardProps {
   project: string;
@@ -21,25 +16,6 @@ interface ForeshadowBoardProps {
   onChanged: () => void;
   /** 点章名：跳到书写板块打开该章并选中引文。 */
   onOpenChapter: (ordinal: number, quote: string) => void;
-}
-
-const STATE_HINTS: Record<string, string> = {
-  待埋: "先记下来、还没写进正文的线索。",
-  已埋: "已经写进正文，等着回收。",
-  部分收: "收了一半（阶段回收），还欠一个终结。",
-  已收: "已经彻底回收。",
-  弃用: "不打算收了（可随时改回其他状态）。",
-};
-
-function groupSort(state: string) {
-  return (a: ForeshadowView, b: ForeshadowView) => {
-    if (state === FORESHADOW_STATE_PLANTED || state === FORESHADOW_STATE_PARTIAL) {
-      const ua = a.uncollectedChapters ?? -1;
-      const ub = b.uncollectedChapters ?? -1;
-      if (ua !== ub) return ub - ua;
-    }
-    return a.name.localeCompare(b.name, "zh");
-  };
 }
 
 /** 伏笔看板（工单 #6，docs/spec/伏笔系统.md）：长期管理半区——
@@ -96,6 +72,20 @@ export default function ForeshadowBoard({
     }
   }
 
+  async function changePending(name: string, pending: boolean) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await invoke("set_foreshadow_pending", { project, name, pending });
+      await scan();
+      onChanged();
+    } catch (e) {
+      window.alert(`切换待打磨失败：${errMsg(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove(name: string) {
     if (busy) return;
     if (!window.confirm(`删除伏笔「${name}」？\n（伏笔.yaml 里的这一条会整条删掉）`)) return;
@@ -126,22 +116,7 @@ export default function ForeshadowBoard({
   }
 
   const overdueCount = views.filter((v) => v.overdue).length;
-  // 五态各一组；手写的不在五态内的状态值也列出来（只提示不校验）。
-  const knownStates = FORESHADOW_STATES as readonly string[];
-  const groups = [
-    ...FORESHADOW_STATES.map((state) => ({
-      label: state as string,
-      hint: STATE_HINTS[state],
-      items: views.filter((v) => v.state === state).sort(groupSort(state)),
-    })),
-    {
-      label: "其他状态",
-      hint: "伏笔.yaml 里手写的状态不在五态内——选一个五态值即可归组。",
-      items: views
-        .filter((v) => !knownStates.includes(v.state))
-        .sort((a, b) => a.name.localeCompare(b.name, "zh")),
-    },
-  ].filter((group) => group.items.length > 0);
+  const searchHitName = destination?.hit.kind === "伏笔" ? destination.hit.title : null;
 
   return (
     <div className="note-pane">
@@ -176,86 +151,17 @@ export default function ForeshadowBoard({
         </div>
       )}
 
-      {groups.map((group) => (
-        <section key={group.label} className="foreshadow-group">
-          <h3 className="foreshadow-group-head">
-            {group.label}
-            <span className="foreshadow-group-count">{group.items.length}</span>
-            <span className="hint">{group.hint}</span>
-          </h3>
-          <div className="card-list">
-            {group.items.map((v) => {
-              // 手写的状态值不在五态内：只提示不校验，原样列出让人改回来。
-              const unknownState = !(FORESHADOW_STATES as readonly string[]).includes(v.state);
-              return (
-                <div key={v.name} id={contentCardDomId(`${project}/伏笔/${v.name}`)} tabIndex={-1} className={`card-item ${destination?.hit.kind === "伏笔" && destination.hit.title === v.name ? "is-search-hit" : ""}`}>
-                  <div className="card-title-row">
-                    <span className="card-title static">{v.name}</span>
-                    {v.overdue && (
-                      <span className="card-cat danger">超期 {v.uncollectedChapters} 章</span>
-                    )}
-                    {!v.overdue && v.uncollectedChapters !== null && (
-                      <span className="card-cat">已 {v.uncollectedChapters} 章未收</span>
-                    )}
-                  </div>
-
-                  {v.planted.map((a, i) => (
-                    <p key={`p${i}`} className="foreshadow-anchor">
-                      <button
-                        className="link-btn"
-                        title="跳到书写板块这一章，选中引文"
-                        onClick={() => onOpenChapter(a.chapter, a.quote)}
-                      >
-                        埋于 {chapterHead(a.chapter, chapterPrefix)}
-                      </button>
-                      {a.quote && <span className="foreshadow-quote">「{a.quote}」</span>}
-                      {a.stale && <span className="card-cat danger">引文失配</span>}
-                    </p>
-                  ))}
-                  {v.recovered.map((r, i) => (
-                    <p key={`r${i}`} className="foreshadow-anchor">
-                      <button
-                        className="link-btn"
-                        title="跳到书写板块这一章，选中引文"
-                        onClick={() => onOpenChapter(r.chapter, r.quote)}
-                      >
-                        收于 {chapterHead(r.chapter, chapterPrefix)} · {r.kind}
-                      </button>
-                      {r.quote && <span className="foreshadow-quote">「{r.quote}」</span>}
-                      {r.note && <span className="foreshadow-note">{r.note}</span>}
-                      {r.stale && <span className="card-cat danger">引文失配</span>}
-                    </p>
-                  ))}
-                  {v.planted.length === 0 && v.recovered.length === 0 && (
-                    <p className="hint">还没有埋设与回收记录。</p>
-                  )}
-
-                  <div className="card-actions">
-                    <select
-                      className="select small"
-                      value={v.state}
-                      disabled={busy}
-                      title="改状态（约定值只提示不校验）"
-                      onChange={(e) => void changeState(v.name, e.target.value)}
-                    >
-                      {unknownState && <option value={v.state}>{v.state}</option>}
-                      {FORESHADOW_STATES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                    <button className="btn small danger" disabled={busy} onClick={() => void remove(v.name)}>
-                      删除
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ))}
-
+      <ForeshadowBoardContent
+        project={project}
+        chapterPrefix={chapterPrefix}
+        views={views}
+        busy={busy}
+        searchHitName={searchHitName}
+        onOpenChapter={onOpenChapter}
+        onChangeState={changeState}
+        onChangePending={changePending}
+        onRemove={remove}
+      />
       {creating && (
         <ForeshadowNameDialog
           title="新建伏笔（待埋）"
