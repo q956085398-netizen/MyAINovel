@@ -1,0 +1,45 @@
+[package]
+name = "app"
+version = "0.1.0"
+description = "工笔 · 个人网文创作工具"
+authors = ["q956085398-netizen"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# protocol-asset：封面/背景图的本地加载走 asset 协议（工单 #23）
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+percent-encoding = "2"
+# 快照文件名用本地时间戳（YYYYMMDD-HHMMSSmmm），已在依赖树里（serde_with 传递依赖）
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# AI 侧边栏：OpenAI 兼容接口的流式对话走 Rust 侧，绕开 webview CORS
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["macros", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

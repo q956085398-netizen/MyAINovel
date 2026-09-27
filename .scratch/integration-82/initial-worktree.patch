@@ -1,0 +1,3668 @@
+diff --git a/app/src-tauri/src/ai.rs b/app/src-tauri/src/ai.rs
+index 21df109..6195377 100644
+--- a/app/src-tauri/src/ai.rs
++++ b/app/src-tauri/src/ai.rs
+@@ -47,8 +47,7 @@ pub fn save_config(path: &Path, config: &AiConfig) -> Result<(), String> {
+     if let Some(dir) = path.parent() {
+         std::fs::create_dir_all(dir).map_err(|e| format!("创建配置目录失败：{e}"))?;
+     }
+-    let text =
+-        serde_json::to_string_pretty(config).map_err(|e| format!("配置序列化失败：{e}"))?;
++    let text = serde_json::to_string_pretty(config).map_err(|e| format!("配置序列化失败：{e}"))?;
+     write_text_atomic(path, &text)
+ }
+ 
+@@ -136,8 +135,7 @@ pub fn save_session(dir: &Path, session: &ChatSession) -> Result<(), String> {
+         return Err(format!("非法会话 id：{}", session.id));
+     }
+     std::fs::create_dir_all(dir).map_err(|e| format!("创建会话目录失败：{e}"))?;
+-    let text =
+-        serde_json::to_string_pretty(session).map_err(|e| format!("会话序列化失败：{e}"))?;
++    let text = serde_json::to_string_pretty(session).map_err(|e| format!("会话序列化失败：{e}"))?;
+     write_text_atomic(&session_path(dir, &session.id), &text)
+ }
+ 
+@@ -145,8 +143,7 @@ pub fn load_session(dir: &Path, id: &str) -> Result<ChatSession, String> {
+     if !valid_session_id(id) {
+         return Err(format!("非法会话 id：{id}"));
+     }
+-    let text = read_text(&session_path(dir, id))
+-        .map_err(|e| format!("读取会话失败：{e}"))?;
++    let text = read_text(&session_path(dir, id)).map_err(|e| format!("读取会话失败：{e}"))?;
+     serde_json::from_str(&text).map_err(|e| format!("会话解析失败：{e}"))
+ }
+ 
+@@ -163,7 +160,9 @@ pub fn list_sessions(dir: &Path) -> Result<Vec<ChatSessionSummary>, String> {
+             continue;
+         }
+         let Ok(text) = read_text(&path) else { continue };
+-        let Ok(session) = serde_json::from_str::<ChatSession>(&text) else { continue };
++        let Ok(session) = serde_json::from_str::<ChatSession>(&text) else {
++            continue;
++        };
+         out.push(ChatSessionSummary {
+             id: session.id,
+             title: session.title,
+@@ -213,7 +212,10 @@ impl SseDecoder {
+             if line.last() == Some(&b'\r') {
+                 line = &line[..line.len() - 1];
+             }
+-            self.take_line(String::from_utf8_lossy(line).into_owned().as_str(), &mut events);
++            self.take_line(
++                String::from_utf8_lossy(line).into_owned().as_str(),
++                &mut events,
++            );
+         }
+         events
+     }
+@@ -430,7 +432,9 @@ pub async fn chat_stream(
+             }
+         }
+     }
+-    on_event(ChatStreamEvent::Done { reason: finish_reason });
++    on_event(ChatStreamEvent::Done {
++        reason: finish_reason,
++    });
+     Ok(())
+ }
+ 
+@@ -462,7 +466,10 @@ mod tests {
+     fn sse_basic_events_and_done() {
+         let mut d = SseDecoder::new();
+         let chunk = b"data: {\"a\":1}\n\ndata: [DONE]\n\n";
+-        assert_eq!(d.feed(chunk), vec![r#"{"a":1}"#.to_string(), "[DONE]".to_string()]);
++        assert_eq!(
++            d.feed(chunk),
++            vec![r#"{"a":1}"#.to_string(), "[DONE]".to_string()]
++        );
+         assert!(d.finish().is_empty());
+     }
+ 
+@@ -558,7 +565,10 @@ mod tests {
+             active_provider_id: Some("p1".into()),
+         };
+         save_config(&path, &cfg).unwrap();
+-        assert_eq!(load_config(&path).unwrap().providers[0].model, "deepseek-chat");
++        assert_eq!(
++            load_config(&path).unwrap().providers[0].model,
++            "deepseek-chat"
++        );
+     }
+ 
+     #[test]
+@@ -579,7 +589,10 @@ mod tests {
+         };
+         save_session(dir.path(), &s).unwrap();
+         let loaded = load_session(dir.path(), "s1").unwrap();
+-        assert_eq!(loaded.messages[0].meta, Some(json!({"kind":"小结","startLine":3})));
++        assert_eq!(
++            loaded.messages[0].meta,
++            Some(json!({"kind":"小结","startLine":3}))
++        );
+ 
+         let mut s2 = s.clone();
+         s2.id = "s2".into();
+@@ -630,7 +643,10 @@ mod tests {
+             r#"{"id":"legacy","title":"旧会话","createdAt":1,"updatedAt":2,"messages":[]}"#,
+         )
+         .unwrap();
+-        assert!(load_session(dir.path(), "legacy").unwrap().persona.is_none());
++        assert!(load_session(dir.path(), "legacy")
++            .unwrap()
++            .persona
++            .is_none());
+ 
+         // 人物对话会话：标签往返，列表摘要也带。
+         let s = ChatSession {
+@@ -655,7 +671,10 @@ mod tests {
+         );
+         let list = list_sessions(dir.path()).unwrap();
+         assert_eq!(list[0].id, "persona");
+-        assert_eq!(list[0].persona.as_ref().map(|p| p.person.as_str()), Some("张三"));
++        assert_eq!(
++            list[0].persona.as_ref().map(|p| p.person.as_str()),
++            Some("张三")
++        );
+         assert!(list[1].persona.is_none());
+ 
+         // 无标签会话存盘不落 persona 键——文件形状与旧会话完全一致。
+@@ -704,7 +723,10 @@ mod tests {
+             preset: Some(snapshot.clone()),
+         };
+         save_session(dir.path(), &s).unwrap();
+-        assert_eq!(load_session(dir.path(), "snap").unwrap().preset, Some(snapshot));
++        assert_eq!(
++            load_session(dir.path(), "snap").unwrap().preset,
++            Some(snapshot)
++        );
+ 
+         // 无预设会话存盘不落 preset 键，文件形状与旧会话完全一致。
+         let mut bare = s.clone();
+diff --git a/app/src-tauri/src/ai_context.rs b/app/src-tauri/src/ai_context.rs
+index 1285898..f723ee8 100644
+--- a/app/src-tauri/src/ai_context.rs
++++ b/app/src-tauri/src/ai_context.rs
+@@ -129,9 +129,8 @@ fn project_title(project: &Path) -> Result<String, String> {
+             return Ok(title.to_string());
+         }
+     }
+-    let name = project::strip_book_marks(
+-        project.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+-    );
++    let name =
++        project::strip_book_marks(project.file_name().and_then(|n| n.to_str()).unwrap_or(""));
+     Ok(if name.is_empty() {
+         "（未命名）".to_string()
+     } else {
+@@ -204,7 +203,10 @@ fn arrangement_context(project: &Path) -> Result<String, String> {
+     let mut out = String::new();
+     out.push_str("【体检对象】全书排布（大纲）\n");
+     out.push_str(&format!("【书名】《{title}》\n"));
+-    out.push_str(&format!("【类型圈】{}\n", join_or(&types, "（类型圈还没定）")));
++    out.push_str(&format!(
++        "【类型圈】{}\n",
++        join_or(&types, "（类型圈还没定）")
++    ));
+ 
+     if items.is_empty() {
+         out.push_str("【排布】（排布还是空的）\n");
+@@ -223,11 +225,7 @@ fn arrangement_context(project: &Path) -> Result<String, String> {
+ 
+     out.push_str("【机检提示】\n");
+     out.push_str(&format!("- {}\n", check.ratio_hint));
+-    for hint in check
+-        .pace_hints
+-        .iter()
+-        .chain(check.ref_hints.iter())
+-    {
++    for hint in check.pace_hints.iter().chain(check.ref_hints.iter()) {
+         out.push_str(&format!("- {hint}\n"));
+     }
+     if !check.missing_units.is_empty() {
+@@ -265,7 +263,10 @@ fn contradiction_context(project: &Path) -> Result<String, String> {
+     let mut out = String::new();
+     out.push_str("【体检对象】矛盾池（剧情种子）\n");
+     out.push_str(&format!("【书名】《{title}》\n"));
+-    out.push_str(&format!("【类型圈】{}\n", join_or(&types, "（类型圈还没定）")));
++    out.push_str(&format!(
++        "【类型圈】{}\n",
++        join_or(&types, "（类型圈还没定）")
++    ));
+     let unit_names: Vec<String> = units.iter().map(|u| u.name.clone()).collect();
+     out.push_str(&format!(
+         "【已有单元】{}\n",
+@@ -292,17 +293,14 @@ fn contradiction_context(project: &Path) -> Result<String, String> {
+         // 核心优先；没写就退到正文开头（明说是摘要，AI 才知道这是残缺信息）。
+         match opt_text(note.core.as_deref()) {
+             Some(core) => parts.push(format!("核心：{}", one_line(core, CORE_PREVIEW_LIMIT))),
+-            None => parts.push(format!(
+-                "核心（正文摘）：{}",
+-                {
+-                    let head = one_line(&note.body, BODY_PREVIEW_LIMIT);
+-                    if head.is_empty() {
+-                        "（空）".to_string()
+-                    } else {
+-                        head
+-                    }
++            None => parts.push(format!("核心（正文摘）：{}", {
++                let head = one_line(&note.body, BODY_PREVIEW_LIMIT);
++                if head.is_empty() {
++                    "（空）".to_string()
++                } else {
++                    head
+                 }
+-            )),
++            })),
+         }
+         out.push_str(&format!("- {}\n", parts.join(" ｜ ")));
+     }
+@@ -331,7 +329,10 @@ fn relationship_context(project: &Path, names: &[String]) -> Result<String, Stri
+     let mut out = String::new();
+     out.push_str("【体检对象】选中人物的关系网\n");
+     out.push_str(&format!("【书名】《{title}》\n"));
+-    out.push_str(&format!("【类型圈】{}\n", join_or(&types, "（类型圈还没定）")));
++    out.push_str(&format!(
++        "【类型圈】{}\n",
++        join_or(&types, "（类型圈还没定）")
++    ));
+ 
+     out.push_str("【选中人物】\n");
+     for name in &subjects {
+@@ -438,7 +439,10 @@ fn character_context(project: &Path, subjects: &[String]) -> Result<String, Stri
+ 
+     let mut out = String::new();
+     out.push_str(&format!("【书名】《{title}》\n"));
+-    out.push_str(&format!("【类型圈】{}\n", join_or(&types, "（类型圈还没定）")));
++    out.push_str(&format!(
++        "【类型圈】{}\n",
++        join_or(&types, "（类型圈还没定）")
++    ));
+ 
+     let mut head = vec![note.name.clone()];
+     if let Some(group) = opt_text(note.group.as_deref()) {
+@@ -555,7 +559,10 @@ fn expectation_events(views: &[ExpectationView], ordinal: u32) -> Vec<String> {
+     views
+         .iter()
+         .flat_map(|v| {
+-            let head = format!("{} ｜ {}·{} ｜ 状态：{}", v.name, v.horizon, v.kind, v.state);
++            let head = format!(
++                "{} ｜ {}·{} ｜ 状态：{}",
++                v.name, v.horizon, v.kind, v.state
++            );
+             chapter_events(&head, &v.planted, &v.fulfilled, ordinal)
+         })
+         .collect()
+@@ -582,7 +589,10 @@ fn open_lines(views: &[ExpectationView]) -> Vec<String> {
+             let overdue = if v.overdue { " ｜ 超期" } else { "" };
+             format!(
+                 "- {} ｜ {}·{} ｜ 状态：{}{}{}",
+-                v.name, v.horizon, v.kind, v.state,
++                v.name,
++                v.horizon,
++                v.kind,
++                v.state,
+                 if behind.is_empty() {
+                     String::new()
+                 } else {
+@@ -677,7 +687,10 @@ fn chapter_context(project: &Path, ordinal: u32) -> Result<String, String> {
+     if expectation_lines.is_empty() {
+         out.push_str("【本章期待线】（本章没有期待线的埋设或兑现）\n");
+     } else {
+-        out.push_str(&format!("【本章期待线】共 {} 条\n", expectation_lines.len()));
++        out.push_str(&format!(
++            "【本章期待线】共 {} 条\n",
++            expectation_lines.len()
++        ));
+         for line in &expectation_lines {
+             out.push_str(&format!("{line}\n"));
+         }
+@@ -846,7 +859,10 @@ mod tests {
+             "- 单元: 不存在的单元\n- 单元: 初入京城\n",
+         );
+         let text = build_context(KIND_ARRANGEMENT, &p, None, &[]).unwrap();
+-        assert!(text.contains("排布引用了不存在的单元：不存在的单元"), "{text}");
++        assert!(
++            text.contains("排布引用了不存在的单元：不存在的单元"),
++            "{text}"
++        );
+         assert!(text.contains("还没排布的单元：论道"), "{text}");
+     }
+ 
+@@ -854,7 +870,10 @@ mod tests {
+     fn 排布体检_单元核心缺失给占位不静默() {
+         let tmp = TempDir::new().unwrap();
+         let p = sample_project(tmp.path());
+-        write(&p.join("构思/单元/论道.md"), "---\n起章: 5\n---\n单元正文\n");
++        write(
++            &p.join("构思/单元/论道.md"),
++            "---\n起章: 5\n---\n单元正文\n",
++        );
+         let text = build_context(KIND_ARRANGEMENT, &p, None, &[]).unwrap();
+         assert!(text.contains("核心：（空）"), "{text}");
+     }
+@@ -868,7 +887,10 @@ mod tests {
+             "---\n状态: 待用\n---\n这是没有一句话核心的矛盾正文，应当被摘进来。\n",
+         );
+         let text = build_context(KIND_CONTRADICTIONS, &p, None, &[]).unwrap();
+-        assert!(text.contains("【已有单元】共 2 个：初入京城、论道"), "{text}");
++        assert!(
++            text.contains("【已有单元】共 2 个：初入京城、论道"),
++            "{text}"
++        );
+         assert!(text.contains("【矛盾池】共 2 条"), "{text}");
+         assert!(text.contains("核心：铜钱是谁留的"), "{text}");
+         assert!(
+@@ -915,7 +937,10 @@ mod tests {
+         let text = build_context(KIND_RELATIONSHIPS, &p, None, &names).unwrap();
+         assert!(text.contains("【书名】《大魏读书人》"), "{text}");
+         assert!(text.contains("【类型圈】掉马甲、打脸"), "{text}");
+-        assert!(text.contains("- 张三 ｜ 分组：主角阵营 ｜ 别名：小陈"), "{text}");
++        assert!(
++            text.contains("- 张三 ｜ 分组：主角阵营 ｜ 别名：小陈"),
++            "{text}"
++        );
+         assert!(text.contains("小传：出身寒门，靠情报起家。"), "{text}");
+         assert!(text.contains("- 王五 ｜ 分组：敌方"), "{text}");
+         // 李四不在选中名单里，但他那一端要出现——关系网是一张网。
+@@ -979,8 +1004,14 @@ mod tests {
+         let text = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &["张三".to_string()]).unwrap();
+         assert!(text.contains("【书名】《大魏读书人》"), "{text}");
+         assert!(text.contains("【类型圈】掉马甲、打脸"), "{text}");
+-        assert!(text.contains("【人物】张三 ｜ 分组：主角阵营 ｜ 别名：小陈"), "{text}");
+-        assert!(text.contains("【小传】\n第一段生平。\n\n第二段性格。\n"), "{text}");
++        assert!(
++            text.contains("【人物】张三 ｜ 分组：主角阵营 ｜ 别名：小陈"),
++            "{text}"
++        );
++        assert!(
++            text.contains("【小传】\n第一段生平。\n\n第二段性格。\n"),
++            "{text}"
++        );
+         assert!(
+             text.contains("张三 → 李四 ｜ 类型：师徒 ｜ 描述：收徒实为监视 ｜ 秘密"),
+             "{text}"
+@@ -1011,7 +1042,8 @@ mod tests {
+     fn 人物对话_人物缺失_人数不对_表坏了都报错() {
+         let tmp = TempDir::new().unwrap();
+         let p = sample_relationship_project(tmp.path());
+-        let err = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &["查无此人".to_string()]).unwrap_err();
++        let err = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &["查无此人".to_string()])
++            .unwrap_err();
+         assert!(err.contains("没有找到「查无此人」"), "{err}");
+         let both = vec!["张三".to_string(), "李四".to_string()];
+         let err = build_context(KIND_CHARACTER_DIALOGUE, &p, None, &both).unwrap_err();
+@@ -1082,8 +1114,14 @@ mod tests {
+         assert!(text.contains("章节拍安排：代入、拉扯、兑现"), "{text}");
+         assert!(text.contains("第三章的正文。那枚铜钱还在"), "{text}");
+         assert!(!text.contains("【本章伏笔】"), "陪看不读取额外线索：{text}");
+-        assert!(!text.contains("【本章期待线】"), "陪看不读取额外线索：{text}");
+-        assert!(!text.contains("【全书未收的线】"), "陪看不读取额外线索：{text}");
++        assert!(
++            !text.contains("【本章期待线】"),
++            "陪看不读取额外线索：{text}"
++        );
++        assert!(
++            !text.contains("【全书未收的线】"),
++            "陪看不读取额外线索：{text}"
++        );
+     }
+ 
+     #[test]
+@@ -1112,7 +1150,10 @@ mod tests {
+ 
+         let text = build_context(KIND_CHAPTER_COMPANION, &p, Some(3), &[]).unwrap();
+ 
+-        assert!(text.contains("【本章意图】初入京城（未匹配桥段）"), "{text}");
++        assert!(
++            text.contains("【本章意图】初入京城（未匹配桥段）"),
++            "{text}"
++        );
+         assert!(text.contains("单元情绪目标：先压后扬的痛快"), "{text}");
+         assert!(text.contains("桥段意图尚未匹配"), "{text}");
+     }
+@@ -1141,7 +1182,10 @@ mod tests {
+ 
+         assert!(text.contains("点击按钮时的正文。"), "{text}");
+         assert!(!text.contains("保存往返后的盘面。"), "{text}");
+-        assert!(!text.contains("状态: 草稿"), "frontmatter 不进入材料：{text}");
++        assert!(
++            !text.contains("状态: 草稿"),
++            "frontmatter 不进入材料：{text}"
++        );
+     }
+ 
+     #[test]
+@@ -1175,14 +1219,19 @@ mod tests {
+             ),
+             "{text}"
+         );
+-        assert!(!text.contains("状态: 草稿"), "frontmatter 不该进材料：{text}");
++        assert!(
++            !text.contains("状态: 草稿"),
++            "frontmatter 不该进材料：{text}"
++        );
+     }
+ 
+     #[test]
+     fn 本章体检_未收的线超期在前_超上限只列前三十() {
+         let tmp = TempDir::new().unwrap();
+         let p = sample_chapter_project(tmp.path());
+-        let mut yaml = String::from("- 名: 早早埋的\n  档位: 短\n  状态: 已埋\n  埋设:\n    - 章: 1\n      引文: 一句\n");
++        let mut yaml = String::from(
++            "- 名: 早早埋的\n  档位: 短\n  状态: 已埋\n  埋设:\n    - 章: 1\n      引文: 一句\n",
++        );
+         for i in 0..35 {
+             yaml.push_str(&format!(
+                 "- 名: 线{i}\n  档位: 长\n  状态: 已埋\n  埋设:\n    - 章: {}\n      引文: 句{i}\n",
+@@ -1192,7 +1241,10 @@ mod tests {
+         write(&p.join("三线.yaml"), &yaml);
+         write(&p.join("正文/0200 第二百章.md"), "很久以后的正文。\n");
+         let text = build_context(KIND_CHAPTER, &p, Some(200), &[]).unwrap();
+-        assert!(text.contains("【全书未收的线】共 36 条（只列前 30）"), "{text}");
++        assert!(
++            text.contains("【全书未收的线】共 36 条（只列前 30）"),
++            "{text}"
++        );
+         let list: Vec<&str> = text
+             .lines()
+             .skip_while(|l| !l.starts_with("【全书未收的线】"))
+@@ -1237,8 +1289,14 @@ mod tests {
+             text.contains("【正文】--- 正文开始 ---\n（本章还是空的）\n--- 正文结束 ---"),
+             "{text}"
+         );
+-        assert!(text.contains("【本章伏笔】（本章没有伏笔的埋设或回收）"), "{text}");
+-        assert!(text.contains("【本章期待线】（本章没有期待线的埋设或兑现）"), "{text}");
++        assert!(
++            text.contains("【本章伏笔】（本章没有伏笔的埋设或回收）"),
++            "{text}"
++        );
++        assert!(
++            text.contains("【本章期待线】（本章没有期待线的埋设或兑现）"),
++            "{text}"
++        );
+         assert!(text.contains("【全书未收的线】（没有未收的线）"), "{text}");
+     }
+ 
+diff --git a/app/src-tauri/src/book_file.rs b/app/src-tauri/src/book_file.rs
+index 6270eba..8755d70 100644
+--- a/app/src-tauri/src/book_file.rs
++++ b/app/src-tauri/src/book_file.rs
+@@ -536,11 +536,7 @@ pub(crate) fn has_md_extension(path: &Path) -> bool {
+ 
+ /// 目标文件名被占用时续号（标题-2、标题-3……）；self_path 即目标时
+ /// 不续（编辑既有文件不算冲突）。
+-pub(crate) fn unique_file_path(
+-    dir: &Path,
+-    file_name: &str,
+-    self_path: Option<&Path>,
+-) -> PathBuf {
++pub(crate) fn unique_file_path(dir: &Path, file_name: &str, self_path: Option<&Path>) -> PathBuf {
+     let first = dir.join(file_name);
+     if !first.exists() || Some(first.as_path()) == self_path {
+         return first;
+@@ -1463,7 +1459,8 @@ mod tests {
+ 
+     #[test]
+     fn 书档解析_空值不算_多块取首块() {
+-        let content = "开场白\n\n> [!书档]\n> 书名：甲\n> 成绩：\n\n正文\n\n> [!书档]\n> 书名：乙\n";
++        let content =
++            "开场白\n\n> [!书档]\n> 书名：甲\n> 成绩：\n\n正文\n\n> [!书档]\n> 书名：乙\n";
+         let header = parse_book_header(content).unwrap();
+         assert_eq!(header.title.as_deref(), Some("甲"));
+         assert_eq!(header.track_record, None);
+@@ -1546,7 +1543,10 @@ mod tests {
+         let text = read_text(&md).unwrap();
+         assert!(text.contains("书名：纸面上的"));
+         assert!(!text.contains("yaml里的"), "md 为准、不搬值");
+-        assert!(!root.join("书乙.yaml").exists(), "只剩四键的 yaml 整文件删除");
++        assert!(
++            !root.join("书乙.yaml").exists(),
++            "只剩四键的 yaml 整文件删除"
++        );
+     }
+ 
+     #[test]
+diff --git a/app/src-tauri/src/chapter.rs b/app/src-tauri/src/chapter.rs
+index e4247e9..b991990 100644
+--- a/app/src-tauri/src/chapter.rs
++++ b/app/src-tauri/src/chapter.rs
+@@ -253,7 +253,8 @@ pub fn scan_chapter_cards(project: &Path) -> Result<Vec<ChapterCard>, String> {
+             let intent = chapter.ordinal.and_then(|ordinal| {
+                 let unit = unit_for_chapter(&units, ordinal)?;
+                 let bridge = crate::planning::bridges_for_chapter(&bridges, &unit.name, ordinal)
+-                    .into_iter().next();
++                    .into_iter()
++                    .next();
+                 if let Some(bridge) = bridge {
+                     let detail = bridge
+                         .emotion_curve
+@@ -866,7 +867,10 @@ mod tests {
+             &p.join("构思/桥段/密信.md"),
+             "---\n所属单元: 初入京城\n顺序: 1\n起章: 2\n止章: 3\n情绪曲线: 从恐惧转为决心\n---\n桥段正文",
+         );
+-        write(&p.join("构思/桥段/甲桥段.md"), "---\n所属单元: 初入京城\n顺序: 9\n起章: 2\n止章: 3\n---\n另一个重叠桥段");
++        write(
++            &p.join("构思/桥段/甲桥段.md"),
++            "---\n所属单元: 初入京城\n顺序: 9\n起章: 2\n止章: 3\n---\n另一个重叠桥段",
++        );
+ 
+         let cards = scan_chapter_cards(&p).unwrap();
+         assert_eq!(cards.len(), 3);
+diff --git a/app/src-tauri/src/cover.rs b/app/src-tauri/src/cover.rs
+index 13fc573..394387a 100644
+--- a/app/src-tauri/src/cover.rs
++++ b/app/src-tauri/src/cover.rs
+@@ -53,14 +53,12 @@ pub fn set_cover(dir: &Path, image: &Path) -> Result<PathBuf, String> {
+         .map(|e| e.to_ascii_lowercase())
+         .filter(|e| COVER_EXTS.contains(&e.as_str()))
+         .ok_or_else(|| "封面只支持 png/jpg/webp 图片".to_string())?;
+-    let bytes =
+-        fs::read(image).map_err(|e| format!("无法读取图片 {}：{e}", image.display()))?;
++    let bytes = fs::read(image).map_err(|e| format!("无法读取图片 {}：{e}", image.display()))?;
+     fs::create_dir_all(dir).map_err(|e| format!("无法创建文件夹 {}：{e}", dir.display()))?;
+     for ext in COVER_EXTS {
+         let old = dir.join(format!("{COVER_STEM}.{ext}"));
+         if old.exists() {
+-            fs::remove_file(&old)
+-                .map_err(|e| format!("无法删除旧封面 {}：{e}", old.display()))?;
++            fs::remove_file(&old).map_err(|e| format!("无法删除旧封面 {}：{e}", old.display()))?;
+         }
+     }
+     let dest = dir.join(format!("{COVER_STEM}.{ext}"));
+@@ -114,7 +112,11 @@ mod tests {
+         let dir = tmp.path().join("附件");
+         write(&dir.join("封面.PNG"), "大写");
+         write(&dir.join("封面.WebP"), "webp");
+-        assert_eq!(find_cover(&dir), Some(dir.join("封面.PNG")), "png 仍压过 webp");
++        assert_eq!(
++            find_cover(&dir),
++            Some(dir.join("封面.PNG")),
++            "png 仍压过 webp"
++        );
+     }
+ 
+     #[test]
+diff --git a/app/src-tauri/src/expectation.rs b/app/src-tauri/src/expectation.rs
+index fbd7e01..0dfe4c1 100644
+--- a/app/src-tauri/src/expectation.rs
++++ b/app/src-tauri/src/expectation.rs
+@@ -3,12 +3,13 @@
+ //! （锚点＝章序数＋引文、单文件整表重写、现扫派生），数据落项目根
+ //! `三线.yaml`（应用受管；写路径原子，ADR 0004）。正文零污染。
+ 
++use std::fs;
+ use std::path::{Path, PathBuf};
+ 
+ use serde::{Deserialize, Serialize};
+ use serde_yaml::{Mapping, Value};
+ 
+-use crate::book_file::map_scalar;
++use crate::book_file::{content_fingerprint, map_scalar, write_text_atomic};
+ use crate::thread::{self, Anchor, AnchorView, Payoff, PayoffView};
+ 
+ pub const EXPECTATION_FILE: &str = "三线.yaml";
+@@ -70,6 +71,8 @@ pub struct Expectation {
+     pub horizon: String,
+     /// 五态之一；缺省读作「待埋」。
+     pub state: String,
++    /// 独立于五态状态机的待打磨标记；false 不落盘。
++    pub pending: bool,
+     pub planted: Vec<Anchor>,
+     pub fulfilled: Vec<Payoff>,
+ }
+@@ -82,6 +85,7 @@ pub struct ExpectationView {
+     pub kind: String,
+     pub horizon: String,
+     pub state: String,
++    pub pending: bool,
+     pub planted: Vec<AnchorView>,
+     pub fulfilled: Vec<PayoffView>,
+     /// 距当前最大章序已过多少章未推进（仅已埋/部分兑现有值）。
+@@ -95,6 +99,8 @@ pub struct ExpectationView {
+ pub struct ExpectationBoard {
+     /// 轴长＝max(全书最大章序, 锚点最大章)——锚点落在已删章上也不越界。
+     pub max_chapter: u32,
++    /// 三线.yaml 当前内容指纹，作为待打磨键切换的乐观锁版本。
++    pub table_fingerprint: Option<String>,
+     pub items: Vec<ExpectationView>,
+ }
+ 
+@@ -104,58 +110,283 @@ pub fn expectation_path(project: &Path) -> PathBuf {
+ 
+ // ---------- 读写 ----------
+ 
++struct ExpectationSnapshot {
++    items: Vec<Expectation>,
++    raw: Option<String>,
++    fingerprint: Option<String>,
++}
++
++fn parse_expectation(map: &Mapping, path: &Path, index: usize) -> Result<Expectation, String> {
++    let name = map_scalar(map, "名")
++        .filter(|n| !n.trim().is_empty())
++        .ok_or_else(|| format!("{} 第 {index} 项缺「名」", path.display()))?;
++    let pending_key = Value::String("待打磨".into());
++    let pending = match map.get(&pending_key) {
++        None | Some(Value::Bool(false)) => false,
++        Some(Value::Bool(true)) => true,
++        Some(_) => {
++            return Err(format!(
++                "{} 第 {index} 项的「待打磨」应为布尔值",
++                path.display()
++            ));
++        }
++    };
++    Ok(Expectation {
++        name,
++        kind: map_scalar(map, "类别").unwrap_or_else(|| KIND_EXPECTATION.to_string()),
++        horizon: map_scalar(map, "档位").unwrap_or_else(|| HORIZON_MID.to_string()),
++        state: map_scalar(map, "状态").unwrap_or_else(|| STATE_PENDING.to_string()),
++        pending,
++        planted: thread::map_anchors(map, "埋设", path, index)?,
++        fulfilled: thread::map_payoffs(map, "兑现", path, index, PAYOFF_STAGE)?,
++    })
++}
++
++fn read_expectation_snapshot(project: &Path) -> Result<ExpectationSnapshot, String> {
++    let path = expectation_path(project);
++    let bytes = match fs::read(&path) {
++        Ok(bytes) => bytes,
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
++            return Ok(ExpectationSnapshot {
++                items: Vec::new(),
++                raw: None,
++                fingerprint: None,
++            });
++        }
++        Err(error) => return Err(format!("无法读取文件 {}：{error}", path.display())),
++    };
++    let fingerprint = content_fingerprint(&bytes).to_string();
++    let raw = String::from_utf8(bytes).map_err(|error| {
++        format!(
++            "无法解析 {}：不是有效的 UTF-8 文本（{error}）",
++            path.display()
++        )
++    })?;
++    let items = thread::parse_threads_text(
++        &raw,
++        &path,
++        "期待线条目（名/类别/档位/状态/待打磨/埋设/兑现）",
++        parse_expectation,
++    )?;
++    Ok(ExpectationSnapshot {
++        items,
++        raw: Some(raw),
++        fingerprint: Some(fingerprint),
++    })
++}
++
+ pub fn read_expectations(project: &Path) -> Result<Vec<Expectation>, String> {
+-    thread::read_threads(
+-        &expectation_path(project),
+-        "期待线条目（名/类别/档位/状态/埋设/兑现）",
+-        |map, path, index| {
+-            let name = map_scalar(map, "名")
+-                .filter(|n| !n.trim().is_empty())
+-                .ok_or_else(|| format!("{} 第 {index} 项缺「名」", path.display()))?;
+-            Ok(Expectation {
+-                name,
+-                kind: map_scalar(map, "类别").unwrap_or_else(|| KIND_EXPECTATION.to_string()),
+-                horizon: map_scalar(map, "档位").unwrap_or_else(|| HORIZON_MID.to_string()),
+-                state: map_scalar(map, "状态").unwrap_or_else(|| STATE_PENDING.to_string()),
+-                planted: thread::map_anchors(map, "埋设", path, index)?,
+-                fulfilled: thread::map_payoffs(map, "兑现", path, index, PAYOFF_STAGE)?,
+-            })
+-        },
+-    )
++    Ok(read_expectation_snapshot(project)?.items)
+ }
+ 
+ pub fn write_expectations(project: &Path, list: &[Expectation]) -> Result<(), String> {
+-    thread::write_threads(&expectation_path(project), list, |item| {
+-        let mut map = Mapping::new();
+-        map.insert(
+-            Value::String("名".into()),
+-            Value::String(item.name.trim().to_string()),
+-        );
++    let snapshot = read_expectation_snapshot(project)?;
++    let mut current: Value = match snapshot.raw.as_deref() {
++        Some(raw) if raw.trim().is_empty() => Value::Sequence(Vec::new()),
++        Some(raw) => serde_yaml::from_str(raw).map_err(|error| {
++            format!("无法解析 {}：{error}", expectation_path(project).display())
++        })?,
++        None => Value::Sequence(Vec::new()),
++    };
++    let Value::Sequence(current_rows) = &mut current else {
++        return Err(format!(
++            "{} 顶层应为期待线列表",
++            expectation_path(project).display()
++        ));
++    };
++    if current_rows.len() != snapshot.items.len() {
++        return Err(format!(
++            "{} 条目数发生变化，请重新载入",
++            expectation_path(project).display()
++        ));
++    }
++
++    let mut seen = std::collections::HashSet::new();
++    for item in &snapshot.items {
++        if !seen.insert(item.name.as_str()) {
++            return Err(format!("期待线「{}」重名，无法安全保存", item.name));
++        }
++    }
++    seen.clear();
++    for item in list {
++        if !seen.insert(item.name.as_str()) {
++            return Err(format!("期待线「{}」重名，无法安全保存", item.name));
++        }
++    }
++
++    let mut rows = Vec::with_capacity(list.len());
++    for item in list {
++        let Some(index) = snapshot
++            .items
++            .iter()
++            .position(|current| current.name == item.name)
++        else {
++            rows.push(Value::Mapping(render_expectation(item)));
++            continue;
++        };
++        let mut map = current_rows[index]
++            .as_mapping()
++            .cloned()
++            .ok_or_else(|| format!("期待线「{}」的数据格式异常", item.name))?;
++        merge_expectation(&mut map, &snapshot.items[index], item);
++        rows.push(Value::Mapping(map));
++    }
++    let text = serde_yaml::to_string(&Value::Sequence(rows))
++        .map_err(|error| format!("无法生成 yaml：{error}"))?;
++    write_text_atomic(&expectation_path(project), &text)
++}
++
++fn render_expectation(item: &Expectation) -> Mapping {
++    let mut map = Mapping::new();
++    map.insert(
++        Value::String("名".into()),
++        Value::String(item.name.trim().to_string()),
++    );
++    map.insert(
++        Value::String("类别".into()),
++        Value::String(non_empty(&item.kind, KIND_EXPECTATION)),
++    );
++    map.insert(
++        Value::String("档位".into()),
++        Value::String(non_empty(&item.horizon, HORIZON_MID)),
++    );
++    map.insert(
++        Value::String("状态".into()),
++        Value::String(non_empty(&item.state, STATE_PENDING)),
++    );
++    if item.pending {
++        map.insert(Value::String("待打磨".into()), Value::Bool(true));
++    }
++    if !item.planted.is_empty() {
+         map.insert(
+-            Value::String("类别".into()),
+-            Value::String(non_empty(&item.kind, KIND_EXPECTATION)),
++            Value::String("埋设".into()),
++            thread::anchors_value(&item.planted),
+         );
++    }
++    if !item.fulfilled.is_empty() {
+         map.insert(
+-            Value::String("档位".into()),
+-            Value::String(non_empty(&item.horizon, HORIZON_MID)),
++            Value::String("兑现".into()),
++            thread::payoffs_value(&item.fulfilled),
+         );
++    }
++    map
++}
++
++fn merge_expectation(map: &mut Mapping, current: &Expectation, next: &Expectation) {
++    set_string_if_changed(map, "类别", &current.kind, &next.kind);
++    set_string_if_changed(map, "档位", &current.horizon, &next.horizon);
++    set_string_if_changed(map, "状态", &current.state, &next.state);
++    if next.pending {
++        map.insert(Value::String("待打磨".into()), Value::Bool(true));
++    }
++    merge_rows(
++        map,
++        "埋设",
++        &current.planted,
++        &next.planted,
++        thread::anchors_value,
++    );
++    merge_rows(
++        map,
++        "兑现",
++        &current.fulfilled,
++        &next.fulfilled,
++        thread::payoffs_value,
++    );
++}
++
++fn set_string_if_changed(map: &mut Mapping, key: &str, current: &str, next: &str) {
++    if current != next {
+         map.insert(
+-            Value::String("状态".into()),
+-            Value::String(non_empty(&item.state, STATE_PENDING)),
++            Value::String(key.to_string()),
++            Value::String(non_empty(next, current)),
+         );
+-        if !item.planted.is_empty() {
+-            map.insert(
+-                Value::String("埋设".into()),
+-                thread::anchors_value(&item.planted),
+-            );
+-        }
+-        if !item.fulfilled.is_empty() {
+-            map.insert(
+-                Value::String("兑现".into()),
+-                thread::payoffs_value(&item.fulfilled),
+-            );
++    }
++}
++
++fn merge_rows<T: PartialEq>(
++    map: &mut Mapping,
++    key: &str,
++    current: &[T],
++    next: &[T],
++    render: impl Fn(&[T]) -> Value,
++) {
++    if current == next {
++        return;
++    }
++    if next.is_empty() {
++        map.remove(Value::String(key.to_string()));
++        return;
++    }
++    if next.len() > current.len() && next.starts_with(current) {
++        let Value::Sequence(additional) = render(&next[current.len()..]) else {
++            return;
++        };
++        let map_key = Value::String(key.to_string());
++        if let Some(Value::Sequence(existing)) = map.get_mut(&map_key) {
++            existing.extend(additional);
++        } else {
++            map.insert(map_key, Value::Sequence(additional));
+         }
+-        Value::Mapping(map)
++        return;
++    }
++    map.insert(Value::String(key.to_string()), render(next));
++}
++
++/// 只切换原目标条目的「待打磨」键。先比对页面读取时的整表指纹，
++/// 再从当前 YAML 映射上单点修改，保留未知字段、其他条目与条目次序。
++pub fn set_expectation_pending(
++    project: &Path,
++    name: &str,
++    pending: bool,
++    expected_fingerprint: &str,
++) -> Result<crate::book_file::SaveResult, String> {
++    let name = name.trim();
++    if name.is_empty() {
++        return Err("期待线名不能为空".to_string());
++    }
++    let path = expectation_path(project);
++    let snapshot = read_expectation_snapshot(project)?;
++    if snapshot.fingerprint.as_deref() != Some(expected_fingerprint) {
++        return Ok(crate::book_file::SaveResult::Conflict);
++    }
++    let Some(raw) = snapshot.raw else {
++        return Err(format!("没有找到期待线「{name}」"));
++    };
++    let mut value: Value = serde_yaml::from_str(&raw)
++        .map_err(|error| format!("无法解析 {}：{error}", path.display()))?;
++    let Value::Sequence(rows) = &mut value else {
++        return Err(format!("{} 顶层应为期待线列表", path.display()));
++    };
++    let matches: Vec<usize> = rows
++        .iter()
++        .enumerate()
++        .filter_map(|(index, row)| {
++            row.as_mapping()
++                .and_then(|map| map_scalar(map, "名"))
++                .is_some_and(|row_name| row_name == name)
++                .then_some(index)
++        })
++        .collect();
++    let index = match matches.as_slice() {
++        [] => return Err(format!("没有找到期待线「{name}」")),
++        [index] => *index,
++        _ => return Err(format!("期待线「{name}」重名，无法安全定位")),
++    };
++    let Some(map) = rows[index].as_mapping_mut() else {
++        // The table was validated above; this remains a defensive guard if its shape changes.
++        return Err(format!("{} 第 {} 项应为映射", path.display(), index + 1));
++    };
++    let key = Value::String("待打磨".into());
++    if pending {
++        map.insert(key, Value::Bool(true));
++    } else {
++        map.remove(&key);
++    }
++    let text = serde_yaml::to_string(&value).map_err(|error| format!("无法生成 yaml：{error}"))?;
++    write_text_atomic(&path, &text)?;
++    Ok(crate::book_file::SaveResult::Saved {
++        fingerprint: content_fingerprint(text.as_bytes()).to_string(),
+     })
+ }
+ 
+@@ -210,6 +441,7 @@ pub fn add_expectation(
+         kind,
+         horizon,
+         state: STATE_PENDING.to_string(),
++        pending: false,
+         planted: Vec::new(),
+         fulfilled: Vec::new(),
+     });
+@@ -261,6 +493,7 @@ pub fn annotate_expectation(
+                 kind,
+                 horizon,
+                 state: STATE_PLANTED.to_string(),
++                pending: false,
+                 planted: vec![anchor],
+                 fulfilled: Vec::new(),
+             });
+@@ -387,7 +620,9 @@ pub fn delete_expectation(project: &Path, name: &str) -> Result<Vec<Expectation>
+ /// 时间线网格数据：读三线.yaml ＋ 现扫正文算未推进章数/超期/引文失配。
+ /// 未推进＝最大章序 − 最近一次锚点章（埋设或兑现都算推进，与伏笔只算埋设不同）。
+ pub fn expectation_board(project: &Path) -> Result<ExpectationBoard, String> {
+-    let list = read_expectations(project)?;
++    let snapshot = read_expectation_snapshot(project)?;
++    let table_fingerprint = snapshot.fingerprint;
++    let list = snapshot.items;
+     let texts = thread::ChapterTexts::load(project)?;
+     let max_ordinal = texts.max_ordinal();
+     let mut max_chapter = max_ordinal;
+@@ -420,6 +655,7 @@ pub fn expectation_board(project: &Path) -> Result<ExpectationBoard, String> {
+                 kind: item.kind,
+                 horizon: item.horizon,
+                 state: item.state,
++                pending: item.pending,
+                 planted: texts.anchor_views(&item.planted),
+                 fulfilled: texts.payoff_views(&item.fulfilled),
+                 unadvanced_chapters,
+@@ -429,6 +665,7 @@ pub fn expectation_board(project: &Path) -> Result<ExpectationBoard, String> {
+         .collect();
+     Ok(ExpectationBoard {
+         max_chapter,
++        table_fingerprint,
+         items,
+     })
+ }
+@@ -456,11 +693,16 @@ mod tests {
+         write(&project.join(format!("正文/{ordinal:04} {title}.md")), body);
+     }
+ 
++    fn fingerprint(board: &ExpectationBoard) -> &str {
++        board.table_fingerprint.as_deref().unwrap()
++    }
++
+     #[test]
+     fn 新建待埋_类别档位_重名报错_未知值报错() {
+         let tmp = TempDir::new().unwrap();
+         let p = project(tmp.path());
+-        let list = add_expectation(&p, "主角何时亮出金手指", KIND_EXPECTATION, HORIZON_SHORT).unwrap();
++        let list =
++            add_expectation(&p, "主角何时亮出金手指", KIND_EXPECTATION, HORIZON_SHORT).unwrap();
+         assert_eq!(list[0].state, STATE_PENDING);
+         assert_eq!(list[0].kind, KIND_EXPECTATION);
+         assert_eq!(list[0].horizon, HORIZON_SHORT);
+@@ -476,39 +718,57 @@ mod tests {
+         let tmp = TempDir::new().unwrap();
+         let p = project(tmp.path());
+ 
+-        let list =
+-            annotate_expectation(&p, "木匣里的东西", 1, "他摸了摸怀里的木匣", KIND_EXPECTATION, HORIZON_SHORT)
+-                .unwrap();
++        let list = annotate_expectation(
++            &p,
++            "木匣里的东西",
++            1,
++            "他摸了摸怀里的木匣",
++            KIND_EXPECTATION,
++            HORIZON_SHORT,
++        )
++        .unwrap();
+         assert_eq!(list[0].state, STATE_PLANTED);
+         assert_eq!(list[0].horizon, HORIZON_SHORT);
+ 
+         // 同章同引文重复标注不重复追加。
+-        let list =
+-            annotate_expectation(&p, "木匣里的东西", 1, "他摸了摸怀里的木匣", KIND_EXPECTATION, HORIZON_SHORT)
+-                .unwrap();
++        let list = annotate_expectation(
++            &p,
++            "木匣里的东西",
++            1,
++            "他摸了摸怀里的木匣",
++            KIND_EXPECTATION,
++            HORIZON_SHORT,
++        )
++        .unwrap();
+         assert_eq!(list[0].planted.len(), 1);
+ 
+         // 后续章再标注 → 追加埋设；传别的类别/档位不改已有值。
+-        let list =
+-            annotate_expectation(&p, "木匣里的东西", 5, "木匣还在怀里", KIND_GOAL, HORIZON_LONG)
+-                .unwrap();
++        let list = annotate_expectation(
++            &p,
++            "木匣里的东西",
++            5,
++            "木匣还在怀里",
++            KIND_GOAL,
++            HORIZON_LONG,
++        )
++        .unwrap();
+         assert_eq!(list[0].planted.len(), 2);
+         assert_eq!(list[0].kind, KIND_EXPECTATION);
+         assert_eq!(list[0].horizon, HORIZON_SHORT);
+ 
+         // 先建待埋，再从正文标注 → 升已埋。
+         add_expectation(&p, "玉佩", KIND_GOAL, HORIZON_MID).unwrap();
+-        let list =
+-            annotate_expectation(&p, "玉佩", 2, "腰间的玉佩不见了", KIND_GOAL, HORIZON_MID).unwrap();
++        let list = annotate_expectation(&p, "玉佩", 2, "腰间的玉佩不见了", KIND_GOAL, HORIZON_MID)
++            .unwrap();
+         let jade = list.iter().find(|e| e.name == "玉佩").unwrap();
+         assert_eq!(jade.state, STATE_PLANTED);
+         assert_eq!(jade.planted.len(), 1);
+ 
+         // 新建时校验类别/档位；空引文/空名报错且不落盘。
++        assert!(annotate_expectation(&p, "新的", 1, "引文", "悬念", HORIZON_SHORT).is_err());
+         assert!(
+-            annotate_expectation(&p, "新的", 1, "引文", "悬念", HORIZON_SHORT).is_err()
++            annotate_expectation(&p, "  ", 1, "引文", KIND_EXPECTATION, HORIZON_SHORT).is_err()
+         );
+-        assert!(annotate_expectation(&p, "  ", 1, "引文", KIND_EXPECTATION, HORIZON_SHORT).is_err());
+         assert!(annotate_expectation(&p, "名", 1, "  ", KIND_EXPECTATION, HORIZON_SHORT).is_err());
+     }
+ 
+@@ -578,13 +838,13 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn 读写_默认值_未知键丢弃_损坏报错() {
++    fn 读写_默认值_未知键保留_损坏报错() {
+         let tmp = TempDir::new().unwrap();
+         let p = project(tmp.path());
+-        // 手写条目：缺类别/档位/状态 → 期待/中/待埋；条目内未知键整表重写会丢。
++        // 手写条目：缺类别/档位/状态 → 期待/中/待埋；往返不要求旧文件迁移。
+         write(
+             &expectation_path(&p),
+-            "- 名: 手写的线\n  私货: 会丢\n  埋设:\n  - 章: 2\n    引文: 手写\n",
++            "- 名: 手写的线\n  私货: 保留\n  埋设:\n  - 章: 2\n    引文: 手写\n    锚点私货: 也保留\n",
+         );
+         let list = read_expectations(&p).unwrap();
+         assert_eq!(list[0].kind, KIND_EXPECTATION);
+@@ -592,10 +852,9 @@ mod tests {
+         assert_eq!(list[0].state, STATE_PENDING);
+         write_expectations(&p, &list).unwrap();
+         let raw = fs::read_to_string(expectation_path(&p)).unwrap();
+-        assert!(!raw.contains("私货"), "条目内未知键整表重写会丢：{raw}");
++        assert!(raw.contains("私货: 保留"), "条目内未知键应保留：{raw}");
++        assert!(raw.contains("锚点私货: 也保留"), "嵌套未知键应保留：{raw}");
+         assert!(raw.contains("名: 手写的线"));
+-        assert!(raw.contains("类别: 期待"));
+-        assert!(raw.contains("档位: 中"));
+ 
+         // 兑现缺「类型」→ 阶段。
+         write(
+@@ -611,6 +870,121 @@ mod tests {
+         assert!(read_expectations(&p).is_err());
+     }
+ 
++    #[test]
++    fn 待打磨_期待感与目标往返_保留条目字段和原顺序() {
++        let tmp = TempDir::new().unwrap();
++        let p = project(tmp.path());
++        write(
++            &expectation_path(&p),
++            "- 名: 期待线\n  类别: 期待\n  档位: 短\n  状态: 部分兑现\n  私货: 原样留下\n  埋设:\n  - 章: 2\n    引文: 怀里的木匣\n  兑现:\n  - 章: 5\n    引文: 木匣开启\n    类型: 阶段\n    说明: 只露一角\n- 名: 目标线\n  类别: 目标\n  档位: 长\n  状态: 已埋\n  待打磨: false\n  私货: 第二条也留下\n",
++        );
++
++        let initial = expectation_board(&p).unwrap();
++        assert!(initial.items.iter().all(|item| !item.pending));
++        set_expectation_pending(&p, "期待线", true, fingerprint(&initial)).unwrap();
++
++        let after_expectation = expectation_board(&p).unwrap();
++        let expectation = after_expectation
++            .items
++            .iter()
++            .find(|item| item.name == "期待线")
++            .unwrap();
++        assert!(expectation.pending);
++        assert_eq!(expectation.kind, KIND_EXPECTATION);
++        assert_eq!(expectation.horizon, HORIZON_SHORT);
++        assert_eq!(expectation.state, STATE_PARTIAL);
++        assert_eq!(expectation.planted[0].quote, "怀里的木匣");
++        assert_eq!(expectation.fulfilled[0].note.as_deref(), Some("只露一角"));
++        set_expectation_pending(&p, "目标线", true, fingerprint(&after_expectation)).unwrap();
++
++        let both_pending = expectation_board(&p).unwrap();
++        assert!(both_pending.items.iter().all(|item| item.pending));
++        let target = both_pending
++            .items
++            .iter()
++            .find(|item| item.name == "目标线")
++            .unwrap();
++        assert_eq!(target.kind, KIND_GOAL);
++        assert_eq!(target.horizon, HORIZON_LONG);
++        assert_eq!(target.state, STATE_PLANTED);
++        set_expectation_pending(&p, "期待线", false, fingerprint(&both_pending)).unwrap();
++
++        let after_exit = expectation_board(&p).unwrap();
++        let expectation = after_exit
++            .items
++            .iter()
++            .find(|item| item.name == "期待线")
++            .unwrap();
++        assert!(!expectation.pending);
++        assert_eq!(expectation.kind, KIND_EXPECTATION);
++        assert_eq!(expectation.horizon, HORIZON_SHORT);
++        assert_eq!(expectation.state, STATE_PARTIAL);
++        set_expectation_pending(&p, "目标线", false, fingerprint(&after_exit)).unwrap();
++
++        let raw = fs::read_to_string(expectation_path(&p)).unwrap();
++        let rows: Vec<Value> = serde_yaml::from_str(&raw).unwrap();
++        assert_eq!(rows.len(), 2);
++        let first = rows[0].as_mapping().unwrap();
++        let second = rows[1].as_mapping().unwrap();
++        assert_eq!(map_scalar(first, "名").as_deref(), Some("期待线"));
++        assert_eq!(map_scalar(second, "名").as_deref(), Some("目标线"));
++        assert!(!first.contains_key(Value::String("待打磨".into())));
++        assert!(!second.contains_key(Value::String("待打磨".into())));
++        assert_eq!(map_scalar(first, "私货").as_deref(), Some("原样留下"));
++        assert_eq!(map_scalar(second, "私货").as_deref(), Some("第二条也留下"));
++    }
++
++    #[test]
++    fn 待打磨_外部修改或重名时拒绝覆盖() {
++        let tmp = TempDir::new().unwrap();
++        let p = project(tmp.path());
++        write(
++            &expectation_path(&p),
++            "- 名: 唯一线\n  类别: 期待\n  档位: 中\n  状态: 待埋\n  私货: 原值\n",
++        );
++        let before_external_change = expectation_board(&p).unwrap();
++        let external = "- 名: 唯一线\n  类别: 期待\n  档位: 长\n  状态: 待埋\n  私货: 外部更新\n";
++        write(&expectation_path(&p), external);
++        assert!(matches!(
++            set_expectation_pending(&p, "唯一线", true, fingerprint(&before_external_change)),
++            Ok(crate::book_file::SaveResult::Conflict)
++        ));
++        assert_eq!(fs::read_to_string(expectation_path(&p)).unwrap(), external);
++
++        let before_damage = expectation_board(&p).unwrap();
++        let damaged = "- 名: 唯一线\n  待打磨: [\n";
++        write(&expectation_path(&p), damaged);
++        assert!(set_expectation_pending(&p, "唯一线", true, fingerprint(&before_damage)).is_err());
++        assert_eq!(fs::read_to_string(expectation_path(&p)).unwrap(), damaged);
++
++        let duplicate = "- 名: 重名线\n  类别: 期待\n- 名: 重名线\n  类别: 目标\n";
++        write(&expectation_path(&p), duplicate);
++        let current = expectation_board(&p).unwrap();
++        assert!(set_expectation_pending(&p, "重名线", true, fingerprint(&current)).is_err());
++        assert_eq!(fs::read_to_string(expectation_path(&p)).unwrap(), duplicate);
++    }
++
++    #[test]
++    fn 待打磨_编辑业务状态时保留原标记锚点和未知字段() {
++        let tmp = TempDir::new().unwrap();
++        let p = project(tmp.path());
++        write(
++            &expectation_path(&p),
++            "- 名: 去京城\n  类别: 目标\n  档位: 长\n  状态: 已埋\n  待打磨: true\n  私货: 留着\n  埋设:\n  - 章: 3\n    引文: 启程\n    锚点备注: 留着\n",
++        );
++
++        let updated = set_expectation_state(&p, "去京城", STATE_PARTIAL).unwrap();
++        assert!(updated[0].pending);
++        assert_eq!(updated[0].state, STATE_PARTIAL);
++        assert_eq!(updated[0].kind, KIND_GOAL);
++        assert_eq!(updated[0].horizon, HORIZON_LONG);
++        assert_eq!(updated[0].planted[0].quote, "启程");
++        let raw = fs::read_to_string(expectation_path(&p)).unwrap();
++        assert!(raw.contains("待打磨: true"));
++        assert!(raw.contains("私货: 留着"));
++        assert!(raw.contains("锚点备注: 留着"));
++    }
++
+     #[test]
+     fn 看板_未推进按最近锚点_超期按档位_失配() {
+         let tmp = TempDir::new().unwrap();
+@@ -620,29 +994,80 @@ mod tests {
+         chapter(&p, 26, "远行", "主角收拾行囊。");
+ 
+         // 短线：埋于 1、阶段兑现于 10 → 最近锚点 10，最大章序 26 → 16 章未推进 → 超期（阈值 8）。
+-        annotate_expectation(&p, "木匣", 1, "他摸了摸怀里的木匣，没敢打开。", KIND_EXPECTATION, HORIZON_SHORT)
+-            .unwrap();
+-        fulfill_expectation(&p, "木匣", 10, "木匣开了，里面是一枚旧铜钱。", PAYOFF_STAGE, None).unwrap();
++        annotate_expectation(
++            &p,
++            "木匣",
++            1,
++            "他摸了摸怀里的木匣，没敢打开。",
++            KIND_EXPECTATION,
++            HORIZON_SHORT,
++        )
++        .unwrap();
++        fulfill_expectation(
++            &p,
++            "木匣",
++            10,
++            "木匣开了，里面是一枚旧铜钱。",
++            PAYOFF_STAGE,
++            None,
++        )
++        .unwrap();
+ 
+         // 中线：只埋于 26 → 未推进 0，不超期。
+         annotate_expectation(&p, "去京城", 26, "主角收拾行囊。", KIND_GOAL, HORIZON_MID).unwrap();
+ 
+         // 长线：埋于 1，未推进 25 → 阈值 50，不超期但记数。
+-        annotate_expectation(&p, "主角身世", 1, "他摸了摸怀里的木匣，没敢打开。", KIND_EXPECTATION, HORIZON_LONG)
+-            .unwrap();
++        annotate_expectation(
++            &p,
++            "主角身世",
++            1,
++            "他摸了摸怀里的木匣，没敢打开。",
++            KIND_EXPECTATION,
++            HORIZON_LONG,
++        )
++        .unwrap();
+ 
+         // 已兑现/待埋/弃用不算未推进。
+-        annotate_expectation(&p, "已还的账", 1, "他摸了摸怀里的木匣，没敢打开。", KIND_GOAL, HORIZON_SHORT)
+-            .unwrap();
+-        fulfill_expectation(&p, "已还的账", 10, "木匣开了，里面是一枚旧铜钱。", PAYOFF_FINAL, None).unwrap();
++        annotate_expectation(
++            &p,
++            "已还的账",
++            1,
++            "他摸了摸怀里的木匣，没敢打开。",
++            KIND_GOAL,
++            HORIZON_SHORT,
++        )
++        .unwrap();
++        fulfill_expectation(
++            &p,
++            "已还的账",
++            10,
++            "木匣开了，里面是一枚旧铜钱。",
++            PAYOFF_FINAL,
++            None,
++        )
++        .unwrap();
+         add_expectation(&p, "还没写", KIND_EXPECTATION, HORIZON_SHORT).unwrap();
+-        annotate_expectation(&p, "弃了的", 1, "他摸了摸怀里的木匣，没敢打开。", KIND_EXPECTATION, HORIZON_SHORT)
+-            .unwrap();
++        annotate_expectation(
++            &p,
++            "弃了的",
++            1,
++            "他摸了摸怀里的木匣，没敢打开。",
++            KIND_EXPECTATION,
++            HORIZON_SHORT,
++        )
++        .unwrap();
+         set_expectation_state(&p, "弃了的", STATE_DROPPED).unwrap();
+ 
+         // 引文失配：章 1 里找不到这句话。
+-        annotate_expectation(&p, "失配的线", 1, "这句话已经不在正文里了", KIND_EXPECTATION, HORIZON_SHORT)
+-            .unwrap();
++        annotate_expectation(
++            &p,
++            "失配的线",
++            1,
++            "这句话已经不在正文里了",
++            KIND_EXPECTATION,
++            HORIZON_SHORT,
++        )
++        .unwrap();
+ 
+         let board = expectation_board(&p).unwrap();
+         assert_eq!(board.max_chapter, 26);
+diff --git a/app/src-tauri/src/export.rs b/app/src-tauri/src/export.rs
+index 3e8cc2e..42e6c55 100644
+--- a/app/src-tauri/src/export.rs
++++ b/app/src-tauri/src/export.rs
+@@ -586,7 +586,11 @@ pub fn export_book(
+     let built = build_export(project, range, template)?;
+     let dir = project.join(EXPORT_DIR);
+     fs::create_dir_all(&dir).map_err(|e| format!("无法创建文件夹 {}：{e}", dir.display()))?;
+-    let ext = if template.format == FORMAT_MD { "md" } else { "txt" };
++    let ext = if template.format == FORMAT_MD {
++        "md"
++    } else {
++        "txt"
++    };
+     let stamp = chrono::Local::now().format("%Y%m%d").to_string();
+     let base = format!("{}-{}-{stamp}", built.title, range.label());
+     let mut path = dir.join(format!("{base}.{ext}"));
+@@ -706,7 +710,6 @@ mod tests {
+         assert_eq!(cleaned.body, "斜体 与 a_b_c");
+     }
+ 
+-
+     #[test]
+     fn 清洗_空行压缩与段首缩进() {
+         let mut template = ExportTemplate::default();
+@@ -755,7 +758,12 @@ mod tests {
+         assert_eq!(report.chapters[1].ordinal, 2);
+         assert_eq!(report.warnings.len(), 1);
+         assert!(report.warnings[0].contains("随手记"));
+-        let file_name = report.path.file_name().unwrap().to_string_lossy().into_owned();
++        let file_name = report
++            .path
++            .file_name()
++            .unwrap()
++            .to_string_lossy()
++            .into_owned();
+         assert!(file_name.starts_with("大魏读书人-全书-"), "{file_name}");
+         assert!(file_name.ends_with(".txt"), "{file_name}");
+ 
+@@ -769,7 +777,10 @@ mod tests {
+         let tmp = TempDir::new().unwrap();
+         let p = project(tmp.path());
+         for n in 1..=3 {
+-            write(&p.join(format!("正文/{n:04} 第{n}章.md")), &format!("正文{n}"));
++            write(
++                &p.join(format!("正文/{n:04} 第{n}章.md")),
++                &format!("正文{n}"),
++            );
+         }
+         let range = ChapterRange {
+             from: Some(2),
+@@ -865,7 +876,10 @@ mod tests {
+     fn 预览_截断加提示_不落盘() {
+         let tmp = TempDir::new().unwrap();
+         let p = project(tmp.path());
+-        write(&p.join("正文/0001 甲.md"), &"字".repeat(PREVIEW_CHARS + 100));
++        write(
++            &p.join("正文/0001 甲.md"),
++            &"字".repeat(PREVIEW_CHARS + 100),
++        );
+         let text = preview_export(&p, ChapterRange::default(), &ExportTemplate::default()).unwrap();
+         assert!(text.ends_with("……（预览截断，完整内容见导出文件）"));
+         assert!(!p.join(EXPORT_DIR).exists(), "预览不写盘");
+@@ -934,11 +948,28 @@ mod tests {
+             warnings: Vec::new(),
+         };
+         let value = serde_json::to_value(&report).unwrap();
+-        for key in ["path", "format", "chapterCount", "wordCount", "chapters", "warnings"] {
++        for key in [
++            "path",
++            "format",
++            "chapterCount",
++            "wordCount",
++            "chapters",
++            "warnings",
++        ] {
+             assert!(value.get(key).is_some(), "缺字段 {key}");
+         }
+-        for key in ["ordinal", "title", "fileName", "wordCount", "imagesDropped", "notes"] {
+-            assert!(value["chapters"][0].get(key).is_some(), "章报告缺字段 {key}");
++        for key in [
++            "ordinal",
++            "title",
++            "fileName",
++            "wordCount",
++            "imagesDropped",
++            "notes",
++        ] {
++            assert!(
++                value["chapters"][0].get(key).is_some(),
++                "章报告缺字段 {key}"
++            );
+         }
+     }
+ }
+diff --git a/app/src-tauri/src/global_search.rs b/app/src-tauri/src/global_search.rs
+index 63849ed..6f6c83f 100644
+--- a/app/src-tauri/src/global_search.rs
++++ b/app/src-tauri/src/global_search.rs
+@@ -538,7 +538,7 @@ mod tests {
+         write(
+             root.path(),
+             "项目/甲/三线.yaml",
+-            "- 名: 回家\n  类别: 目标\n  档位: 长\n  埋设:\n    - 章: 1\n      引文: 铜铃声\n",
++            "- 名: 回家\n  类别: 目标\n  档位: 长\n  待打磨: true\n  私货: 保留\n  埋设:\n    - 章: 1\n      引文: 铜铃声\n",
+         );
+         write(root.path(), "灵感库/故事卡/铃声.md", "铜铃故事");
+         write(root.path(), "《拆书》/拆书.md", "铜铃桥段");
+diff --git a/app/src-tauri/src/lib.rs b/app/src-tauri/src/lib.rs
+index bed459b..4ae2d0d 100644
+--- a/app/src-tauri/src/lib.rs
++++ b/app/src-tauri/src/lib.rs
+@@ -6,8 +6,9 @@ mod cover;
+ mod expectation;
+ mod export;
+ mod foreshadow;
+-mod inspiration;
++mod global_search;
+ mod ideation;
++mod inspiration;
+ mod library;
+ mod map;
+ mod pending;
+@@ -16,9 +17,8 @@ mod presets;
+ mod project;
+ mod proofread;
+ mod relationship;
+-mod social;
+ mod search;
+-mod global_search;
++mod social;
+ mod thread;
+ mod trope;
+ mod vocabulary;
+@@ -31,8 +31,8 @@ use chapter::{ChapterCard, ChapterEntry, SnapshotEntry, UnitBrief, WritingStats}
+ use expectation::{Expectation, ExpectationBoard};
+ use export::{ChapterRange, ExportReport, ExportTemplate};
+ use foreshadow::{Foreshadow, ForeshadowView};
+-use inspiration::{CardDraft, ImportEntry, InspirationCard, LinkedChapter};
+ use ideation::IdeationOverview;
++use inspiration::{CardDraft, ImportEntry, InspirationCard, LinkedChapter};
+ use library::BookEntry;
+ use map::{
+     GeoUpgradePreview, GeoUpgradeTarget, MapCanvasLayout, MapCanvasPlacement, MapDraft, MapEntry,
+@@ -183,14 +183,21 @@ fn load_vocab(root: String) -> Result<Vocabulary, String> {
+ 
+ #[tauri::command]
+ async fn global_search_preview(root: String, path: String, name: String) -> Result<String, String> {
+-    tauri::async_runtime::spawn_blocking(move || global_search::preview(Path::new(&root), Path::new(&path), &name))
+-        .await.map_err(|e| e.to_string())?
++    tauri::async_runtime::spawn_blocking(move || {
++        global_search::preview(Path::new(&root), Path::new(&path), &name)
++    })
++    .await
++    .map_err(|e| e.to_string())?
+ }
+ 
+ #[tauri::command]
+-async fn global_search(root: String, query: String) -> Result<global_search::GlobalSearchReport, String> {
++async fn global_search(
++    root: String,
++    query: String,
++) -> Result<global_search::GlobalSearchReport, String> {
+     tauri::async_runtime::spawn_blocking(move || global_search::search(Path::new(&root), &query))
+-        .await.map_err(|e| e.to_string())?
++        .await
++        .map_err(|e| e.to_string())?
+ }
+ 
+ #[tauri::command]
+@@ -431,7 +438,12 @@ fn edit_map_relation(
+     next: Option<MapRelation>,
+     expected: Option<String>,
+ ) -> Result<MapStructure, String> {
+-    map::edit_map_relation(Path::new(&project), index, next.as_ref(), expected.as_deref())
++    map::edit_map_relation(
++        Path::new(&project),
++        index,
++        next.as_ref(),
++        expected.as_deref(),
++    )
+ }
+ 
+ #[tauri::command]
+@@ -441,7 +453,12 @@ fn edit_region_relation(
+     next: Option<RegionRelation>,
+     expected: Option<String>,
+ ) -> Result<MapStructure, String> {
+-    map::edit_region_relation(Path::new(&project), index, next.as_ref(), expected.as_deref())
++    map::edit_region_relation(
++        Path::new(&project),
++        index,
++        next.as_ref(),
++        expected.as_deref(),
++    )
+ }
+ 
+ #[tauri::command]
+@@ -624,43 +641,75 @@ fn read_social_canvas(project: String) -> Result<social::SocialCanvas, String> {
+     social::canvas_view(Path::new(&project))
+ }
+ #[tauri::command]
+-fn save_social_layout(project: String, placements: Vec<social::Placement>, expected: String) -> Result<social::SocialCanvas, String> {
++fn save_social_layout(
++    project: String,
++    placements: Vec<social::Placement>,
++    expected: String,
++) -> Result<social::SocialCanvas, String> {
+     social::save_canvas_layout(Path::new(&project), &placements, &expected)
+ }
+ #[tauri::command]
+-fn arrange_social_canvas(project: String, all: bool, expected: String) -> Result<social::SocialCanvas, String> {
++fn arrange_social_canvas(
++    project: String,
++    all: bool,
++    expected: String,
++) -> Result<social::SocialCanvas, String> {
+     social::arrange_canvas(Path::new(&project), all, &expected)
+ }
+ #[tauri::command]
+-fn edit_social_edge(project: String, index: Option<usize>, next: Option<social::SocialEdge>, expected: String) -> Result<social::SocialCanvas, String> {
++fn edit_social_edge(
++    project: String,
++    index: Option<usize>,
++    next: Option<social::SocialEdge>,
++    expected: String,
++) -> Result<social::SocialCanvas, String> {
+     social::edit_canvas_edge(Path::new(&project), index, next.as_ref(), &expected)
+ }
+ #[tauri::command]
+-fn save_social_legend(project: String, legend: Vec<relationship::LegendItem>, sources: Vec<Option<usize>>, expected: String) -> Result<social::SocialCanvas, String> {
++fn save_social_legend(
++    project: String,
++    legend: Vec<relationship::LegendItem>,
++    sources: Vec<Option<usize>>,
++    expected: String,
++) -> Result<social::SocialCanvas, String> {
+     social::save_canvas_legend(Path::new(&project), &legend, &sources, &expected)
+ }
+ #[tauri::command]
+-fn save_organization(project: String, draft: social::OrganizationDraft, expected: Option<String>) -> Result<social::Organization,String> {
++fn save_organization(
++    project: String,
++    draft: social::OrganizationDraft,
++    expected: Option<String>,
++) -> Result<social::Organization, String> {
+     social::save_organization(Path::new(&project), &draft, expected.as_deref())
+ }
+ #[tauri::command]
+-fn delete_organization(project: String, name: String, expected: String) -> Result<(),String> {
++fn delete_organization(project: String, name: String, expected: String) -> Result<(), String> {
+     social::delete_organization(Path::new(&project), &name, &expected)
+ }
+ #[tauri::command]
+-fn edit_membership(project: String, next: Option<social::Membership>, previous: Option<social::Membership>, expected: String) -> Result<(),String> {
+-    social::edit_membership(Path::new(&project),next.as_ref(),previous.as_ref(),&expected)
++fn edit_membership(
++    project: String,
++    next: Option<social::Membership>,
++    previous: Option<social::Membership>,
++    expected: String,
++) -> Result<(), String> {
++    social::edit_membership(
++        Path::new(&project),
++        next.as_ref(),
++        previous.as_ref(),
++        &expected,
++    )
+ }
+ #[tauri::command]
+-fn preview_social_upgrade(project: String) -> Result<social::UpgradePreview,String> {
++fn preview_social_upgrade(project: String) -> Result<social::UpgradePreview, String> {
+     social::preview_upgrade(Path::new(&project))
+ }
+ #[tauri::command]
+-fn confirm_social_upgrade(project: String, preview: social::UpgradePreview) -> Result<(),String> {
++fn confirm_social_upgrade(project: String, preview: social::UpgradePreview) -> Result<(), String> {
+     social::confirm_upgrade(Path::new(&project), &preview)
+ }
+ #[tauri::command]
+-fn recover_social_upgrade(project: String) -> Result<(),String> {
++fn recover_social_upgrade(project: String) -> Result<(), String> {
+     social::recover_upgrade(Path::new(&project))
+ }
+ 
+@@ -939,6 +988,17 @@ fn set_expectation_state(
+     expectation::set_expectation_state(Path::new(&project), &name, &state)
+ }
+ 
++/// 切换期待线的独立待打磨状态；以看板载入时的三线.yaml 指纹拒绝陈旧写入。
++#[tauri::command]
++fn set_expectation_pending(
++    project: String,
++    name: String,
++    fingerprint: String,
++    pending: bool,
++) -> Result<SaveResult, String> {
++    expectation::set_expectation_pending(Path::new(&project), &name, pending, &fingerprint)
++}
++
+ #[tauri::command]
+ fn set_expectation_meta(
+     project: String,
+@@ -1240,6 +1300,7 @@ pub fn run() {
+             annotate_expectation,
+             fulfill_expectation,
+             set_expectation_state,
++            set_expectation_pending,
+             set_expectation_meta,
+             delete_expectation,
+             load_writing_stats,
+diff --git a/app/src-tauri/src/library.rs b/app/src-tauri/src/library.rs
+index 11dfc01..c621ab5 100644
+--- a/app/src-tauri/src/library.rs
++++ b/app/src-tauri/src/library.rs
+@@ -23,7 +23,8 @@ pub const PROJECTS_DIR: &str = "项目";
+ /// 只作用于新建书。首次使用（点「拆书模板」入口或新建书）不存在则落
+ /// 默认模板——书档头卡＋空行＋第1章；占位符仅 `{书名}` 一个。
+ pub const TEMPLATE_FILE: &str = "拆书模板.md";
+-pub const DEFAULT_TEMPLATE: &str = "> [!书档]\n> 书名：{书名}\n> 成绩：\n> 简介：\n> 金手指：\n\n第1章\n";
++pub const DEFAULT_TEMPLATE: &str =
++    "> [!书档]\n> 书名：{书名}\n> 成绩：\n> 简介：\n> 金手指：\n\n第1章\n";
+ 
+ fn template_path(root: &Path) -> PathBuf {
+     root.join(TEMPLATE_FILE)
+@@ -97,9 +98,12 @@ pub fn create_book(root: &Path, title: &str) -> Result<BookEntry, String> {
+     if !root.is_dir() {
+         return Err(format!("不是有效的文件夹：{}", root.display()));
+     }
+-    let title = title.trim().trim_start_matches('《').trim_end_matches('》').trim();
+-    let name =
+-        sanitize_file_name(title).map_err(|_| "书名不能为空（或只剩符号）".to_string())?;
++    let title = title
++        .trim()
++        .trim_start_matches('《')
++        .trim_end_matches('》')
++        .trim();
++    let name = sanitize_file_name(title).map_err(|_| "书名不能为空（或只剩符号）".to_string())?;
+     let dir = root.join(format!("《{name}》"));
+     if dir.exists() {
+         return Err(format!("已存在同名书「{name}」"));
+@@ -483,7 +487,10 @@ mod tests {
+         let root = TempDir::new().unwrap().path().to_path_buf();
+         write(&root.join("书甲.md"), "第1章");
+         write(&root.join("项目/《我的书》/项目.yaml"), "书名: 我的书\n");
+-        write(&root.join("项目/《我的书》/正文/0001 初入江湖.md"), "第1章 初入江湖");
++        write(
++            &root.join("项目/《我的书》/正文/0001 初入江湖.md"),
++            "第1章 初入江湖",
++        );
+         // 项目/ 根下的散 .md 也不该被当成一本叫「项目」的书。
+         write(&root.join("项目/随手记.md"), "不属于拆书");
+ 
+@@ -599,10 +606,7 @@ mod tests {
+         let books = scan_library(&root).unwrap();
+         assert_eq!(books.len(), 1);
+         assert_eq!(books[0].name, "我的新书");
+-        assert_eq!(
+-            books[0].meta.track_record, None,
+-            "模板空成绩列显示空"
+-        );
++        assert_eq!(books[0].meta.track_record, None, "模板空成绩列显示空");
+     }
+ 
+     #[test]
+@@ -645,10 +649,16 @@ mod tests {
+         let entry = open_book_template(&root).unwrap();
+         assert_eq!(entry.name, "拆书模板");
+         assert_eq!(entry.primary_md, root.join(TEMPLATE_FILE));
+-        assert_eq!(fs::read_to_string(&root.join(TEMPLATE_FILE)).unwrap(), DEFAULT_TEMPLATE);
++        assert_eq!(
++            fs::read_to_string(&root.join(TEMPLATE_FILE)).unwrap(),
++            DEFAULT_TEMPLATE
++        );
+ 
+         // 用户改过的模板原样保留，不被默认值覆盖。
+-        write(&root.join(TEMPLATE_FILE), "> [!书档]\n> 书名：{书名}\n\n第一章\n");
++        write(
++            &root.join(TEMPLATE_FILE),
++            "> [!书档]\n> 书名：{书名}\n\n第一章\n",
++        );
+         assert_eq!(
+             open_book_template(&root).unwrap().primary_md,
+             root.join(TEMPLATE_FILE)
+@@ -699,7 +709,10 @@ mod tests {
+     fn 扫描与搜索_库根拆书模板_不算书() {
+         let root = TempDir::new().unwrap().path().to_path_buf();
+         write(&root.join("书甲.md"), "第1章");
+-        write(&root.join(TEMPLATE_FILE), "> [!书档]\n> 书名：{书名}\n\n第1章\n");
++        write(
++            &root.join(TEMPLATE_FILE),
++            "> [!书档]\n> 书名：{书名}\n\n第1章\n",
++        );
+ 
+         let books = scan_library(&root).unwrap();
+         assert_eq!(books.len(), 1);
+@@ -720,10 +733,7 @@ mod tests {
+         write(&root.join("《书丙》/附件/封面.png"), "png");
+ 
+         let books = scan_library(&root).unwrap();
+-        assert_eq!(
+-            books[0].cover,
+-            Some(root.join("《书丙》/附件/封面.png"))
+-        );
++        assert_eq!(books[0].cover, Some(root.join("《书丙》/附件/封面.png")));
+         assert_eq!(books[0].cover_dir, root.join("《书丙》/附件"));
+     }
+ 
+@@ -780,7 +790,11 @@ mod tests {
+ 
+         let books = scan_library(&root).unwrap();
+         assert_eq!(books[0].cover.as_deref(), Some(dest.as_path()));
+-        assert_eq!(fs::read(&dest).unwrap(), "png bytes".as_bytes(), "拷贝而非引用");
++        assert_eq!(
++            fs::read(&dest).unwrap(),
++            "png bytes".as_bytes(),
++            "拷贝而非引用"
++        );
+     }
+ 
+     #[test]
+@@ -807,7 +821,10 @@ mod tests {
+             &root.join("书甲.md"),
+             "> [!书档]\n> 书名：纸面名\n> 成绩：纸面成绩\n> 金手指：纸面金手指\n\n第1章",
+         );
+-        write(&root.join("书甲.yaml"), "书名: yaml名\n成绩: yaml成绩\n金手指: yaml金手指\n");
++        write(
++            &root.join("书甲.yaml"),
++            "书名: yaml名\n成绩: yaml成绩\n金手指: yaml金手指\n",
++        );
+         // 乙：只有 yaml 残键（还没打开过的旧书）。
+         write(&root.join("书乙.md"), "第1章");
+         write(&root.join("书乙.yaml"), "成绩: 均订两万\n");
+@@ -815,14 +832,23 @@ mod tests {
+         write(&root.join("书丙.md"), "第1章");
+ 
+         let books = scan_library(&root).unwrap();
+-        let 甲 = books.iter().find(|b| b.primary_md.ends_with("书甲.md")).unwrap();
++        let 甲 = books
++            .iter()
++            .find(|b| b.primary_md.ends_with("书甲.md"))
++            .unwrap();
+         assert_eq!(甲.name, "纸面名");
+         assert_eq!(甲.meta.track_record.as_deref(), Some("纸面成绩"));
+         assert_eq!(甲.meta.golden_finger.as_deref(), Some("纸面金手指"));
+-        let 乙 = books.iter().find(|b| b.primary_md.ends_with("书乙.md")).unwrap();
++        let 乙 = books
++            .iter()
++            .find(|b| b.primary_md.ends_with("书乙.md"))
++            .unwrap();
+         assert_eq!(乙.name, "书乙", "无书档无yaml书名→文件夹名兜底");
+         assert_eq!(乙.meta.track_record.as_deref(), Some("均订两万"));
+-        let 丙 = books.iter().find(|b| b.primary_md.ends_with("书丙.md")).unwrap();
++        let 丙 = books
++            .iter()
++            .find(|b| b.primary_md.ends_with("书丙.md"))
++            .unwrap();
+         assert_eq!(丙.name, "书丙");
+         assert_eq!(丙.meta, BookMeta::default());
+     }
+@@ -838,11 +864,17 @@ mod tests {
+         );
+ 
+         // 扫描只读：迁移前后 yaml/md 都不动。
+-        let before = (fs::read(&md).unwrap(), fs::read(&root.join("《旧书》/拆书.yaml")).unwrap());
++        let before = (
++            fs::read(&md).unwrap(),
++            fs::read(&root.join("《旧书》/拆书.yaml")).unwrap(),
++        );
+         let books = scan_library(&root).unwrap();
+         assert_eq!(books[0].name, "旧书", "yaml 残键过渡显示");
+         assert_eq!(
+-            (fs::read(&md).unwrap(), fs::read(&root.join("《旧书》/拆书.yaml")).unwrap()),
++            (
++                fs::read(&md).unwrap(),
++                fs::read(&root.join("《旧书》/拆书.yaml")).unwrap()
++            ),
+             before,
+             "书库扫描绝不写盘"
+         );
+diff --git a/app/src-tauri/src/pending.rs b/app/src-tauri/src/pending.rs
+index 136125e..ca829a7 100644
+--- a/app/src-tauri/src/pending.rs
++++ b/app/src-tauri/src/pending.rs
+@@ -53,9 +53,7 @@ mod tests {
+     use std::fs;
+     use tempfile::TempDir;
+ 
+-    use crate::expectation::{
+-        annotate_expectation, KIND_EXPECTATION, KIND_GOAL, HORIZON_SHORT,
+-    };
++    use crate::expectation::{annotate_expectation, HORIZON_SHORT, KIND_EXPECTATION, KIND_GOAL};
+     use crate::foreshadow::{annotate_foreshadow, recover_foreshadow, RECOVERY_FINAL};
+ 
+     fn write(path: &std::path::Path, content: &str) {
+@@ -95,7 +93,15 @@ mod tests {
+         // 伏笔埋在第 1 章 → 距 30 章已 29 章未收（≥20 超期）。
+         annotate_foreshadow(&p, "黄铜钥匙", 1, "他摸了摸口袋里的黄铜钥匙").unwrap();
+         // 短档期待线埋在第 20 章 → 距 30 章已 10 章未兑现（短档阈值 8，超期）。
+-        annotate_expectation(&p, "主角何时亮出金手指", 20, "第20章的正文", KIND_EXPECTATION, HORIZON_SHORT).unwrap();
++        annotate_expectation(
++            &p,
++            "主角何时亮出金手指",
++            20,
++            "第20章的正文",
++            KIND_EXPECTATION,
++            HORIZON_SHORT,
++        )
++        .unwrap();
+         // 长档目标线埋在第 29 章 → 只过 1 章，不超期，不该出现。
+         annotate_expectation(&p, "打上界", 29, "第29章的正文", KIND_GOAL, "长").unwrap();
+ 
+@@ -127,7 +133,10 @@ mod tests {
+     fn 线表坏了_错误上抛不吞() {
+         let tmp = TempDir::new().unwrap();
+         let p = project(tmp.path());
+-        write(&crate::foreshadow::foreshadow_path(&p), "顶层不是列表: true\n");
++        write(
++            &crate::foreshadow::foreshadow_path(&p),
++            "顶层不是列表: true\n",
++        );
+         assert!(project_pending(&p).is_err());
+     }
+ 
+diff --git a/app/src-tauri/src/planning.rs b/app/src-tauri/src/planning.rs
+index 62b98c9..0705554 100644
+--- a/app/src-tauri/src/planning.rs
++++ b/app/src-tauri/src/planning.rs
+@@ -590,13 +590,16 @@ pub(crate) fn bridges_for_chapter<'a>(
+     unit_name: &str,
+     ordinal: u32,
+ ) -> Vec<&'a Bridge> {
+-    let mut matches = bridges.iter().filter(|bridge| {
+-        bridge.unit.as_deref() == Some(unit_name)
+-            && matches!(
+-                (bridge.start_chapter, bridge.end_chapter),
+-                (Some(start), Some(end)) if start <= end && start <= ordinal && ordinal <= end
+-            )
+-    }).collect::<Vec<_>>();
++    let mut matches = bridges
++        .iter()
++        .filter(|bridge| {
++            bridge.unit.as_deref() == Some(unit_name)
++                && matches!(
++                    (bridge.start_chapter, bridge.end_chapter),
++                    (Some(start), Some(end)) if start <= end && start <= ordinal && ordinal <= end
++                )
++        })
++        .collect::<Vec<_>>();
+     matches.sort_by(|left, right| compare_bridge_order(left, right));
+     matches
+ }
+@@ -718,32 +721,58 @@ pub fn save_bridge(
+             },
+             None => Mapping::new(),
+         }
+-    } else { Mapping::new() };
++    } else {
++        Mapping::new()
++    };
+     read_bridge_type_solutions(&map)?;
+     if let Some(expected) = &draft.type_solutions_fingerprint {
+-        let current = map.get(Value::String("类型解法".into())).unwrap_or(&Value::Null);
++        let current = map
++            .get(Value::String("类型解法".into()))
++            .unwrap_or(&Value::Null);
+         if pair_fingerprint(current)? != *expected {
+             return Err("类型解法已被外部修改，请重新打开桥段".into());
+         }
+     }
+     apply_bridge_draft(&mut map, draft);
+-    let previous_pairs = map.get(Value::String("类型解法".into())).and_then(Value::as_sequence).cloned().unwrap_or_default();
++    let previous_pairs = map
++        .get(Value::String("类型解法".into()))
++        .and_then(Value::as_sequence)
++        .cloned()
++        .unwrap_or_default();
+     let mut pairs = Vec::new();
+     for pair in &draft.type_solutions {
+-        if pair.source.is_none() && pair.kind.trim().is_empty() && pair.solution.trim().is_empty() { continue; }
++        if pair.source.is_none() && pair.kind.trim().is_empty() && pair.solution.trim().is_empty() {
++            continue;
++        }
+         let mut item = if let Some(source) = &pair.source {
+-            let original = previous_pairs.get(source.index).ok_or("类型解法已被外部修改，请重新打开桥段")?;
++            let original = previous_pairs
++                .get(source.index)
++                .ok_or("类型解法已被外部修改，请重新打开桥段")?;
+             if pair_fingerprint(original)? != source.fingerprint {
+                 return Err("类型解法已被外部修改，请重新打开桥段".into());
+             }
+-            original.as_mapping().cloned().ok_or("无法读取原类型解法条目")?
+-        } else { Mapping::new() };
+-        item.insert(Value::String("类型".into()), Value::String(pair.kind.clone()));
+-        item.insert(Value::String("解法".into()), Value::String(pair.solution.clone()));
++            original
++                .as_mapping()
++                .cloned()
++                .ok_or("无法读取原类型解法条目")?
++        } else {
++            Mapping::new()
++        };
++        item.insert(
++            Value::String("类型".into()),
++            Value::String(pair.kind.clone()),
++        );
++        item.insert(
++            Value::String("解法".into()),
++            Value::String(pair.solution.clone()),
++        );
+         pairs.push(Value::Mapping(item));
+     }
+-    if pairs.is_empty() { map.remove(Value::String("类型解法".into())); }
+-    else { map.insert(Value::String("类型解法".into()), Value::Sequence(pairs)); }
++    if pairs.is_empty() {
++        map.remove(Value::String("类型解法".into()));
++    } else {
++        map.insert(Value::String("类型解法".into()), Value::Sequence(pairs));
++    }
+     if let Some(previous) = prev_path {
+         if previous != path {
+             fs::rename(previous, &path)
+@@ -755,19 +784,36 @@ pub fn save_bridge(
+ }
+ 
+ fn read_bridge_type_solutions(map: &Mapping) -> Result<Vec<BridgeTypeSolution>, String> {
+-    let Some(value) = map.get(Value::String("类型解法".into())) else { return Ok(Vec::new()); };
+-    let items = value.as_sequence().ok_or("桥段的类型解法应为列表，拒绝覆盖")?;
+-    items.iter().enumerate().map(|(index, item)| {
+-        let fields = item.as_mapping().ok_or("桥段的类型解法条目应为对象，拒绝覆盖")?;
+-        let text = |key: &str| -> Result<String, String> {
+-            match fields.get(Value::String(key.into())) {
+-                None | Some(Value::Null) => Ok(String::new()),
+-                Some(Value::String(value)) => Ok(value.clone()),
+-                _ => Err(format!("桥段类型解法的{key}应为文字，拒绝覆盖")),
+-            }
+-        };
+-        Ok(BridgeTypeSolution { kind: text("类型")?, solution: text("解法")?, source: Some(BridgePairSource { index, fingerprint: pair_fingerprint(item)? }) })
+-    }).collect()
++    let Some(value) = map.get(Value::String("类型解法".into())) else {
++        return Ok(Vec::new());
++    };
++    let items = value
++        .as_sequence()
++        .ok_or("桥段的类型解法应为列表，拒绝覆盖")?;
++    items
++        .iter()
++        .enumerate()
++        .map(|(index, item)| {
++            let fields = item
++                .as_mapping()
++                .ok_or("桥段的类型解法条目应为对象，拒绝覆盖")?;
++            let text = |key: &str| -> Result<String, String> {
++                match fields.get(Value::String(key.into())) {
++                    None | Some(Value::Null) => Ok(String::new()),
++                    Some(Value::String(value)) => Ok(value.clone()),
++                    _ => Err(format!("桥段类型解法的{key}应为文字，拒绝覆盖")),
++                }
++            };
++            Ok(BridgeTypeSolution {
++                kind: text("类型")?,
++                solution: text("解法")?,
++                source: Some(BridgePairSource {
++                    index,
++                    fingerprint: pair_fingerprint(item)?,
++                }),
++            })
++        })
++        .collect()
+ }
+ 
+ fn apply_bridge_draft(map: &mut Mapping, draft: &BridgeDraft) {
+@@ -901,7 +947,11 @@ mod tests {
+         let dir = tmp.path().join("构思/桥段");
+         fs::create_dir_all(&dir).unwrap();
+         let path = dir.join("夜探.md");
+-        for original in ["---\n类型解法: 不是列表\n---\n保留正文", "---\n类型解法: [坏条目]\n---\n保留正文", "---\n类型解法: [\n---\n保留正文"] {
++        for original in [
++            "---\n类型解法: 不是列表\n---\n保留正文",
++            "---\n类型解法: [坏条目]\n---\n保留正文",
++            "---\n类型解法: [\n---\n保留正文",
++        ] {
+             fs::write(&path, original).unwrap();
+             assert!(save_bridge(tmp.path(), &BridgeDraft::new("夜探"), Some(&path)).is_err());
+             assert_eq!(fs::read_to_string(&path).unwrap(), original);
+diff --git a/app/src-tauri/src/presets.rs b/app/src-tauri/src/presets.rs
+index 95bd4ad..3eebfb2 100644
+--- a/app/src-tauri/src/presets.rs
++++ b/app/src-tauri/src/presets.rs
+@@ -156,8 +156,7 @@ pub fn save(path: &Path, save: &PresetSave) -> Result<PresetState, String> {
+     if let Some(dir) = path.parent() {
+         fs::create_dir_all(dir).map_err(|e| format!("创建预设目录失败：{e}"))?;
+     }
+-    let text =
+-        serde_json::to_string_pretty(&file).map_err(|e| format!("预设序列化失败：{e}"))?;
++    let text = serde_json::to_string_pretty(&file).map_err(|e| format!("预设序列化失败：{e}"))?;
+     write_text_atomic(path, &text)?;
+     Ok(state_from(file))
+ }
+@@ -280,8 +279,17 @@ mod tests {
+         let tmp = TempDir::new().unwrap();
+         let state = load(&tmp.path().join("presets.json")).unwrap();
+         assert_eq!(
+-            state.builtins.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+-            vec![GENERAL_PRESET_ID, "builtin:analyst", "builtin:ideator", "builtin:editor"],
++            state
++                .builtins
++                .iter()
++                .map(|p| p.id.as_str())
++                .collect::<Vec<_>>(),
++            vec![
++                GENERAL_PRESET_ID,
++                "builtin:analyst",
++                "builtin:ideator",
++                "builtin:editor"
++            ],
+         );
+         assert_eq!(state.default_preset_id, GENERAL_PRESET_ID);
+         assert!(state.user_presets.is_empty());
+@@ -293,9 +301,21 @@ mod tests {
+         for preset in builtin_presets() {
+             assert!(!preset.name.is_empty(), "{} 缺名称", preset.id);
+             assert!(!preset.description.is_empty(), "{} 缺说明", preset.id);
+-            assert!(!preset.system_prompt.trim().is_empty(), "{} 缺系统提示", preset.id);
+-            assert!(preset.provider_override.is_none(), "{} 不应带供应商覆盖", preset.id);
+-            assert!(preset.model_override.is_none(), "{} 不应带模型覆盖", preset.id);
++            assert!(
++                !preset.system_prompt.trim().is_empty(),
++                "{} 缺系统提示",
++                preset.id
++            );
++            assert!(
++                preset.provider_override.is_none(),
++                "{} 不应带供应商覆盖",
++                preset.id
++            );
++            assert!(
++                preset.model_override.is_none(),
++                "{} 不应带模型覆盖",
++                preset.id
++            );
+             assert!(valid_color(&preset.color), "{} 识别色格式不对", preset.id);
+         }
+         // 通用助手与前端 ai.ts::DEFAULT_SYSTEM_PROMPT 必须逐字相同（旧会话
+@@ -315,10 +335,13 @@ mod tests {
+         let mut a = user_preset("u-1", "我的军师");
+         a.provider_override = Some("p-deepseek".to_string());
+         a.model_override = Some("deepseek-chat".to_string());
+-        let state = save(&path, &PresetSave {
+-            default_preset_id: "u-1".to_string(),
+-            user_presets: vec![a],
+-        })
++        let state = save(
++            &path,
++            &PresetSave {
++                default_preset_id: "u-1".to_string(),
++                user_presets: vec![a],
++            },
++        )
+         .unwrap();
+         assert_eq!(state.default_preset_id, "u-1");
+ 
+@@ -326,13 +349,19 @@ mod tests {
+         let reloaded = load(&path).unwrap();
+         assert_eq!(reloaded.default_preset_id, "u-1");
+         assert_eq!(reloaded.user_presets.len(), 1);
+-        assert_eq!(reloaded.user_presets[0].provider_override.as_deref(), Some("p-deepseek"));
++        assert_eq!(
++            reloaded.user_presets[0].provider_override.as_deref(),
++            Some("p-deepseek")
++        );
+ 
+         // 删除默认预设时换新默认（通用助手），整表再存。
+-        let state = save(&path, &PresetSave {
+-            default_preset_id: GENERAL_PRESET_ID.to_string(),
+-            user_presets: vec![],
+-        })
++        let state = save(
++            &path,
++            &PresetSave {
++                default_preset_id: GENERAL_PRESET_ID.to_string(),
++                user_presets: vec![],
++            },
++        )
+         .unwrap();
+         assert_eq!(state.default_preset_id, GENERAL_PRESET_ID);
+         assert!(load(&path).unwrap().user_presets.is_empty());
+@@ -344,15 +373,21 @@ mod tests {
+         let mut a = user_preset(" u-1 ", "  我的军师  ");
+         a.provider_override = Some("  ".to_string());
+         a.model_override = Some(" deepseek-chat ".to_string());
+-        let state = save(&tmp.path().join("presets.json"), &PresetSave {
+-            default_preset_id: "u-1".to_string(),
+-            user_presets: vec![a],
+-        })
++        let state = save(
++            &tmp.path().join("presets.json"),
++            &PresetSave {
++                default_preset_id: "u-1".to_string(),
++                user_presets: vec![a],
++            },
++        )
+         .unwrap();
+         assert_eq!(state.user_presets[0].id, "u-1");
+         assert_eq!(state.user_presets[0].name, "我的军师");
+         assert_eq!(state.user_presets[0].provider_override, None);
+-        assert_eq!(state.user_presets[0].model_override.as_deref(), Some("deepseek-chat"));
++        assert_eq!(
++            state.user_presets[0].model_override.as_deref(),
++            Some("deepseek-chat")
++        );
+     }
+ 
+     #[test]
+@@ -360,10 +395,13 @@ mod tests {
+         let tmp = TempDir::new().unwrap();
+         let path = tmp.path().join("presets.json");
+         // 默认指向不存在的预设（比如删了默认预设还照存）→ 拒绝。
+-        let err = save(&path, &PresetSave {
+-            default_preset_id: "u-gone".to_string(),
+-            user_presets: vec![user_preset("u-1", "我的军师")],
+-        })
++        let err = save(
++            &path,
++            &PresetSave {
++                default_preset_id: "u-gone".to_string(),
++                user_presets: vec![user_preset("u-1", "我的军师")],
++            },
++        )
+         .unwrap_err();
+         assert!(err.contains("默认助手不存在"), "{err}");
+         assert!(!path.exists(), "校验失败不应落盘");
+@@ -376,45 +414,60 @@ mod tests {
+ 
+         let mut no_name = user_preset("u-1", "我的军师");
+         no_name.name = "  ".to_string();
+-        assert!(save(&path, &PresetSave {
+-            default_preset_id: GENERAL_PRESET_ID.to_string(),
+-            user_presets: vec![no_name],
+-        })
++        assert!(save(
++            &path,
++            &PresetSave {
++                default_preset_id: GENERAL_PRESET_ID.to_string(),
++                user_presets: vec![no_name],
++            }
++        )
+         .unwrap_err()
+         .contains("名称"));
+ 
+         let mut no_prompt = user_preset("u-1", "我的军师");
+         no_prompt.system_prompt = "".to_string();
+-        assert!(save(&path, &PresetSave {
+-            default_preset_id: GENERAL_PRESET_ID.to_string(),
+-            user_presets: vec![no_prompt],
+-        })
++        assert!(save(
++            &path,
++            &PresetSave {
++                default_preset_id: GENERAL_PRESET_ID.to_string(),
++                user_presets: vec![no_prompt],
++            }
++        )
+         .unwrap_err()
+         .contains("系统提示"));
+ 
+         let mut bad_color = user_preset("u-1", "我的军师");
+         bad_color.color = "red".to_string();
+-        assert!(save(&path, &PresetSave {
+-            default_preset_id: GENERAL_PRESET_ID.to_string(),
+-            user_presets: vec![bad_color],
+-        })
++        assert!(save(
++            &path,
++            &PresetSave {
++                default_preset_id: GENERAL_PRESET_ID.to_string(),
++                user_presets: vec![bad_color],
++            }
++        )
+         .unwrap_err()
+         .contains("#rrggbb"));
+ 
+         let mut builtin_copy = user_preset("builtin:general", "假的通用助手");
+         builtin_copy.system_prompt = "被改了".to_string();
+-        assert!(save(&path, &PresetSave {
+-            default_preset_id: GENERAL_PRESET_ID.to_string(),
+-            user_presets: vec![builtin_copy],
+-        })
++        assert!(save(
++            &path,
++            &PresetSave {
++                default_preset_id: GENERAL_PRESET_ID.to_string(),
++                user_presets: vec![builtin_copy],
++            }
++        )
+         .unwrap_err()
+         .contains("内置预设"));
+ 
+         let dup = vec![user_preset("u-1", "甲"), user_preset("u-1", "乙")];
+-        assert!(save(&path, &PresetSave {
+-            default_preset_id: GENERAL_PRESET_ID.to_string(),
+-            user_presets: dup,
+-        })
++        assert!(save(
++            &path,
++            &PresetSave {
++                default_preset_id: GENERAL_PRESET_ID.to_string(),
++                user_presets: dup,
++            }
++        )
+         .unwrap_err()
+         .contains("重复"));
+         assert!(!path.exists());
+@@ -453,7 +506,11 @@ mod tests {
+         assert_eq!(state.builtin_version, BUILTIN_VERSION);
+ 
+         // defaultPresetId 显式为 null 也回通用助手。
+-        std::fs::write(&path, json!({"defaultPresetId": null, "userPresets": []}).to_string()).unwrap();
++        std::fs::write(
++            &path,
++            json!({"defaultPresetId": null, "userPresets": []}).to_string(),
++        )
++        .unwrap();
+         assert_eq!(load(&path).unwrap().default_preset_id, GENERAL_PRESET_ID);
+     }
+ 
+diff --git a/app/src-tauri/src/project.rs b/app/src-tauri/src/project.rs
+index 572c853..2b7df68 100644
+--- a/app/src-tauri/src/project.rs
++++ b/app/src-tauri/src/project.rs
+@@ -26,10 +26,10 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+ use serde_yaml::{Mapping, Value};
+ 
+ use crate::book_file::{
+-    content_fingerprint, has_md_extension, is_hidden, lossy_yaml_mapping, map_list, map_scalar, map_u32, read_text,
+-    read_yaml_mapping, sanitize_file_name, set_map_list, set_map_scalar, set_map_u32,
+-    split_frontmatter, strip_bom, unique_file_path, write_frontmatter, write_text_atomic,
+-    write_yaml_mapping, frontmatter_mapping,
++    content_fingerprint, frontmatter_mapping, has_md_extension, is_hidden, lossy_yaml_mapping,
++    map_list, map_scalar, map_u32, read_text, read_yaml_mapping, sanitize_file_name, set_map_list,
++    set_map_scalar, set_map_u32, split_frontmatter, strip_bom, unique_file_path, write_frontmatter,
++    write_text_atomic, write_yaml_mapping,
+ };
+ use crate::library::PROJECTS_DIR;
+ 
+@@ -86,7 +86,8 @@ pub fn scan_projects(root: &Path) -> Result<Vec<ProjectEntry>, String> {
+         return Ok(Vec::new());
+     }
+     let mut out: Vec<ProjectEntry> = Vec::new();
+-    let entries = fs::read_dir(&dir).map_err(|e| format!("无法读取文件夹 {}：{e}", dir.display()))?;
++    let entries =
++        fs::read_dir(&dir).map_err(|e| format!("无法读取文件夹 {}：{e}", dir.display()))?;
+     for entry in entries.flatten() {
+         let path = entry.path();
+         if path.is_dir() && !is_hidden(&path) {
+@@ -103,9 +104,12 @@ pub fn create_project(root: &Path, title: &str) -> Result<ProjectEntry, String>
+     if !root.is_dir() {
+         return Err(format!("不是有效的文件夹：{}", root.display()));
+     }
+-    let title = title.trim().trim_start_matches('《').trim_end_matches('》').trim();
+-    let name =
+-        sanitize_file_name(title).map_err(|_| "书名不能为空（或只剩符号）".to_string())?;
++    let title = title
++        .trim()
++        .trim_start_matches('《')
++        .trim_end_matches('》')
++        .trim();
++    let name = sanitize_file_name(title).map_err(|_| "书名不能为空（或只剩符号）".to_string())?;
+     let dir = root.join(PROJECTS_DIR).join(format!("《{name}》"));
+     if dir.exists() {
+         return Err(format!("已存在同名项目「{name}」"));
+@@ -156,7 +160,9 @@ fn project_entry(dir: &Path) -> ProjectEntry {
+ 
+ /// 文件夹名去《》：书名缺省口径（项目列表与 AI 命令材料共用）。
+ pub(crate) fn strip_book_marks(name: &str) -> String {
+-    name.trim_start_matches('《').trim_end_matches('》').to_string()
++    name.trim_start_matches('《')
++        .trim_end_matches('》')
++        .to_string()
+ }
+ 
+ fn count_md(dir: &Path) -> u32 {
+@@ -242,7 +248,8 @@ pub fn write_project_meta(project: &Path, meta: &ProjectMeta) -> Result<(), Stri
+     set_map_scalar(&mut map, "章前缀", meta.chapter_prefix.as_deref());
+     set_plot_lines(&mut map, &meta.plot_lines);
+     set_map_list(&mut map, "地图", &meta.maps);
+-    fs::create_dir_all(project).map_err(|e| format!("无法创建文件夹 {}：{e}", project.display()))?;
++    fs::create_dir_all(project)
++        .map_err(|e| format!("无法创建文件夹 {}：{e}", project.display()))?;
+     write_yaml_mapping(&path, map)
+ }
+ 
+@@ -263,9 +270,8 @@ fn plot_lines_from(map: &Mapping, path: &Path) -> Result<Vec<PlotLine>, String>
+             ));
+         };
+         let mut extra = item_map.clone();
+-        let name = take_scalar(&mut extra, "名").ok_or_else(|| {
+-            format!("{} 的「情节线」第 {} 项缺「名」", path.display(), i + 1)
+-        })?;
++        let name = take_scalar(&mut extra, "名")
++            .ok_or_else(|| format!("{} 的「情节线」第 {} 项缺「名」", path.display(), i + 1))?;
+         out.push(PlotLine {
+             name,
+             color: take_scalar(&mut extra, "色"),
+@@ -290,7 +296,10 @@ fn set_plot_lines(map: &mut Mapping, lines: &[PlotLine]) {
+                 Value::String(line.name.trim().to_string()),
+             );
+             if let Some(color) = trimmed(line.color.as_deref()) {
+-                out.insert(Value::String("色".to_string()), Value::String(color.to_string()));
++                out.insert(
++                    Value::String("色".to_string()),
++                    Value::String(color.to_string()),
++                );
+             }
+             for (k, v) in &line.extra {
+                 if let Value::String(ks) = k {
+@@ -328,7 +337,9 @@ fn maps_from(map: &Mapping, path: &Path) -> Result<Vec<String>, String> {
+ fn take_scalar(map: &mut Mapping, key: &str) -> Option<String> {
+     let k = Value::String(key.to_string());
+     let value = map.get(&k).cloned()?;
+-    let s = crate::book_file::scalar_to_string(&value)?.trim().to_string();
++    let s = crate::book_file::scalar_to_string(&value)?
++        .trim()
++        .to_string();
+     if s.is_empty() {
+         map.remove(&k);
+         return None;
+@@ -423,21 +434,31 @@ pub struct CharacterProfile {
+ impl CharacterProfile {
+     fn read(map: &Mapping) -> Self {
+         Self {
+-            image: map_scalar(map, "形象图"), identity: map_scalar(map, "一句话身份"),
+-            age: map_scalar(map, "年龄或年龄感"), gender: map_scalar(map, "性别"),
+-            traits: map_list(map, "性格关键词"), goal: map_scalar(map, "当前目标"),
+-            ability: map_scalar(map, "能力"), weakness: map_scalar(map, "弱点或代价"),
++            image: map_scalar(map, "形象图"),
++            identity: map_scalar(map, "一句话身份"),
++            age: map_scalar(map, "年龄或年龄感"),
++            gender: map_scalar(map, "性别"),
++            traits: map_list(map, "性格关键词"),
++            goal: map_scalar(map, "当前目标"),
++            ability: map_scalar(map, "能力"),
++            weakness: map_scalar(map, "弱点或代价"),
+             secret: map_scalar(map, "个人秘密"),
+         }
+     }
+ 
+     fn apply(&self, map: &mut Mapping) {
+         for (key, value) in [
+-            ("形象图", &self.image), ("一句话身份", &self.identity),
+-            ("年龄或年龄感", &self.age), ("性别", &self.gender),
+-            ("当前目标", &self.goal), ("能力", &self.ability),
+-            ("弱点或代价", &self.weakness), ("个人秘密", &self.secret),
+-        ] { set_map_scalar(map, key, value.as_deref()); }
++            ("形象图", &self.image),
++            ("一句话身份", &self.identity),
++            ("年龄或年龄感", &self.age),
++            ("性别", &self.gender),
++            ("当前目标", &self.goal),
++            ("能力", &self.ability),
++            ("弱点或代价", &self.weakness),
++            ("个人秘密", &self.secret),
++        ] {
++            set_map_scalar(map, key, value.as_deref());
++        }
+         set_map_list(map, "性格关键词", &self.traits);
+     }
+ }
+@@ -645,7 +666,8 @@ pub fn save_note(
+ 
+     let base = prev_path.filter(|p| *p != path).unwrap_or(&path);
+     if let Some(expected) = &draft.fingerprint {
+-        let current = fs::read(base).map_err(|e| format!("无法读取笔记 {}：{e}", base.display()))?;
++        let current =
++            fs::read(base).map_err(|e| format!("无法读取笔记 {}：{e}", base.display()))?;
+         if &content_fingerprint(&current).to_string() != expected {
+             return Err("笔记在载入后已改变，未覆盖外部修改；请重新打开核对".into());
+         }
+@@ -703,7 +725,10 @@ pub fn promote_contradiction(contradiction_path: &Path) -> Result<NoteEntry, Str
+         .and_then(|p| p.file_name())
+         .and_then(|n| n.to_str());
+     if parent_name != Some(NoteKind::Contradiction.name()) || concept_name != Some(CONCEPT_DIR) {
+-        return Err(format!("{} 不在 构思/矛盾/ 下", contradiction_path.display()));
++        return Err(format!(
++            "{} 不在 构思/矛盾/ 下",
++            contradiction_path.display()
++        ));
+     }
+     let project = contradiction_path
+         .parent()
+@@ -999,8 +1024,8 @@ pub fn save_arrangement(project: &Path, items: &[ArrangementItem]) -> Result<(),
+     }
+ 
+     let seq: Vec<Value> = merged.iter().map(item_to_value).collect();
+-    let text = serde_yaml::to_string(&Value::Sequence(seq))
+-        .map_err(|e| format!("无法生成 yaml：{e}"))?;
++    let text =
++        serde_yaml::to_string(&Value::Sequence(seq)).map_err(|e| format!("无法生成 yaml：{e}"))?;
+     write_text_atomic(&path, &text)
+ }
+ 
+@@ -1188,7 +1213,12 @@ pub fn check_project_arrangement(
+             map_names.push(map.name);
+         }
+     }
+-    Ok(check_arrangement(items, &unit_names, &line_names, &map_names))
++    Ok(check_arrangement(
++        items,
++        &unit_names,
++        &line_names,
++        &map_names,
++    ))
+ }
+ 
+ #[cfg(test)]
+@@ -1202,7 +1232,10 @@ mod tests {
+         let temp = TempDir::new().unwrap();
+         let project = temp.path();
+         let legacy = project.join("构思/世界观/旧修炼体系.md");
+-        write(&legacy, "---\n类别: 力量体系\n自定义境界: [听潮, 观海]\n---\n原有设定，不要求等级。\n");
++        write(
++            &legacy,
++            "---\n类别: 力量体系\n自定义境界: [听潮, 观海]\n---\n原有设定，不要求等级。\n",
++        );
+         let original = fs::read(&legacy).unwrap();
+         let old = scan_notes(project, NoteKind::Worldview).unwrap();
+         assert_eq!(old[0].body.trim(), "原有设定，不要求等级。");
+@@ -1221,8 +1254,14 @@ mod tests {
+ 
+         draft.body.clear();
+         save_note(project, &draft, Some(&legacy)).unwrap();
+-        assert_eq!(scan_notes(project, NoteKind::Worldview).unwrap()[0].body, "");
+-        assert_eq!(fs::read_dir(project.join("构思/世界观")).unwrap().count(), 1);
++        assert_eq!(
++            scan_notes(project, NoteKind::Worldview).unwrap()[0].body,
++            ""
++        );
++        assert_eq!(
++            fs::read_dir(project.join("构思/世界观")).unwrap().count(),
++            1
++        );
+     }
+ 
+     fn write(path: &Path, content: &str) {
+@@ -1255,24 +1294,43 @@ mod tests {
+         let mut d = NoteDraft::new(NoteKind::Character, "新人");
+         d.character = CharacterProfile {
+             image: Some("../../附件/不存在.png".into()),
+-            identity: Some("守门人".into()), age: Some("看起来二十岁".into()),
+-            gender: Some("女".into()), traits: vec!["谨慎".into(), "执拗".into()],
+-            goal: Some("寻回兄长".into()), ability: Some("听风".into()),
+-            weakness: Some("每次使用失聪一天".into()), secret: Some("来自敌营".into()),
++            identity: Some("守门人".into()),
++            age: Some("看起来二十岁".into()),
++            gender: Some("女".into()),
++            traits: vec!["谨慎".into(), "执拗".into()],
++            goal: Some("寻回兄长".into()),
++            ability: Some("听风".into()),
++            weakness: Some("每次使用失聪一天".into()),
++            secret: Some("来自敌营".into()),
+         };
+         d.aliases = vec!["阿风".into()];
+         d.body = "## 小传\n不受固定表单限制。\n## 人物弧\n学会信任。".into();
+         let created = save_note(p, &d, None).unwrap();
+-        crate::social::save_organization(p, &crate::social::OrganizationDraft {
+-            name: "山门".into(), purpose: Some("守护山道".into()), body: "完整组织正文".into(),
+-            ..Default::default()
+-        }, None).unwrap();
++        crate::social::save_organization(
++            p,
++            &crate::social::OrganizationDraft {
++                name: "山门".into(),
++                purpose: Some("守护山道".into()),
++                body: "完整组织正文".into(),
++                ..Default::default()
++            },
++            None,
++        )
++        .unwrap();
+         let reopened = scan_notes(p, NoteKind::Character).unwrap();
+-        assert_eq!(reopened.iter().find(|n| n.name == "新人").unwrap(), &created);
++        assert_eq!(
++            reopened.iter().find(|n| n.name == "新人").unwrap(),
++            &created
++        );
+         let legacy = reopened.iter().find(|n| n.name == "旧人物").unwrap();
+         assert_eq!(legacy.character, CharacterProfile::default());
+         assert_eq!(legacy.group.as_deref(), Some("山门"));
+-        assert_eq!(crate::social::workspace(p).unwrap().organizations[0].draft.body, "完整组织正文");
++        assert_eq!(
++            crate::social::workspace(p).unwrap().organizations[0]
++                .draft
++                .body,
++            "完整组织正文"
++        );
+         d.character = CharacterProfile::default();
+         let cleared = save_note(p, &d, Some(&created.path)).unwrap();
+         assert_eq!(cleared.character, CharacterProfile::default());
+@@ -1306,7 +1364,9 @@ mod tests {
+         let path = temp.path().join("构思/人物/甲.md");
+         fs::create_dir_all(path.parent().unwrap()).unwrap();
+         fs::write(&path, [0xff]).unwrap();
+-        let entry = scan_notes(temp.path(), NoteKind::Character).unwrap().remove(0);
++        let entry = scan_notes(temp.path(), NoteKind::Character)
++            .unwrap()
++            .remove(0);
+         let mut d = NoteDraft::new(NoteKind::Character, "甲");
+         d.fingerprint = Some(entry.fingerprint);
+         fs::write(&path, [0xfe]).unwrap();
+@@ -1353,7 +1413,10 @@ mod tests {
+     fn 扫描_直接子文件夹即项目_懒生成缺省书名() {
+         let root = root();
+         write(&project(&root).join("项目.yaml"), "书名: 大魏读书人\n");
+-        write(&project(&root).join("正文/0001 初入江湖.md"), "第一章\n正文");
++        write(
++            &project(&root).join("正文/0001 初入江湖.md"),
++            "第一章\n正文",
++        );
+         write(&project(&root).join("构思/单元/初入京城.md"), "---\n---\n");
+         // 手建的项目（不带《》）也认；无 项目.yaml 时书名取文件夹名。
+         write(&root.join("项目/手建的书/正文/0001.md"), "第一章");
+@@ -1465,7 +1528,9 @@ mod tests {
+         assert_eq!(meta.plot_lines.len(), 2);
+         assert_eq!(meta.plot_lines[0].name, "主线");
+         assert_eq!(meta.plot_lines[0].color.as_deref(), Some("#c0392b"));
+-        assert!(meta.plot_lines[0].extra.contains_key(Value::String("备注".into())));
++        assert!(meta.plot_lines[0]
++            .extra
++            .contains_key(Value::String("备注".into())));
+ 
+         write_project_meta(&dir, &meta).unwrap();
+         let text = fs::read_to_string(meta_path(&dir)).unwrap();
+@@ -1574,7 +1639,8 @@ mod tests {
+         let mut character = draft(NoteKind::Character, "陈平安");
+         character.start_chapter = Some(3);
+         save_note(&dir, &character, None).unwrap();
+-        let text = fs::read_to_string(notes_dir(&dir, NoteKind::Character).join("陈平安.md")).unwrap();
++        let text =
++            fs::read_to_string(notes_dir(&dir, NoteKind::Character).join("陈平安.md")).unwrap();
+         assert!(!text.contains("起章"), "人物不写章区间：{text}");
+     }
+ 
+@@ -1589,7 +1655,10 @@ mod tests {
+ 
+         // 在 Obsidian 里手补一个未知键。
+         let text = fs::read_to_string(&saved.path).unwrap();
+-        write(&saved.path, &text.replacen("---\n", "---\n自定义键: 保留我\n", 1));
++        write(
++            &saved.path,
++            &text.replacen("---\n", "---\n自定义键: 保留我\n", 1),
++        );
+ 
+         let mut renamed = d.clone();
+         renamed.name = "初入京城-改".into();
+@@ -1616,7 +1685,12 @@ mod tests {
+ 
+         d.character.identity = None;
+         d.body = "只有正文".into();
+-        let saved = save_note(&dir, &d, Some(&saved_path(&dir, NoteKind::Character, "陈平安"))).unwrap();
++        let saved = save_note(
++            &dir,
++            &d,
++            Some(&saved_path(&dir, NoteKind::Character, "陈平安")),
++        )
++        .unwrap();
+         let text = fs::read_to_string(&saved.path).unwrap();
+         assert_eq!(text, "只有正文", "映射为空时不落空 frontmatter 块");
+     }
+@@ -1661,7 +1735,11 @@ mod tests {
+         let target = &before[1];
+         crate::book_file::set_pending(&target.path, true).unwrap();
+         let during = scan_notes(&dir, NoteKind::Unit).unwrap();
+-        assert_eq!(order(&during), vec!["初入京城", "宫变前夜", "收尾"], "路径序不变");
++        assert_eq!(
++            order(&during),
++            vec!["初入京城", "宫变前夜", "收尾"],
++            "路径序不变"
++        );
+         assert!(during[1].pending);
+         assert!(!during[0].pending && !during[2].pending);
+ 
+@@ -1680,13 +1758,21 @@ mod tests {
+         // 退出：键移除，回到原类别原排序位置；文件数不变（没有第二份便笺）。
+         crate::book_file::set_pending(&during[1].path, false).unwrap();
+         let after = scan_notes(&dir, NoteKind::Unit).unwrap();
+-        assert_eq!(order(&after), vec!["初入京城", "宫变前夜", "收尾"], "退出按原位置恢复");
++        assert_eq!(
++            order(&after),
++            vec!["初入京城", "宫变前夜", "收尾"],
++            "退出按原位置恢复"
++        );
+         assert!(
+             after.iter().filter(|n| n.pending).count() == 0,
+             "读模型里待打磨区为空（前端整个区域不渲染）"
+         );
+         assert!(after[1].body.contains("在便笺里改过的正文"), "退出不动内容");
+-        assert_eq!(crate::book_file::count_files_recursive(&dir), files_before, "进出待打磨不建便笺库");
++        assert_eq!(
++            crate::book_file::count_files_recursive(&dir),
++            files_before,
++            "进出待打磨不建便笺库"
++        );
+     }
+ 
+     #[test]
+@@ -1702,20 +1788,29 @@ mod tests {
+         assert_eq!(read[0].core.as_deref(), Some("背着通缉身份在京城立足"));
+ 
+         // 旧内容（无键）与手写 false 都按普通内容处理，值原样保留。
+-        write(&dir.join("构思/矛盾/手写false.md"), "---\n待打磨: false\n状态: 池中\n---\n\n正文");
++        write(
++            &dir.join("构思/矛盾/手写false.md"),
++            "---\n待打磨: false\n状态: 池中\n---\n\n正文",
++        );
+         let read = scan_notes(&dir, NoteKind::Contradiction).unwrap();
+         let 手写 = read.iter().find(|n| n.name == "手写false").unwrap();
+         assert!(!手写.pending);
+-        assert!(fs::read_to_string(&手写.path)
+-            .unwrap()
+-            .contains("待打磨: false"), "不认识的值不改动");
++        assert!(
++            fs::read_to_string(&手写.path)
++                .unwrap()
++                .contains("待打磨: false"),
++            "不认识的值不改动"
++        );
+         assert_eq!(手写.status.as_deref(), Some("池中"));
+ 
+         // 矛盾提为单元：读-合-写同样不抹待打磨键。
+         let promoted = promote_contradiction(&saved.path).unwrap();
+         assert!(!promoted.pending, "新单元默认不是待打磨");
+         let back = scan_notes(&dir, NoteKind::Contradiction).unwrap();
+-        assert!(back.iter().find(|n| n.name == "通缉身份").unwrap().pending, "提为单元不动原矛盾的状态");
++        assert!(
++            back.iter().find(|n| n.name == "通缉身份").unwrap().pending,
++            "提为单元不动原矛盾的状态"
++        );
+     }
+ 
+     #[test]
+@@ -1745,7 +1840,10 @@ mod tests {
+             .unwrap()
+             .contains("自定义键: 保留我"));
+ 
+-        assert_eq!(read_circle(&project(&root).join("不存在的项目")).unwrap(), Circle::default());
++        assert_eq!(
++            read_circle(&project(&root).join("不存在的项目")).unwrap(),
++            Circle::default()
++        );
+     }
+ 
+     #[test]
+@@ -1816,7 +1914,10 @@ mod tests {
+         save_arrangement(&dir, &items).unwrap();
+ 
+         let text = fs::read_to_string(arrangement_path(&dir)).unwrap();
+-        assert!(text.contains("备注: 盘上更新的"), "盘上更新的手补值应胜出：{text}");
++        assert!(
++            text.contains("备注: 盘上更新的"),
++            "盘上更新的手补值应胜出：{text}"
++        );
+         assert!(text.contains("非标量保留"), "非标量已知键原样保留：{text}");
+         assert!(text.contains("节奏: 紧绷"));
+ 
+@@ -1885,14 +1986,30 @@ mod tests {
+         let map_names = vec!["京城".to_string()];
+ 
+         let items = vec![
+-            item("初入京城", Some("主线"), Some("京城"), Some("升级"), Some("紧绷")),
+-            item("宫变前夜", Some("主线"), Some("江南"), Some("升级"), Some("紧绷")),
++            item(
++                "初入京城",
++                Some("主线"),
++                Some("京城"),
++                Some("升级"),
++                Some("紧绷"),
++            ),
++            item(
++                "宫变前夜",
++                Some("主线"),
++                Some("江南"),
++                Some("升级"),
++                Some("紧绷"),
++            ),
+             item("幽灵单元", Some("感情线"), None, Some("升级"), Some("紧绷")),
+             item("初入京城", None, None, Some("战斗"), None),
+         ];
+         let check = check_arrangement(&items, &unit_names, &line_names, &map_names);
+ 
+-        assert!(check.ratio_hint.contains("升级 3 : 战斗 1"), "{}", check.ratio_hint);
++        assert!(
++            check.ratio_hint.contains("升级 3 : 战斗 1"),
++            "{}",
++            check.ratio_hint
++        );
+         assert_eq!(check.pace_hints.len(), 1);
+         assert!(check.pace_hints[0].contains("第 1~3 项连续「紧绷」"));
+         assert!(check.ref_hints.iter().any(|h| h.contains("感情线")));
+@@ -1933,21 +2050,33 @@ mod tests {
+             .collect();
+         items.extend((0..3).map(|_| item("甲", None, None, Some("战斗"), None)));
+         let check = check_arrangement(&items, &units, &[], &[]);
+-        assert!(check.ratio_hint.contains("战斗偏少"), "{}", check.ratio_hint);
++        assert!(
++            check.ratio_hint.contains("战斗偏少"),
++            "{}",
++            check.ratio_hint
++        );
+ 
+         let mut items: Vec<ArrangementItem> = (0..4)
+             .map(|_| item("甲", None, None, Some("升级"), None))
+             .collect();
+         items.extend((0..2).map(|_| item("甲", None, None, Some("战斗"), None)));
+         let check = check_arrangement(&items, &units, &[], &[]);
+-        assert!(check.ratio_hint.contains("接近 2:1"), "{}", check.ratio_hint);
++        assert!(
++            check.ratio_hint.contains("接近 2:1"),
++            "{}",
++            check.ratio_hint
++        );
+ 
+         let mut items: Vec<ArrangementItem> = (0..2)
+             .map(|_| item("甲", None, None, Some("升级"), None))
+             .collect();
+         items.extend((0..3).map(|_| item("甲", None, None, Some("战斗"), None)));
+         let check = check_arrangement(&items, &units, &[], &[]);
+-        assert!(check.ratio_hint.contains("战斗偏多"), "{}", check.ratio_hint);
++        assert!(
++            check.ratio_hint.contains("战斗偏多"),
++            "{}",
++            check.ratio_hint
++        );
+     }
+ 
+     #[test]
+@@ -1978,13 +2107,18 @@ mod tests {
+             &[item("初入京城", Some("主线"), Some("京城"), None, None)],
+         )
+         .unwrap();
+-        assert!(check.ref_hints.is_empty(), "地理词条应认作地图定义：{:?}", check.ref_hints);
++        assert!(
++            check.ref_hints.is_empty(),
++            "地理词条应认作地图定义：{:?}",
++            check.ref_hints
++        );
+         assert!(check.missing_units.is_empty());
+         assert!(check.unarranged_units.is_empty());
+     }
+ 
+     #[test]
+-    fn 矛盾提为单元_预填字段_状态改已成单元_矛盾留档() {        let root = root();
++    fn 矛盾提为单元_预填字段_状态改已成单元_矛盾留档() {
++        let root = root();
+         let dir = project(&root);
+         let mut c = draft(NoteKind::Contradiction, "通缉身份");
+         c.core = Some("背着通缉身份在京城立足".into());
+diff --git a/app/src-tauri/src/relationship.rs b/app/src-tauri/src/relationship.rs
+index f31e74e..0498f92 100644
+--- a/app/src-tauri/src/relationship.rs
++++ b/app/src-tauri/src/relationship.rs
+@@ -15,9 +15,7 @@ use std::path::{Path, PathBuf};
+ use serde::{Deserialize, Serialize};
+ use serde_yaml::{Mapping, Value};
+ 
+-use crate::book_file::{
+-    map_scalar, read_yaml_mapping, sanitize_file_name, write_yaml_mapping,
+-};
++use crate::book_file::{map_scalar, read_yaml_mapping, sanitize_file_name, write_yaml_mapping};
+ use crate::project::{self, NoteDraft, NoteEntry, NoteKind};
+ 
+ pub const RELATION_FILE: &str = "人物关系.yaml";
+@@ -157,21 +155,25 @@ pub fn read_table(project: &Path) -> Result<RelationshipTable, String> {
+         map = crate::social::read_graph(project)?;
+         // 旧人物画布仅投影人—人关系；组织边仍由同一社会网保存。
+         if let Some(Value::Sequence(rows)) = map.get_mut(Value::String("关系".into())) {
+-            rows.retain(|v| v.as_mapping().is_some_and(|r| {
+-                map_scalar(r,"起类").as_deref().unwrap_or("人物") == "人物"
+-                    && map_scalar(r,"止类").as_deref().unwrap_or("人物") == "人物"
+-            }));
++            rows.retain(|v| {
++                v.as_mapping().is_some_and(|r| {
++                    map_scalar(r, "起类").as_deref().unwrap_or("人物") == "人物"
++                        && map_scalar(r, "止类").as_deref().unwrap_or("人物") == "人物"
++                })
++            });
+         }
+     }
+     let mut edges = edges_from(&map, &path)?;
+     let fingerprint = if path == crate::social::graph_path(project) {
+-        let raw = std::fs::read(&path).map_err(|e|e.to_string())?;
++        let raw = std::fs::read(&path).map_err(|e| e.to_string())?;
+         let version = crate::book_file::content_fingerprint(&raw);
+         for (index, edge) in edges.iter_mut().enumerate() {
+             edge.source_row = Some(format!("{version}:{index}"));
+         }
+         Some(version.to_string())
+-    } else { None };
++    } else {
++        None
++    };
+     Ok(RelationshipTable {
+         fingerprint,
+         legend: legend_from(&map, &path)?,
+@@ -190,7 +192,12 @@ pub fn save_table(project: &Path, table: &RelationshipTable) -> Result<(), Strin
+     let edges = normalize_edges(&table.edges)?;
+     let path = relationship_path(project);
+     if path == crate::social::graph_path(project) {
+-        return crate::social::save_person_relationships(project, &legend, &edges, table.fingerprint.as_deref());
++        return crate::social::save_person_relationships(
++            project,
++            &legend,
++            &edges,
++            table.fingerprint.as_deref(),
++        );
+     }
+     read_table(project)?;
+     if let Some(parent) = path.parent() {
+@@ -217,7 +224,11 @@ pub(crate) fn legend_from(map: &Mapping, path: &Path) -> Result<Vec<LegendItem>,
+         .enumerate()
+         .map(|(i, item)| {
+             let Value::Mapping(row) = item else {
+-                return Err(format!("{} 图例第 {} 项应为映射（名/色/方向）", path.display(), i + 1));
++                return Err(format!(
++                    "{} 图例第 {} 项应为映射（名/色/方向）",
++                    path.display(),
++                    i + 1
++                ));
+             };
+             let name = map_scalar(row, "名")
+                 .filter(|n| !n.trim().is_empty())
+@@ -348,7 +359,10 @@ fn legend_value(legend: &[LegendItem]) -> Value {
+             .map(|item| {
+                 let mut m = Mapping::new();
+                 m.insert(Value::String("名".into()), Value::String(item.name.clone()));
+-                m.insert(Value::String("色".into()), Value::String(item.color.clone()));
++                m.insert(
++                    Value::String("色".into()),
++                    Value::String(item.color.clone()),
++                );
+                 m.insert(
+                     Value::String("方向".into()),
+                     Value::String(if item.directed { DIRECTED } else { UNDIRECTED }.to_string()),
+@@ -367,9 +381,20 @@ fn edges_value(edges: &[Relationship]) -> Value {
+                 let mut m = Mapping::new();
+                 m.insert(Value::String("起".into()), Value::String(edge.from.clone()));
+                 m.insert(Value::String("止".into()), Value::String(edge.to.clone()));
+-                m.insert(Value::String("类型".into()), Value::String(edge.kind.clone()));
+-                if let Some(note) = edge.note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+-                    m.insert(Value::String("描述".into()), Value::String(note.to_string()));
++                m.insert(
++                    Value::String("类型".into()),
++                    Value::String(edge.kind.clone()),
++                );
++                if let Some(note) = edge
++                    .note
++                    .as_deref()
++                    .map(str::trim)
++                    .filter(|n| !n.is_empty())
++                {
++                    m.insert(
++                        Value::String("描述".into()),
++                        Value::String(note.to_string()),
++                    );
+                 }
+                 // 缺省否，只写 true（文件干净：没秘密的边不长尾巴）。
+                 if edge.secret {
+@@ -668,7 +693,10 @@ mod tests {
+         assert!(read_table(&p).is_err());
+         write(&relationship_path(&p), "关系:\n- 起: 张三\n  止: 李四\n");
+         assert!(read_table(&p).unwrap_err().contains("类型"));
+-        write(&relationship_path(&p), "关系:\n- 起: 张三\n  止: 李四\n  类型: 师徒\n  秘密: 是\n");
++        write(
++            &relationship_path(&p),
++            "关系:\n- 起: 张三\n  止: 李四\n  类型: 师徒\n  秘密: 是\n",
++        );
+         assert!(read_table(&p).unwrap_err().contains("秘密"));
+     }
+ 
+@@ -783,11 +811,14 @@ mod tests {
+ 
+         let view = relationship_view(&p);
+         // 画布存回用的就是 view.edges——失效引用必须留在里面，不然一次保存就没了。
+-        save_table(&p, &RelationshipTable {
+-            fingerprint: view.fingerprint,
+-            legend: view.legend,
+-            edges: view.edges,
+-        })
++        save_table(
++            &p,
++            &RelationshipTable {
++                fingerprint: view.fingerprint,
++                legend: view.legend,
++                edges: view.edges,
++            },
++        )
+         .unwrap();
+         let back = read_table(&p).unwrap();
+         assert_eq!(back.edges, table.edges);
+@@ -887,9 +918,11 @@ mod tests {
+         // 秘密边带「·秘密」，无向边用「－」。
+         assert_eq!(note.body, "涉及人物：张三（师徒→李四·秘密）、李四");
+ 
+-        assert!(promote_characters_to_contradiction(&p, &names, Some("师徒疑云"))
+-            .unwrap_err()
+-            .contains("同名矛盾"));
++        assert!(
++            promote_characters_to_contradiction(&p, &names, Some("师徒疑云"))
++                .unwrap_err()
++                .contains("同名矛盾")
++        );
+         assert!(promote_characters_to_contradiction(&p, &["张三".to_string()], None).is_err());
+         assert!(promote_characters_to_contradiction(
+             &p,
+@@ -948,7 +981,10 @@ mod tests {
+         save_table(&p, &table).unwrap();
+ 
+         let raw = fs::read_to_string(relationship_path(&p)).unwrap();
+-        assert!(raw.contains("名: 师徒") && raw.contains("秘密: true"), "{raw}");
++        assert!(
++            raw.contains("名: 师徒") && raw.contains("秘密: true"),
++            "{raw}"
++        );
+ 
+         // 读回画布：图例、边、无失效引用。
+         let view = relationship_view(&p);
+@@ -962,7 +998,11 @@ mod tests {
+         let found = character_confluence(&p, &names).unwrap();
+         assert_eq!(found.edges.len(), 1);
+         assert_eq!(
+-            found.units.iter().map(|u| u.name.as_str()).collect::<Vec<_>>(),
++            found
++                .units
++                .iter()
++                .map(|u| u.name.as_str())
++                .collect::<Vec<_>>(),
+             vec!["初入京城"]
+         );
+ 
+@@ -973,11 +1013,13 @@ mod tests {
+         assert!(p.join("构思/矛盾/张三·李四.md").is_file());
+ 
+         // AI 材料（只读）：小传、边、类型圈、矛盾标题都在。
+-        let material =
+-            crate::ai_context::build_context("人物关系梳理", &p, None, &names).unwrap();
++        let material = crate::ai_context::build_context("人物关系梳理", &p, None, &names).unwrap();
+         assert!(material.contains("- 张三 ｜ 分组：主角阵营"), "{material}");
+         assert!(material.contains("张三 → 李四 ｜ 类型：师徒"), "{material}");
+         assert!(material.contains("【类型圈】掉马甲"), "{material}");
+-        assert!(material.contains("【已有矛盾】共 1 条：张三·李四"), "{material}");
++        assert!(
++            material.contains("【已有矛盾】共 1 条：张三·李四"),
++            "{material}"
++        );
+     }
+ }
+diff --git a/app/src-tauri/src/search.rs b/app/src-tauri/src/search.rs
+index 147ec6f..5b6a706 100644
+--- a/app/src-tauri/src/search.rs
++++ b/app/src-tauri/src/search.rs
+@@ -185,7 +185,10 @@ mod tests {
+     fn 项目目录_不参与全文搜索() {
+         let root = TempDir::new().unwrap().path().to_path_buf();
+         write(&root.join("书.md"), "正文一行");
+-        write(&root.join("项目/《我的书》/正文/0001 章.md"), "目标词在正文里");
++        write(
++            &root.join("项目/《我的书》/正文/0001 章.md"),
++            "目标词在正文里",
++        );
+         write(&root.join("项目/随手记.md"), "目标词也在项目散文件里");
+ 
+         assert!(search_library(&root, "目标词").unwrap().is_empty());
+diff --git a/app/src-tauri/src/thread.rs b/app/src-tauri/src/thread.rs
+index a0295a1..6a80bd7 100644
+--- a/app/src-tauri/src/thread.rs
++++ b/app/src-tauri/src/thread.rs
+@@ -1,7 +1,7 @@
+ //! 跨章节线索的共享底座（工单 #7，docs/spec/期待感三线.md §一）：
+ //! 伏笔（#6）与三线（#7）同构——锚点＝「章序数 ＋ 引文」、单文件整表读写、
+ //! 现扫派生（引文失配、未推进章数）。本模块放两边共用的形状（锚点/兑现/
+-//! 视图行）、读写与算法；状态值、操作与各自的看板条目留在各自模块。
++//! 视图行）、映射解析与锚点算法；状态值、写入与各自的看板条目留在各自模块。
+ 
+ use std::collections::BTreeMap;
+ use std::path::Path;
+@@ -9,7 +9,7 @@ use std::path::Path;
+ use serde::{Deserialize, Serialize};
+ use serde_yaml::{Mapping, Value};
+ 
+-use crate::book_file::{map_scalar, map_u32, read_text, write_text_atomic};
++use crate::book_file::{map_scalar, map_u32, read_text};
+ use crate::chapter::scan_chapters;
+ 
+ // ---------- 数据模型 ----------
+@@ -103,6 +103,16 @@ pub fn read_threads<T>(
+         return Ok(Vec::new());
+     }
+     let text = read_text(path)?;
++    parse_threads_text(&text, path, label, parse)
++}
++
++/// 解析已读入内存的线索表；可与原始字节指纹共用同一快照。
++pub fn parse_threads_text<T>(
++    text: &str,
++    path: &Path,
++    label: &str,
++    parse: impl Fn(&Mapping, &Path, usize) -> Result<T, String>,
++) -> Result<Vec<T>, String> {
+     if text.trim().is_empty() {
+         return Ok(Vec::new());
+     }
+@@ -126,22 +136,6 @@ pub fn read_threads<T>(
+         .collect()
+ }
+ 
+-/// 整表重写（原子写，ADR 0004）；`render` 把一条线索渲染成 yaml 映射。
+-pub fn write_threads<T>(
+-    path: &Path,
+-    list: &[T],
+-    render: impl Fn(&T) -> Value,
+-) -> Result<(), String> {
+-    if let Some(parent) = path.parent() {
+-        std::fs::create_dir_all(parent)
+-            .map_err(|e| format!("无法创建文件夹 {}：{e}", parent.display()))?;
+-    }
+-    let seq: Vec<Value> = list.iter().map(|item| render(item)).collect();
+-    let text = serde_yaml::to_string(&Value::Sequence(seq))
+-        .map_err(|e| format!("无法生成 yaml：{e}"))?;
+-    write_text_atomic(path, &text)
+-}
+-
+ /// 取「埋设/兑现」列表的原始行（每行必须是映射）；缺键/null 视为空表。
+ pub fn map_rows<'a>(
+     map: &'a Mapping,
+@@ -156,7 +150,10 @@ pub fn map_rows<'a>(
+         return Ok(Vec::new());
+     }
+     let Value::Sequence(seq) = value else {
+-        return Err(format!("{} 第 {index} 项的「{key}」应为列表", path.display()));
++        return Err(format!(
++            "{} 第 {index} 项的「{key}」应为列表",
++            path.display()
++        ));
+     };
+     seq.iter()
+         .enumerate()
+@@ -257,7 +254,10 @@ pub fn payoffs_value(list: &[Payoff]) -> Value {
+                     Value::String(p.kind.trim().to_string()),
+                 );
+                 if let Some(note) = p.note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+-                    m.insert(Value::String("说明".into()), Value::String(note.to_string()));
++                    m.insert(
++                        Value::String("说明".into()),
++                        Value::String(note.to_string()),
++                    );
+                 }
+                 Value::Mapping(m)
+             })
+@@ -356,7 +356,9 @@ mod tests {
+     fn 读_空文件空表_顶层非列表报错() {
+         let tmp = tempfile::TempDir::new().unwrap();
+         let path: PathBuf = tmp.path().join("三线.yaml");
+-        assert!(read_threads(&path, "条目", |_, _, _| Ok(())).unwrap().is_empty());
++        assert!(read_threads(&path, "条目", |_, _, _| Ok(()))
++            .unwrap()
++            .is_empty());
+         write(&path, "名: 不是列表\n");
+         assert!(read_threads(&path, "条目", |_, _, _| Ok(())).is_err());
+         write(&path, "- 名: 缺映射字段的解析由调用方管\n");
+diff --git a/app/src-tauri/src/vocabulary.rs b/app/src-tauri/src/vocabulary.rs
+index 26ad17a..5d8cce7 100644
+--- a/app/src-tauri/src/vocabulary.rs
++++ b/app/src-tauri/src/vocabulary.rs
+@@ -70,10 +70,7 @@ fn words_from_mapping(
+     map: &serde_yaml::Mapping,
+     path: &Path,
+ ) -> Result<(Vec<String>, Vec<String>), String> {
+-    Ok((
+-        word_list(map, "类型", path)?,
+-        word_list(map, "解法", path)?,
+-    ))
++    Ok((word_list(map, "类型", path)?, word_list(map, "解法", path)?))
+ }
+ 
+ fn word_list(map: &serde_yaml::Mapping, key: &str, path: &Path) -> Result<Vec<String>, String> {
+@@ -85,9 +82,11 @@ fn word_list(map: &serde_yaml::Mapping, key: &str, path: &Path) -> Result<Vec<St
+     };
+     seq.iter()
+         .map(|v| {
+-            v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).ok_or_else(
+-                || format!("词表 {} 的「{key}」里有非字符串", path.display()),
+-            )
++            v.as_str()
++                .map(str::trim)
++                .filter(|s| !s.is_empty())
++                .map(str::to_string)
++                .ok_or_else(|| format!("词表 {} 的「{key}」里有非字符串", path.display()))
+         })
+         .collect()
+ }
+@@ -103,7 +102,10 @@ fn write_seed(path: &Path) -> Result<(), String> {
+                 .collect(),
+         ),
+     );
+-    map.insert(Value::String("解法".to_string()), Value::Sequence(Vec::new()));
++    map.insert(
++        Value::String("解法".to_string()),
++        Value::Sequence(Vec::new()),
++    );
+     write_yaml_mapping(path, map)
+ }
+ 
+@@ -129,8 +131,12 @@ fn harvest(root: &Path) -> (WordCounts, WordCounts) {
+             for pair in &bridge.type_solutions {
+                 let kind = pair.kind.trim();
+                 let solution = pair.solution.trim();
+-                if !kind.is_empty() { *type_counts.entry(kind.into()).or_insert(0) += 1; }
+-                if !solution.is_empty() { *solution_counts.entry(solution.into()).or_insert(0) += 1; }
++                if !kind.is_empty() {
++                    *type_counts.entry(kind.into()).or_insert(0) += 1;
++                }
++                if !solution.is_empty() {
++                    *solution_counts.entry(solution.into()).or_insert(0) += 1;
++                }
+             }
+         }
+     }
+@@ -179,9 +185,13 @@ mod tests {
+         let tmp = TempDir::new().unwrap();
+         let project = crate::project::create_project(tmp.path(), "新书").unwrap();
+         let mut draft = crate::planning::BridgeDraft::new("夜探");
+-        draft.type_solutions.push(crate::planning::BridgeTypeSolution {
+-            kind: "自创类型".into(), solution: "借对手之口".into(), source: None,
+-        });
++        draft
++            .type_solutions
++            .push(crate::planning::BridgeTypeSolution {
++                kind: "自创类型".into(),
++                solution: "借对手之口".into(),
++                source: None,
++            });
+         crate::planning::save_bridge(&project.dir, &draft, None).unwrap();
+         load_vocab(tmp.path()).unwrap();
+         let before = fs::read(vocab_path(tmp.path())).unwrap();
+@@ -219,7 +229,10 @@ mod tests {
+     #[test]
+     fn 已有词表_文件序在前_已用词按次数降序追加去重() {
+         let root = TempDir::new().unwrap().path().to_path_buf();
+-        write(&root.join("词表.yaml"), "类型:\n- 自定义甲\n- 掉马甲\n解法:\n- 写法一\n");
++        write(
++            &root.join("词表.yaml"),
++            "类型:\n- 自定义甲\n- 掉马甲\n解法:\n- 写法一\n",
++        );
+         write(&root.join("书甲.md"), "第1章");
+         write(
+             &root.join("书甲.yaml"),
+@@ -234,7 +247,10 @@ mod tests {
+         let vocab = load_vocab(&root).unwrap();
+         // 文件序在前；掉马甲（用 2 次）排在其后；同频（各 1 次）按字典序：
+         // 「新」U+65B0 < 「更」U+66F4。
+-        assert_eq!(vocab.types, vec!["自定义甲", "掉马甲", "新类型", "更少用的"]);
++        assert_eq!(
++            vocab.types,
++            vec!["自定义甲", "掉马甲", "新类型", "更少用的"]
++        );
+         assert_eq!(vocab.solutions, vec!["写法一", "扫地僧式"]);
+     }
+ 
+diff --git a/app/src/App.css b/app/src/App.css
+index 280087d..40b58d0 100644
+--- a/app/src/App.css
++++ b/app/src/App.css
+@@ -4151,10 +4151,36 @@ button.save-chip {
+ .exp-detail-head .card-actions {
+   margin-left: auto;
+   display: flex;
++  flex-wrap: wrap;
+   align-items: center;
+   gap: var(--sp-3);
+ }
+ 
++.exp-pending-notes {
++  display: grid;
++  gap: var(--sp-3);
++}
++
++.exp-pending-note .card-actions {
++  align-items: center;
++  flex-wrap: wrap;
++}
++
++.exp-pending-note .select {
++  margin-top: 0;
++}
++
++.exp-pending-section {
++  margin-top: var(--sp-4);
++}
++
++.exp-pending-section h4 {
++  margin: 0 0 var(--sp-2);
++  color: var(--ink-soft);
++  font-size: var(--fs-ui);
++  font-weight: 600;
++}
++
+ /* ---------- 导出与发布（工单 #14，docs/spec/导出与发布.md） ---------- */
+ 
+ .export-tabs {
+diff --git a/app/src/ExpectationBoard.tsx b/app/src/ExpectationBoard.tsx
+index ef62350..bd82a48 100644
+--- a/app/src/ExpectationBoard.tsx
++++ b/app/src/ExpectationBoard.tsx
+@@ -1,7 +1,7 @@
+ import { useSearchDestination } from "./globalSearchNavigation";
+ import { useCallback, useEffect, useState } from "react";
+ import { invoke } from "@tauri-apps/api/core";
+-import type { ExpectationBoard, ExpectationView } from "./types";
++import type { ExpectationBoard, ExpectationView, SaveResult } from "./types";
+ import {
+   EXPECTATION_HORIZONS,
+   EXPECTATION_HORIZON_MID,
+@@ -17,8 +17,13 @@ import {
+   expectationOverdueChapters,
+ } from "./types";
+ import { chapterHead } from "./chapterFile";
++import {
++  expectationPageSections,
++  isExpectationSearchDestination,
++} from "./expectationBoardView.ts";
+ import { errMsg } from "./util";
+ import { ExpectationFormDialog } from "./ExpectationDialog";
++import PendingZone from "./PendingZone";
+ 
+ interface ExpectationBoardProps {
+   project: string;
+@@ -127,7 +132,7 @@ export default function ExpectationBoard({
+   const [creating, setCreating] = useState(false);
+   const [busy, setBusy] = useState(false);
+   const destination = useSearchDestination();
+-  const [selected, setSelected] = useState<string | null>(destination?.hit.kind === "期待线" && destination.hit.projectDir === project ? destination.hit.title : null);
++  const [selected, setSelected] = useState<string | null>(null);
+ 
+   const scan = useCallback(async () => {
+     setLoading(true);
+@@ -148,16 +153,31 @@ export default function ExpectationBoard({
+ 
+   const label = expectationKindLabel(kind);
+   const goalTab = kind === EXPECTATION_KIND_GOAL;
+-  const items = (board?.items ?? []).filter((v) =>
+-    goalTab ? v.kind === EXPECTATION_KIND_GOAL : v.kind !== EXPECTATION_KIND_GOAL,
++  const searchDestinationHere = isExpectationSearchDestination(destination?.hit, project, kind);
++  useEffect(() => {
++    setSelected(
++      searchDestinationHere && destination?.hit.kind === "期待线" ? destination.hit.title : null,
++    );
++  }, [destination, project, searchDestinationHere]);
++  const { items, pending: polishing, grid: visibleItems } = expectationPageSections(
++    board?.items ?? [],
++    kind,
+   );
+   const axis = board?.maxChapter ?? 0;
+-  const placed = items.filter((v) => geometry(v, axis) !== null);
+-  const pending = items.filter((v) => geometry(v, axis) === null);
++  const placed = visibleItems.filter((v) => geometry(v, axis) !== null);
++  const unplaced = visibleItems.filter((v) => geometry(v, axis) === null);
+   const selectedView = items.find((v) => v.name === selected) ?? null;
++  const selectedPending = selectedView?.pending ? selectedView : null;
+   const overdueCount = items.filter((v) => v.overdue).length;
+   const known = EXPECTATION_HORIZONS as readonly string[];
+ 
++  useEffect(() => {
++    if (!searchDestinationHere || !selectedPending) return;
++    document
++      .getElementById(`expectation-pending-${encodeURIComponent(selectedPending.name)}`)
++      ?.scrollIntoView({ block: "nearest" });
++  }, [searchDestinationHere, selectedPending?.name, selectedPending?.pending]);
++
+   // 行＝短/中/长；手写的未知档位单列一行（只提示不校验）。
+   const rowDefs: { key: string; label: string; sub: string | null; bars: Bar[] }[] = [
+     ...EXPECTATION_HORIZONS.map((h) => ({
+@@ -227,6 +247,47 @@ export default function ExpectationBoard({
+     }
+   }
+ 
++  async function togglePending(name: string, pending: boolean) {
++    if (busy) return;
++    const fingerprint = board?.tableFingerprint;
++    if (!fingerprint) {
++      window.alert("期待线列表缺少版本信息，请重新载入后再切换待打磨状态。");
++      await scan();
++      return;
++    }
++    setBusy(true);
++    try {
++      const result = await invoke<SaveResult>("set_expectation_pending", {
++        project,
++        name,
++        fingerprint,
++        pending,
++      });
++      if (result.status === "conflict") {
++        window.alert("磁盘上的期待线列表已变化。已重新载入，请确认后再切换待打磨状态。");
++        await scan();
++        return;
++      }
++      setBoard((current) =>
++        current
++          ? {
++              ...current,
++              tableFingerprint: result.fingerprint,
++              items: current.items.map((item) =>
++                item.name === name ? { ...item, pending } : item,
++              ),
++            }
++          : current,
++      );
++      setSelected(name);
++      onChanged();
++    } catch (e) {
++      window.alert(`切换期待线待打磨失败：${errMsg(e)}`);
++    } finally {
++      setBusy(false);
++    }
++  }
++
+   async function create(name: string, kind: string, horizon: string) {
+     setBusy(true);
+     try {
+@@ -241,6 +302,73 @@ export default function ExpectationBoard({
+     }
+   }
+ 
++  function itemControls(view: ExpectationView) {
++    return (
++      <div className="card-actions">
++        <button
++          className="btn small"
++          disabled={busy}
++          onClick={() => void togglePending(view.name, !view.pending)}
++        >
++          {view.pending ? "整理完成" : "待打磨"}
++        </button>
++        <select
++          className="select small"
++          value={view.kind}
++          disabled={busy}
++          title="类别（约定值只提示不校验）；改成另一类会换到另一个页签"
++          onChange={(e) => void changeMeta(view.name, e.target.value, view.horizon)}
++        >
++          {!(EXPECTATION_KINDS as readonly string[]).includes(view.kind) && (
++            <option value={view.kind}>{expectationKindLabel(view.kind)}</option>
++          )}
++          {EXPECTATION_KINDS.map((k) => (
++            <option key={k} value={k}>
++              {expectationKindLabel(k)}
++            </option>
++          ))}
++        </select>
++        <select
++          className="select small"
++          value={view.horizon}
++          disabled={busy}
++          title="档位（时间线网格的行）"
++          onChange={(e) => void changeMeta(view.name, view.kind, e.target.value)}
++        >
++          {!known.includes(view.horizon) && <option value={view.horizon}>{view.horizon}</option>}
++          {EXPECTATION_HORIZONS.map((h) => (
++            <option key={h} value={h}>
++              {h}
++            </option>
++          ))}
++        </select>
++        <select
++          className="select small"
++          value={view.state}
++          disabled={busy}
++          title="期待线状态（与待打磨独立）"
++          onChange={(e) => void changeState(view.name, e.target.value)}
++        >
++          {!(EXPECTATION_STATES as readonly string[]).includes(view.state) && (
++            <option value={view.state}>{view.state}</option>
++          )}
++          {EXPECTATION_STATES.map((state) => (
++            <option key={state} value={state}>
++              {state}
++            </option>
++          ))}
++        </select>
++        <button
++          className="btn small danger"
++          disabled={busy}
++          onClick={() => void remove(view.name)}
++        >
++          删除
++        </button>
++      </div>
++    );
++  }
++
+   return (
+     <div className="note-pane">
+       <div className="pane-head">
+@@ -263,6 +391,88 @@ export default function ExpectationBoard({
+       {error && <div className="error-box">{error}</div>}
+       {loading && <p className="hint">正在读取……</p>}
+ 
++      {!loading && !error && polishing.length > 0 && (
++        <PendingZone
++          label={`待打磨的期待线（${label}）`}
++          count={polishing.length}
++          hint="完整保留线索内容；整理完成后回到原类别、档位和次序。"
++        >
++          <div className="exp-pending-notes">
++            {polishing.map((view) => (
++              <article
++                key={view.name}
++                id={`expectation-pending-${encodeURIComponent(view.name)}`}
++                className={`card-item exp-pending-note ${
++                  view.name === selected ? "is-search-hit" : ""
++                }`}
++              >
++                <div className="card-title-row">
++                  <button className="card-title" type="button" onClick={() => setSelected(view.name)}>
++                    {view.name}
++                  </button>
++                  <span className="card-cat">类别：{expectationKindLabel(view.kind)}</span>
++                  <span className="card-cat">档位：{view.horizon}</span>
++                  <span className="card-cat">状态：{view.state}</span>
++                  {view.overdue && (
++                    <span className="card-cat danger">超期 {view.unadvancedChapters} 章</span>
++                  )}
++                  {!view.overdue && view.unadvancedChapters !== null && (
++                    <span className="card-cat">已 {view.unadvancedChapters} 章未推进</span>
++                  )}
++                </div>
++                <p className="hint">{STATE_HINTS[view.state] ?? "手写的状态值（只提示不校验）。"}</p>
++                {itemControls(view)}
++
++                <div className="exp-pending-section">
++                  <h4>埋设</h4>
++                  {view.planted.length === 0 ? (
++                    <p className="hint">尚无埋设。</p>
++                  ) : (
++                    view.planted.map((anchor, index) => (
++                      <p key={index} className="foreshadow-anchor">
++                        <button
++                          className="link-btn"
++                          title="跳到书写板块这一章，选中引文"
++                          onClick={() => onOpenChapter(anchor.chapter, anchor.quote)}
++                        >
++                          埋于 {chapterHead(anchor.chapter, chapterPrefix)}
++                        </button>
++                        {anchor.quote && <span className="foreshadow-quote">「{anchor.quote}」</span>}
++                        {anchor.stale && <span className="card-cat danger">引文失配</span>}
++                      </p>
++                    ))
++                  )}
++                </div>
++
++                <div className="exp-pending-section">
++                  <h4>兑现</h4>
++                  {view.fulfilled.length === 0 ? (
++                    <p className="hint">尚无兑现记录。</p>
++                  ) : (
++                    view.fulfilled.map((payoff, index) => (
++                      <p key={index} className="foreshadow-anchor">
++                        <button
++                          className="link-btn"
++                          title="跳到书写板块这一章，选中引文"
++                          onClick={() => onOpenChapter(payoff.chapter, payoff.quote)}
++                        >
++                          兑现于 {chapterHead(payoff.chapter, chapterPrefix)} · {payoff.kind}
++                        </button>
++                        {payoff.quote && <span className="foreshadow-quote">「{payoff.quote}」</span>}
++                        {payoff.note && (
++                          <span className="foreshadow-note">说明：{payoff.note}</span>
++                        )}
++                        {payoff.stale && <span className="card-cat danger">引文失配</span>}
++                      </p>
++                    ))
++                  )}
++                </div>
++              </article>
++            ))}
++          </div>
++        </PendingZone>
++      )}
++
+       {!loading && !error && items.length === 0 && (
+         <div className="empty-state">
+           <p>还没有{label}。</p>
+@@ -276,11 +486,11 @@ export default function ExpectationBoard({
+ 
+       {!loading && !error && items.length > 0 && (
+         <>
+-          {pending.length > 0 && (
++          {unplaced.length > 0 && (
+             <>
+               <div className="exp-lane">
+                 <span className="exp-lane-label">还没落位（待埋）</span>
+-                {pending.map((v) => (
++                {unplaced.map((v) => (
+                   <button
+                     key={v.name}
+                     className={`exp-chip ${v.name === selected ? "active" : ""}`}
+@@ -398,8 +608,8 @@ export default function ExpectationBoard({
+             </p>
+           )}
+ 
+-          {selectedView && (
+-            <section className="exp-detail">
++          {selectedView && !selectedView.pending && (
++            <section id="expectation-detail" className="exp-detail">
+               <div className="exp-detail-head">
+                 <h3>{selectedView.name}</h3>
+                 <span className="card-cat">{expectationKindLabel(selectedView.kind)}</span>
+@@ -412,67 +622,7 @@ export default function ExpectationBoard({
+                 {!selectedView.overdue && selectedView.unadvancedChapters !== null && (
+                   <span className="card-cat">已 {selectedView.unadvancedChapters} 章未推进</span>
+                 )}
+-                <div className="card-actions">
+-                  <select
+-                    className="select small"
+-                    value={selectedView.kind}
+-                    disabled={busy}
+-                    title="类别（约定值只提示不校验）；改成另一类会换到另一个页签"
+-                    onChange={(e) =>
+-                      void changeMeta(selectedView.name, e.target.value, selectedView.horizon)
+-                    }
+-                  >
+-                    {!(EXPECTATION_KINDS as readonly string[]).includes(selectedView.kind) && (
+-                      <option value={selectedView.kind}>{expectationKindLabel(selectedView.kind)}</option>
+-                    )}
+-                    {EXPECTATION_KINDS.map((k) => (
+-                      <option key={k} value={k}>
+-                        {expectationKindLabel(k)}
+-                      </option>
+-                    ))}
+-                  </select>
+-                  <select
+-                    className="select small"
+-                    value={selectedView.horizon}
+-                    disabled={busy}
+-                    title="档位（时间线网格的行）"
+-                    onChange={(e) =>
+-                      void changeMeta(selectedView.name, selectedView.kind, e.target.value)
+-                    }
+-                  >
+-                    {!known.includes(selectedView.horizon) && (
+-                      <option value={selectedView.horizon}>{selectedView.horizon}</option>
+-                    )}
+-                    {EXPECTATION_HORIZONS.map((h) => (
+-                      <option key={h} value={h}>
+-                        {h}
+-                      </option>
+-                    ))}
+-                  </select>
+-                  <select
+-                    className="select small"
+-                    value={selectedView.state}
+-                    disabled={busy}
+-                    title="改状态（约定值只提示不校验）"
+-                    onChange={(e) => void changeState(selectedView.name, e.target.value)}
+-                  >
+-                    {!(EXPECTATION_STATES as readonly string[]).includes(selectedView.state) && (
+-                      <option value={selectedView.state}>{selectedView.state}</option>
+-                    )}
+-                    {EXPECTATION_STATES.map((s) => (
+-                      <option key={s} value={s}>
+-                        {s}
+-                      </option>
+-                    ))}
+-                  </select>
+-                  <button
+-                    className="btn small danger"
+-                    disabled={busy}
+-                    onClick={() => void remove(selectedView.name)}
+-                  >
+-                    删除
+-                  </button>
+-                </div>
++                {itemControls(selectedView)}
+               </div>
+               <p className="hint">
+                 {STATE_HINTS[selectedView.state] ?? "手写的状态值（只提示不校验）。"}
+diff --git a/app/src/types.ts b/app/src/types.ts
+index 5af9443..b6ab028 100644
+--- a/app/src/types.ts
++++ b/app/src/types.ts
+@@ -772,7 +772,7 @@ export interface ExpectationPayoff {
+   note: string | null;
+ }
+ 
+-/** 期待线条目（项目根 三线.yaml，应用受管、整表重写）。 */
++/** 期待线条目（项目根 三线.yaml 的权威数据）。 */
+ export interface Expectation {
+   name: string;
+   /** 期待｜目标（约定值只提示不校验）。 */
+@@ -781,6 +781,8 @@ export interface Expectation {
+   horizon: string;
+   /** 待埋｜已埋｜部分兑现｜已兑现｜弃用（约定值只提示不校验）。 */
+   state: string;
++  /** 独立于兑现状态机的待打磨展示状态。 */
++  pending: boolean;
+   planted: ExpectationAnchor[];
+   fulfilled: ExpectationPayoff[];
+ }
+@@ -791,6 +793,7 @@ export interface ExpectationView {
+   kind: string;
+   horizon: string;
+   state: string;
++  pending: boolean;
+   planted: (ExpectationAnchor & { stale: boolean })[];
+   fulfilled: (ExpectationPayoff & { stale: boolean })[];
+   /** 距当前最大章序已过多少章未推进（仅已埋/部分兑现有值）。 */
+@@ -802,6 +805,8 @@ export interface ExpectationView {
+ export interface ExpectationBoard {
+   /** 轴长＝max(全书最大章序, 锚点最大章)。 */
+   maxChapter: number;
++  /** 三线.yaml 内容指纹；待打磨状态操作用于拒绝陈旧写入。 */
++  tableFingerprint: string | null;
+   items: ExpectationView[];
+ }
+ 
+diff --git "a/docs/spec/\346\234\237\345\276\205\346\204\237\344\270\211\347\272\277.md" "b/docs/spec/\346\234\237\345\276\205\346\204\237\344\270\211\347\272\277.md"
+index bd756d7..c22dcfd 100644
+--- "a/docs/spec/\346\234\237\345\276\205\346\204\237\344\270\211\347\272\277.md"
++++ "b/docs/spec/\346\234\237\345\276\205\346\204\237\344\270\211\347\272\277.md"
+@@ -26,7 +26,7 @@
+ 
+ ## 二、数据：`项目/《书名》/三线.yaml`
+ 
+-- 落点：项目根下一个文件（与 `伏笔.yaml`/`排布.yaml` 同款纪律：单文件读-合-写、应用受管、保存整表重写、条目内手补的未知键会丢）。
++- 落点：项目根下一个文件 `三线.yaml`。文件是期待线唯一数据源；应用操作用读-合-写与原子落盘保留未知键及其他条目。待打磨切换额外携带页面载入时的整表指纹，外部修改后拒绝陈旧写入。
+ - 形态（中文键）：
+ 
+ ```yaml
+@@ -34,6 +34,7 @@
+   类别: 期待              # 期待｜目标（约定值只提示不校验）
+   档位: 短                # 短｜中｜长
+   状态: 已埋              # 待埋｜已埋｜部分兑现｜已兑现｜弃用
++  待打磨: true            # 可选布尔值；缺失/false＝普通展示，退出时删键
+   埋设:
+   - 章: 1                 # 章序数（第几个章标题，1 起；与伏笔/桥段同一套坐标）
+     引文: 他摸了摸怀里的木匣，没敢打开。
+@@ -52,6 +53,7 @@
+   | 类别 | 字符串 | | 期待｜目标；缺省＝期待 |
+   | 档位 | 字符串 | | 短｜中｜长；缺省＝中 |
+   | 状态 | 字符串 | | 五态约定值；缺省按「待埋」显示 |
++  | 待打磨 | 布尔值 | | 独立于兑现状态机；缺失或 false＝普通对象，true＝顶部完整便笺；整理完成时移除键，旧文件无需迁移 |
+   | 埋设 | 列表 | | 每条＝`章`（序数）＋`引文`（选中原文） |
+   | 兑现 | 列表 | | 每条＝`章`＋`引文`＋`类型`（阶段｜终结）＋可选`说明` |
+ 
+@@ -60,6 +62,8 @@
+ ## 三、状态机与操作
+ 
+ - 五态：**待埋 → 已埋 → 部分兑现｜已兑现**；旁支 **弃用**（可恢复）。语义与伏笔逐字对应（埋设＝写进正文、兑现＝还账），动词从「回收」换成「兑现」——网文语境里期待/目标都是「兑现」。
++- 「待打磨」是独立展示状态，不参与五态；进入与退出只改当前条目的布尔键，不改类别、档位、状态、锚点与数组次序。两页顶部按原类别呈现完整便笺；便笺继续提供原有状态、类别/档位、删除和锚点跳转操作，整理完成后回到原网格归属。
++- 待打磨写入以当前三线.yaml 内容指纹对账，只改唯一定位到的原条目；外部变更、损坏 YAML、目标缺失或重名均拒绝写入。保留目标的未知字段、同表其他条目与次序，不创建便笺副本。搜索与网格都现读同一份三线.yaml。
+ - 操作：
+ 
+   | 操作 | 入口 | 效果 |
+@@ -69,12 +73,13 @@
+   | 兑现期待线 | 书写页选中文字右键 | 追加兑现记录（阶段/终结＋可选说明）；终结→已兑现，阶段→部分兑现（弃用不覆盖） |
+   | 改状态 | 看板详情卡 | 五态任切（含弃用/恢复） |
+   | 改类别/档位 | 看板详情卡 | 重分类（两值/三值任切） |
++  | 待打磨／整理完成 | 看板详情卡／顶部便笺 | 只切换独立展示键；整理完成移除键并恢复原类别、档位和次序 |
+   | 删除 | 看板详情卡 | 确认后整条删除 |
+ 
+ ## 四、时间线网格（构思侧「期待感」「目标」页签）
+ 
+ - 位置：构思项目页「期待感」「目标」两页签（v2 拆分），紧跟「伏笔」（都是跨章节线索），各带本类别条数徽标（与单元/伏笔同款）；网格组件按类别过滤复用。
+-- 布局：**行＝档位（短/中/长）**，**列＝章**（一章一列，横向滚动）；一条线＝一条横向条。
++- 布局：**行＝档位（短/中/长）**，**列＝章**（一章一列，横向滚动）；一条线＝一条横向条。待打磨线集中显示在当前类别页顶部完整便笺，不因网格状态或视图筛选而隐藏。
+   - 行标签带含义（v2）：**短期 · 约8章内兑现｜中期 · 约20章｜长期 · 约50章**——阈值即 §五超期阈值，名字不再让人猜。
+   - 条起点＝最早埋设章，条终点＝最近兑现章；**未兑现的线延伸到「当前」（全书最大章序）**，从最近一次锚点起画虚线尾巴，右侧标「已 N 章未推进」，超期整条标红。
+   - 同一档位有多条线时按泳道上下叠放（贪心区间着色，互不遮挡）。

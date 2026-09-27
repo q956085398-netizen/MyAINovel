@@ -1,0 +1,1052 @@
+import { useEffect, useRef, useState } from "react";
+import { Check, Icon, ICON_SIZE_DENSE, X } from "./icons";
+import { Channel, invoke } from "@tauri-apps/api/core";
+import {
+  buildCommandMessages,
+  buildRequestMessages,
+  formatCalloutText,
+  formatProseText,
+  isReportKind,
+  parseTropeSuggestion,
+} from "./ai";
+import PresetGlyph from "./PresetGlyph";
+import {
+  allPresetsOf,
+  copyAsNewSession,
+  presetSnapshot,
+  resolveDraftPreset,
+  resolveConversationTarget,
+  resolveSessionTarget,
+  resolveSystemPrompt,
+  sessionPresetView,
+} from "./sessionPreset";
+import type {
+  AiCommandKind,
+  AiConfig,
+  AiSeed,
+  AssistantPreset,
+  AssistantPresetState,
+  ChatMessage,
+  ChatPersona,
+  ChatSession,
+  ChatSessionSummary,
+  ChatStreamEvent,
+  DocSnapshot,
+  MessageMeta,
+  NoteEntry,
+  ProjectEntry,
+  TropeSuggestion,
+  Vocabulary,
+} from "./types";
+import { errMsg, oneLinePreview, stripBookMarks } from "./util";
+import ChatAdoptDialog, { type ChatExcerptEntry } from "./ChatAdoptDialog";
+import { useLibrarySession } from "./librarySession";
+
+interface AiSidebarProps {
+  open: boolean;
+  onClose: () => void;
+  /** 库根：标注命令组提示词前加载词表，让 AI 优先复用既有类型词。 */
+  libraryPath: string | null;
+  /** 板块命令种子：带材料（拆书三条带选区与行号），面板消费后回调清空。 */
+  seed: AiSeed | null;
+  onSeedConsumed: () => void;
+  getDoc: () => DocSnapshot | null;
+  /** 采纳 callout：anchorLine 为命令时选区末行（1 起），编辑器按其行尾插入。 */
+  adoptCallout: (kind: "点评" | "小结", text: string, anchorLine: number) => boolean;
+  adoptTrope: (startLine: number, endLine: number, s: TropeSuggestion) => void;
+  /** 采纳润色稿：替换写作页当前选区（没有选区/编辑器未就绪返回 false）。 */
+  replaceSelection: (text: string) => boolean;
+  /** 供应商与模型统一在全局独立设置页管理。 */
+  onOpenSettings: () => void;
+}
+
+function nowSec(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
+const CHAT_SESSION_ROOTS_KEY = "gongbi.ai.sessionRoots";
+
+function readChatSessionRoots(): Record<string, string> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(CHAT_SESSION_ROOTS_KEY) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function sameLibraryRoot(left: string | undefined, right: string | null): boolean {
+  if (left === undefined || right === null) return false;
+  const normalize = (path: string) => path.replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase();
+  return normalize(left) === normalize(right);
+}
+
+/** VSCode 式 AI 侧边栏（设计共识 §七）。面板常驻挂载、仅隐藏切换，
+ *  中途收起不打断流式输出。 */
+export default function AiSidebar({
+  open,
+  onClose,
+  libraryPath,
+  seed,
+  onSeedConsumed,
+  getDoc,
+  adoptCallout,
+  adoptTrope,
+  replaceSelection,
+  onOpenSettings,
+}: AiSidebarProps) {
+  const [config, setConfig] = useState<AiConfig | null>(null);
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  /** null＝尚未开聊的草稿（首次发送才建会话文件）。 */
+  const [current, setCurrent] = useState<ChatSession | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [input, setInput] = useState("");
+  const [docAttached, setDocAttached] = useState(false);
+  const librarySession = useLibrarySession();
+  const sessionRootsRef = useRef(readChatSessionRoots());
+  const previousLibrarySessionRef = useRef(librarySession.id);
+  const libraryPathRef = useRef(libraryPath);
+  libraryPathRef.current = libraryPath;
+
+  const streamingRef = useRef(false);
+  const tokenRef = useRef(0);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  /** 与 current 同步的镜像：Channel 回调里读会话现值、做保存副作用，不走 setState updater。 */
+  const currentRef = useRef<ChatSession | null>(null);
+  /** 已采纳过回写的消息（会话内序号），采纳一次即失效。 */
+  const [adoptedSet, setAdoptedSet] = useState<Set<number>>(new Set());
+  /** 人物对话：勾选要落盘的消息（会话内序号，不含 system 底座）。 */
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [adoptOpen, setAdoptOpen] = useState<"矛盾" | "故事卡" | null>(null);
+  /** 打开人物会话时标签对不上（项目/人物改名或删除）的提示；不回写不清理。 */
+  const [stalePersona, setStalePersona] = useState<string | null>(null);
+  /** 防种子被重复消费（React 严格模式效应会跑两遍）。 */
+  const seedRef = useRef<AiSeed | null>(null);
+  /** 助手预设表（工单 T07）：新建会话的卡片与胶囊从这里取；读不到退通用助手。 */
+  const [presetState, setPresetState] = useState<AssistantPresetState | null>(null);
+  const [presetsLoaded, setPresetsLoaded] = useState(false);
+  /** 新会话草稿点选的预设 id；null＝未点选，用设置里的默认。 */
+  const [draftPresetId, setDraftPresetId] = useState<string | null>(null);
+  /** 「换预设＝复制为新会话」小对话框。 */
+  const [switchOpen, setSwitchOpen] = useState(false);
+
+  function rememberSessionRoot(id: string, root: string) {
+    if (sessionRootsRef.current[id] === root) return;
+    const roots = { ...sessionRootsRef.current, [id]: root };
+    sessionRootsRef.current = roots;
+    try {
+      localStorage.setItem(CHAT_SESSION_ROOTS_KEY, JSON.stringify(roots));
+    } catch {
+      // 记录失败时，该会话仍会按当前运行时的库代次限制采纳。
+    }
+  }
+
+  // 切库保留历史记录，但当前会话、文档与采纳草稿不跨库继承。
+  useEffect(() => {
+    const switched = previousLibrarySessionRef.current !== librarySession.id;
+    previousLibrarySessionRef.current = librarySession.id;
+    if (streamingRef.current) {
+      void invoke("chat_cancel", { token: tokenRef.current }).catch(() => {});
+      streamingRef.current = false;
+      setStreaming(false);
+    }
+    currentRef.current = null;
+    setCurrent(null);
+    setDocAttached(false);
+    setAdoptedSet(new Set());
+    setPicked(new Set());
+    setAdoptOpen(null);
+    setStalePersona(null);
+    setInput("");
+    if (switched) void refreshSessions();
+  }, [librarySession.id]);
+
+  // 收起侧栏时不卸载组件；真正卸载（如关闭应用）时结束仍在运行的流。
+  useEffect(() => () => {
+    if (streamingRef.current) {
+      void invoke("chat_cancel", { token: tokenRef.current }).catch(() => {});
+    }
+  }, []);
+
+  function updateSession(
+    fn: (prev: ChatSession | null) => ChatSession | null,
+  ): ChatSession | null {
+    const next = fn(currentRef.current);
+    currentRef.current = next;
+    setCurrent(next);
+    return next;
+  }
+
+  function resetAdopted() {
+    setAdoptedSet(new Set());
+  }
+
+  const conversationTarget = resolveConversationTarget(current, draftPresetId, presetState, config);
+  const doc = getDoc();
+  const canAdoptCurrent = !!current && sameLibraryRoot(sessionRootsRef.current[current.id], libraryPath);
+  const canContinueCurrent = !current || canAdoptCurrent;
+
+  async function refreshSessions() {
+    const session = librarySession.id;
+    try {
+      const list = await invoke<ChatSessionSummary[]>("list_chat_sessions");
+      if (!librarySession.isCurrent(session)) return;
+      setSessions(list);
+    } catch {
+      // 会话列表刷不出来不影响当前对话
+    }
+  }
+
+  async function loadPresets() {
+    try {
+      setPresetState(await invoke<AssistantPresetState>("load_assistant_presets"));
+    } catch {
+      // 预设表读不到不挡对话：默认解析会退通用助手基线
+      setPresetState(null);
+    } finally {
+      setPresetsLoaded(true);
+    }
+  }
+
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const cfg = await invoke<AiConfig>("load_ai_config");
+        setConfig(cfg);
+      } catch (e) {
+        setError(errMsg(e));
+        setConfig({ providers: [], activeProviderId: null });
+      }
+    };
+    const onConfigChanged = (event: Event) => {
+      const config = (event as CustomEvent<AiConfig>).detail;
+      if (config) setConfig(config);
+      else void loadConfig();
+    };
+    // 预设管理保存后广播（T06）：侧栏的卡片与胶囊即时换新。
+    const onPresetsChanged = (event: Event) => {
+      const state = (event as CustomEvent<AssistantPresetState>).detail;
+      if (state) setPresetState(state);
+      else void loadPresets();
+    };
+    window.addEventListener("gongbi:ai-config-changed", onConfigChanged);
+    window.addEventListener("gongbi:ai-presets-changed", onPresetsChanged);
+    void (async () => {
+      await loadConfig();
+      await loadPresets();
+      await refreshSessions();
+    })();
+    return () => {
+      window.removeEventListener("gongbi:ai-config-changed", onConfigChanged);
+      window.removeEventListener("gongbi:ai-presets-changed", onPresetsChanged);
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [current?.messages, streaming]);
+
+  /** 收尾：去掉没等到任何内容的空助手消息，落盘并刷新列表。 */
+  function finalizeStream() {
+    if (!streamingRef.current) return;
+    streamingRef.current = false;
+    setStreaming(false);
+    const updated = updateSession((prev) => {
+      if (!prev) return prev;
+      let messages = prev.messages;
+      const last = messages[messages.length - 1];
+      if (last && last.role === "assistant" && last.content === "") {
+        messages = messages.slice(0, -1);
+      }
+      return { ...prev, messages, updatedAt: nowSec() };
+    });
+    if (updated) {
+      void invoke("save_chat_session", { session: updated })
+        .then(() => refreshSessions())
+        .catch(() => {});
+    }
+  }
+
+  async function send(userText: string, meta?: MessageMeta | null, system?: string) {
+    const text = userText.trim();
+    if (!text || streamingRef.current) return;
+    const origin = currentRef.current;
+    if (origin && !sameLibraryRoot(sessionRootsRef.current[origin.id], libraryPath)) {
+      setError("这是其他库的历史对话，请新建会话后继续。");
+      return;
+    }
+    const requestSession = librarySession.id;
+    // 请求通道按会话的预设快照解析（工单 T07）：覆盖命中时可以顶掉还没
+    // 激活的全局；旧会话/人物会话没有快照，跟随全局当前选择。
+    const newSnapshot = presetSnapshot(resolveDraftPreset(draftPresetId, presetState));
+    const target = resolveConversationTarget(origin, draftPresetId, presetState, config);
+    if (!target.provider) {
+      setError("先在「设置」里配置并选择供应商。");
+      onOpenSettings();
+      return;
+    }
+
+    const now = nowSec();
+    const base =
+      origin ?? {
+        id: crypto.randomUUID(),
+        title: oneLinePreview(text, 20),
+        createdAt: now,
+        updatedAt: now,
+        messages: [] as ChatMessage[],
+        // 新会话创建那一刻定格预设快照：之后预设怎么改都不影响这个会话。
+        preset: newSnapshot,
+      };
+    if (!origin && libraryPath) rememberSessionRoot(base.id, libraryPath);
+    const withUser: ChatSession = {
+      ...base,
+      messages: [...base.messages, { role: "user", content: text, meta: meta ?? undefined }],
+      updatedAt: now,
+    };
+    updateSession(() => withUser);
+    setError(null);
+    resetAdopted();
+    streamingRef.current = true;
+    setStreaming(true);
+    // 用户消息先落盘：中途崩溃/停止也不丢提问。
+    try {
+      await invoke("save_chat_session", { session: withUser });
+      void refreshSessions();
+    } catch {
+      // 落盘失败不阻塞对话
+    }
+    if (!librarySession.isCurrent(requestSession)) return;
+
+    const docForRequest = docAttached ? getDoc() : null;
+    // 三条路径的系统提示在这里收口（工单 T07 隔离纪律）：固定命令 > 人物
+    // 底座 > 会话预设快照 > 通用助手基线；命令与人物对话不吃普通预设。
+    // 人格底座＝会话首条 system 消息：请求时顶掉预设提示，也不在历史里
+    // 重复出现（spec §三）；普通会话没有 system 消息。
+    const personaBase = withUser.messages.find((m) => m.role === "system") ?? null;
+    const history = personaBase
+      ? withUser.messages.filter((m) => m.role !== "system")
+      : withUser.messages;
+    const reqMessages = buildRequestMessages(
+      history,
+      resolveSystemPrompt({
+        commandSystem: system ?? null,
+        personaBase: personaBase?.content ?? null,
+        sessionPreset: withUser.preset ?? null,
+      }),
+      docForRequest,
+    );
+    const token = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+    tokenRef.current = token;
+    const channel = new Channel<ChatStreamEvent>();
+    channel.onmessage = (ev) => {
+      if (!librarySession.isCurrent(requestSession)) return;
+      if (ev.type === "delta") {
+        updateSession((prev) => {
+          if (!prev) return prev;
+          const messages = [...prev.messages];
+          const last = messages[messages.length - 1];
+          if (last && last.role === "assistant") {
+            messages[messages.length - 1] = { ...last, content: last.content + ev.text };
+          } else {
+            messages.push({ role: "assistant", content: ev.text, meta: meta ?? undefined });
+          }
+          return { ...prev, messages };
+        });
+      } else {
+        finalizeStream();
+      }
+    };
+    try {
+      await invoke("chat_stream", {
+        req: {
+          baseUrl: target.provider.baseUrl,
+          apiKey: target.provider.apiKey,
+          model: target.model,
+          messages: reqMessages,
+        },
+        token,
+        onEvent: channel,
+      });
+      if (!librarySession.isCurrent(requestSession)) return;
+      finalizeStream();
+    } catch (e) {
+      if (!librarySession.isCurrent(requestSession)) return;
+      setError(errMsg(e));
+      finalizeStream();
+    }
+  }
+
+  // 板块命令种子：面板拿到即组提示词发送（ADR 0003：AI 只处理人写的内容）。
+  // 供应商未配置时保留种子并打开设置，配好后重跑本效应即自动发出，材料不丢。
+  // 人物对话种子（工单 #16）例外：不发送，只建带人格底座的新会话等人开口。
+  useEffect(() => {
+    if (!seed || !config || !presetsLoaded || seedRef.current === seed) return;
+    const seedLibraryPath = libraryPath;
+    const seedSession = librarySession.id;
+    // 人物对话只走全局；固定命令从人物会话发起时会另开普通会话。
+    const commandTarget = seed.persona
+      ? resolveSessionTarget(null, config)
+      : resolveConversationTarget(
+          currentRef.current?.persona ? null : currentRef.current,
+          draftPresetId, presetState, config,
+        );
+    if (!commandTarget.provider) {
+      setError(
+        seed.persona
+          ? "先配置供应商，配好后会自动开始与这个人物的对话。"
+          : "先配置供应商，「" + seed.kind + "」命令会在配好后自动发出。",
+      );
+      onOpenSettings();
+      return;
+    }
+    if (seed.persona) {
+      if (streamingRef.current) {
+        // 建新会话会把流式回调的落点切走：等这轮回复完再点一次。
+        setError("正在回复中，等这轮结束后再点「跟 TA 聊」。");
+        onSeedConsumed();
+        return;
+      }
+      seedRef.current = seed;
+      onSeedConsumed();
+      // 人格底座＝入戏提示＋后端材料，作为会话首条 system 消息随会话持久化
+      // （spec §三）：重开旧会话不用重读盘，人物也还是那个人物。
+      const { system } = buildCommandMessages(seed);
+      const now = nowSec();
+      const session: ChatSession = {
+        id: crypto.randomUUID(),
+        title: `${seed.persona.project}·${seed.persona.person}`,
+        createdAt: now,
+        updatedAt: now,
+        messages: [{ role: "system", content: system, meta: { kind: "人物对话" } }],
+        persona: seed.persona,
+        // 人物对话不绑助手预设（spec §一）：人格底座就是全部。
+        preset: null,
+      };
+      if (libraryPath) rememberSessionRoot(session.id, libraryPath);
+      updateSession(() => session);
+      resetAdopted();
+      setPicked(new Set());
+      setStalePersona(null);
+      void invoke("save_chat_session", { session })
+        .then(() => refreshSessions())
+        .catch(() => {});
+      return;
+    }
+    seedRef.current = seed;
+    onSeedConsumed();
+    // 命令不混进人物对话会话：人格底座会把命令的回答也带成角色腔。
+    if (currentRef.current?.persona) {
+      updateSession(() => null);
+      resetAdopted();
+      setPicked(new Set());
+    }
+    void (async () => {
+      // 标注命令带词表（每次现取，词表在 Obsidian 里手改也即时生效）。
+      let vocab: Vocabulary | null = null;
+      if (seed.kind === "标注" && seedLibraryPath) {
+        try {
+          vocab = await invoke<Vocabulary>("load_vocab", { root: seedLibraryPath });
+          if (libraryPathRef.current !== seedLibraryPath || !librarySession.isCurrent(seedSession)) return;
+        } catch (e) {
+          if (libraryPathRef.current !== seedLibraryPath || !librarySession.isCurrent(seedSession)) return;
+          // 词表损坏要亮出来（spec：显式报错），但不挡命令本身。
+          setError(`词表加载失败：${errMsg(e)}（标注命令继续，类型提示用通用示例）`);
+        }
+      }
+      const { system, user } = buildCommandMessages(seed, vocab);
+      const meta: MessageMeta = {
+        kind: seed.kind,
+        startLine: seed.startLine,
+        endLine: seed.endLine,
+      };
+      void send(user, meta, system);
+    })();
+    // seed 由用户动作驱动、send 闭包读取即时不依赖其稳定性。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed, config, presetsLoaded, presetState, draftPresetId, librarySession]);
+
+  function stop() {
+    if (!streamingRef.current) return;
+    void invoke("chat_cancel", { token: tokenRef.current }).catch(() => {
+      // 取消失败只能等流自然结束
+    });
+  }
+
+  async function selectSession(id: string) {
+    if (streamingRef.current) return;
+    const session = librarySession.id;
+    try {
+      const loaded = await invoke<ChatSession>("load_chat_session", { id });
+      if (!librarySession.isCurrent(session)) return;
+      updateSession(() => loaded);
+      resetAdopted();
+      setPicked(new Set());
+      if (loaded.persona) void checkPersona(loaded.persona);
+      else setStalePersona(null);
+    } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
+      setError(errMsg(e));
+    }
+  }
+
+  /** 标签失效只提示不校验（spec §三）：旧会话照常能聊（人格底座自随会话），
+   *  对不上时说一声，不回写、不清理；查不动（没开库）就沉默。 */
+  async function checkPersona(p: ChatPersona) {
+    setStalePersona(null);
+    if (!libraryPath) return;
+    const session = librarySession.id;
+    try {
+      const projects = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
+      if (!librarySession.isCurrent(session)) return;
+      const proj = projects.find((x) => x.title === stripBookMarks(p.project));
+      if (!proj) {
+        setStalePersona(`${p.project}这个项目找不到了（改名或挪走？）——按原人格底座继续聊。`);
+        return;
+      }
+      const persons = await invoke<NoteEntry[]>("scan_notes", {
+        project: proj.dir,
+        kind: "人物",
+      });
+      if (!librarySession.isCurrent(session)) return;
+      if (!persons.some((n) => n.name === p.person)) {
+        setStalePersona(
+          `${p.project}里已没有「${p.person}」（改名或删除？）——按原人格底座继续聊。`,
+        );
+      }
+    } catch {
+      // 失效提示是锦上添花：查不动就不查了，别挡对话。
+    }
+  }
+
+  async function deleteCurrentSession() {
+    const session = currentRef.current;
+    if (!session || streamingRef.current || !canAdoptCurrent) return;
+    if (!window.confirm(`确定删除会话「${session.title}」？删除后不可恢复。`)) return;
+    try {
+      await invoke("delete_chat_session", { id: session.id });
+      updateSession(() => null);
+      resetAdopted();
+      setPicked(new Set());
+      setStalePersona(null);
+      await refreshSessions();
+    } catch (e) {
+      setError(errMsg(e));
+    }
+  }
+
+  /** 换预设＝复制为新会话（工单 T07，spec §四）：新 id、新时间、换成目标
+   *  预设的快照，可见消息可选带上；原会话原封不动地留在列表里。 */
+  function createSwitchedSession(target: AssistantPreset, includeVisible: boolean) {
+    const origin = currentRef.current;
+    if (!origin || streamingRef.current || !canAdoptCurrent) return;
+    const session = copyAsNewSession(
+      origin,
+      target,
+      includeVisible,
+      crypto.randomUUID(),
+      nowSec(),
+    );
+    if (libraryPath) rememberSessionRoot(session.id, libraryPath);
+    updateSession(() => session);
+    resetAdopted();
+    setPicked(new Set());
+    setSwitchOpen(false);
+    void invoke("save_chat_session", { session })
+      .then(() => refreshSessions())
+      .catch(() => {
+        // 新会话落盘失败不丢界面：下一条消息发出时会再存
+      });
+  }
+
+  /** 人物对话的勾选（spec §六）：一段对话＝一条或多条消息，说话人标记
+   *  （我＝作者，AI 那条记人物名）在采纳对话框里预填。 */
+  function togglePick(i: number) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  const persona = current?.persona ?? null;
+  // 会话胶囊（工单 T07）：普通会话显示创建时绑定的预设快照，人物会话不显示。
+  const presetView = sessionPresetView(current?.preset, presetState);
+  const allPresets = allPresetsOf(presetState);
+  const draftPreset = resolveDraftPreset(draftPresetId, presetState);
+  const pickedEntries: ChatExcerptEntry[] = persona
+    ? [...picked]
+        .sort((a, b) => a - b)
+        .map((i) => current!.messages[i])
+        .filter((m) => m && m.role !== "system")
+        .map((m) => ({
+          speaker: m.role === "user" ? "我" : persona.person,
+          content: m.content,
+        }))
+    : [];
+
+  function handleAdopt(kind: AiCommandKind, idx: number, content: string, meta: MessageMeta) {
+    if (!canAdoptCurrent) return;
+    if (isReportKind(kind)) {
+      // 报告类命令只给建议（spec §二、§五：建议不是闸，报告不落盘）。
+      return;
+    }
+    if (kind === "标注") {
+      const suggestion = parseTropeSuggestion(content);
+      // 行号是命令时的选区快照：缺了（老会话/新命令）就不采纳，不猜位置。
+      if (!suggestion || meta.startLine === undefined || meta.endLine === undefined) return;
+      adoptTrope(meta.startLine, meta.endLine, suggestion);
+      setAdoptedSet((s) => new Set(s).add(idx));
+      return;
+    }
+    if (kind === "润色") {
+      // 润色是整体改写：替换选中；编辑器不可用（切了板块/没选区）只提示，不乱插。
+      const ok = replaceSelection(formatProseText(content));
+      if (ok) {
+        setAdoptedSet((s) => new Set(s).add(idx));
+      } else {
+        setError("替换失败：回到书写板块、停在当前章，且正文里还留着那段选区。");
+      }
+      return;
+    }
+    if (meta.endLine === undefined) return;
+    const ok = adoptCallout(
+      kind === "梳理" ? "点评" : "小结",
+      formatCalloutText(content),
+      meta.endLine,
+    );
+    if (ok) setAdoptedSet((s) => new Set(s).add(idx));
+  }
+
+  const lastIdx = current ? current.messages.length - 1 : -1;
+
+  return (
+    <aside className={`ai-panel ${open ? "" : "closed"}`}>
+      <header className="ai-header">
+        <span className="ai-title">AI 助手</span>
+        <button
+          className="btn small"
+          disabled={streaming}
+          title={current ? "开一个新会话（先选助手预设）" : "已在空会话"}
+          onClick={() => {
+            updateSession(() => null);
+            resetAdopted();
+            setPicked(new Set());
+            setStalePersona(null);
+            // 每个新会话都从设置里的默认助手起步（工单 T07）。
+            setDraftPresetId(null);
+          }}
+        >
+          新会话
+        </button>
+        <button
+          className="btn small"
+          disabled={!current || streaming || !canAdoptCurrent}
+          title="删除当前会话"
+          onClick={() => void deleteCurrentSession()}
+        >
+          删除
+        </button>
+        <button className="btn small with-icon" onClick={onClose} title="收起面板" aria-label="收起面板">
+          <Icon as={X} size={ICON_SIZE_DENSE} />
+        </button>
+      </header>
+
+      <div className="ai-session-bar">
+        <select
+          className="ai-session-select"
+          value={current?.id ?? ""}
+          disabled={streaming}
+          onChange={(e) => {
+            if (e.target.value) void selectSession(e.target.value);
+          }}
+        >
+          {!current && <option value="">（新会话）</option>}
+          {sessions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.title}（{s.messageCount} 条）
+            </option>
+          ))}
+        </select>
+        {current && !persona && (
+          <>
+            <span
+              className={`ai-preset-chip${presetView?.deleted ? " stale" : ""}`}
+              title={
+                presetView
+                  ? presetView.deleted
+                    ? `「${presetView.name}」已从设置里删除，这个会话按创建时的快照继续`
+                    : `这个会话创建时绑定的助手：${presetView.name}（换助手＝另开新会话）`
+                  : "旧会话未绑定预设：按通用助手继续"
+              }
+            >
+              <span
+                className="ai-preset-dot"
+                style={{ background: presetView?.color || "var(--accent)" }}
+              />
+              {presetView ? presetView.name : "通用助手"}
+              {presetView?.deleted ? "·已删" : ""}
+            </span>
+            <button
+              className="link-like"
+              disabled={streaming || !canAdoptCurrent}
+              title="不在原会话里换人格：另开新会话，可选带上现在的对话"
+              onClick={() => setSwitchOpen(true)}
+            >
+              换预设
+            </button>
+          </>
+        )}
+      </div>
+
+      {stalePersona && persona && <div className="hint-box">{stalePersona}</div>}
+
+      <div className="ai-messages" ref={messagesRef}>
+        {!current && (
+          <div className="ai-preset-pick">
+            <p className="ai-preset-pick-title">
+              新会话用哪个助手？
+              {!presetState && <span className="hint">（预设表读取失败，先按通用助手开聊）</span>}
+            </p>
+            {allPresets.length > 0 && (
+              <div className="ai-preset-cards">
+                {allPresets.map((p) => (
+                  <PresetCard
+                    key={p.id}
+                    preset={p}
+                    selected={p.id === draftPreset.id}
+                    suffix={p.id === presetState?.defaultPresetId ? "（默认）" : undefined}
+                    onClick={() => setDraftPresetId(p.id)}
+                  />
+                ))}
+              </div>
+            )}
+            <p className="hint">发出第一条消息时创建会话，并固定这个助手；之后换助手＝另开新会话。</p>
+          </div>
+        )}
+        {!current || current.messages.length === 0 ? (
+          <div className="ai-empty">
+            <p>和 AI 聊拆书、找灵感、构思剧情。各板块的「AI 命令」：</p>
+            <p className="hint">拆书：梳理选中内容 · 建议类型/解法标注 · 提炼小结</p>
+            <p className="hint">构思：排布体检 · 矛盾梳理（只出报告，不改文件）</p>
+            <p className="hint">书写：AI 陪看本章 · 润色选中（润色点采纳才替换正文）</p>
+            <p className="hint">AI 只给初稿与建议，采纳后才会写入文档。</p>
+          </div>
+        ) : (
+          current.messages.map((m, i) => {
+            // 人格底座（首条 system 消息）：折叠展示，不进对话流。
+            if (m.role === "system") {
+              return (
+                <details key={i} className="ai-persona-base">
+                  <summary>人格底座（{persona ? `与${persona.person}入戏的材料与规则` : "系统提示"}）</summary>
+                  <pre>{m.content}</pre>
+                </details>
+              );
+            }
+            return (
+              <div key={i} className={`ai-msg ${m.role}`}>
+                <div className="ai-msg-row">
+                  {persona && canAdoptCurrent && !streaming && (
+                    <label className="ai-pick" title="勾选后可存为矛盾/故事卡">
+                      <input
+                        type="checkbox"
+                        checked={picked.has(i)}
+                        onChange={() => togglePick(i)}
+                      />
+                    </label>
+                  )}
+                  <div className="ai-bubble">
+                    {m.content}
+                    {streaming && i === lastIdx && m.role === "assistant" && (
+                      <span className="ai-cursor">▍</span>
+                    )}
+                  </div>
+                </div>
+                {m.role === "assistant" && canAdoptCurrent && !streaming && m.meta && (
+                  <AdoptActions
+                    kind={m.meta.kind}
+                    content={m.content}
+                    adopted={adoptedSet.has(i)}
+                    onAdopt={() => handleAdopt(m.meta!.kind, i, m.content, m.meta!)}
+                  />
+                )}
+              </div>
+            );
+          })
+        )}
+        {error && <div className="error-box">{error}</div>}
+      </div>
+
+      {current && !canAdoptCurrent && (
+        <p className="hint" role="status">这条历史对话未记录当前库归属或来自其他库，仅供查看；请新建会话后继续。</p>
+      )}
+
+      {persona && canAdoptCurrent && picked.size > 0 && (
+        <div className="ai-adopt-bar">
+          <span>
+            已选 {picked.size} 条对话
+          </span>
+          <button className="btn small" onClick={() => setAdoptOpen("矛盾")}>
+            存为矛盾
+          </button>
+          <button className="btn small" onClick={() => setAdoptOpen("故事卡")}>
+            存为故事卡
+          </button>
+          <button className="btn small" onClick={() => setPicked(new Set())}>
+            取消选择
+          </button>
+        </div>
+      )}
+
+      <div className="ai-composer">
+        {conversationTarget.stale && (
+          <p className="hint" role="status">助手的供应商覆盖已失效，已回退全局供应商与模型；可在「设置 → AI」中检查配置。</p>
+        )}
+        <div className="ai-composer-controls">
+          <label className="ai-attach" title="把当前打开的文档（拆书稿或当前章）全文作为上下文发给 AI">
+            <input
+              type="checkbox"
+              checked={docAttached}
+              disabled={!doc}
+              onChange={(e) => setDocAttached(e.target.checked)}
+            />
+            携带当前文档
+          </label>
+          {docAttached && doc && (
+            <span className="ai-ctx-chip">
+              《{doc.bookName}》{doc.label ? ` · ${doc.label}` : ""} 约 {doc.content.length} 字
+            </span>
+          )}
+        </div>
+        <textarea
+          className="ai-input"
+          rows={3}
+          value={input}
+          placeholder={
+            conversationTarget.provider
+              ? persona
+                ? `跟${persona.person}说点什么（TA 会入戏回应）……`
+                : "输入后回车发送，Shift+Enter 换行"
+              : "先在「设置」里配置供应商"
+          }
+          disabled={!presetsLoaded || !conversationTarget.provider || !canContinueCurrent}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              const text = input;
+              setInput("");
+              void send(text);
+            }
+          }}
+        />
+        <div className="ai-composer-actions">
+          {streaming ? (
+            <button className="btn" onClick={stop}>
+              停止
+            </button>
+          ) : (
+            <button
+              className="btn primary"
+              disabled={!presetsLoaded || !conversationTarget.provider || !input.trim() || !canContinueCurrent}
+              onClick={() => {
+                const text = input;
+                setInput("");
+                void send(text);
+              }}
+            >
+              发送
+            </button>
+          )}
+        </div>
+      </div>
+
+      {adoptOpen && persona && canAdoptCurrent && pickedEntries.length > 0 && (
+        <ChatAdoptDialog
+          mode={adoptOpen}
+          persona={persona}
+          entries={pickedEntries}
+          libraryRoot={libraryPath}
+          onClose={() => setAdoptOpen(null)}
+        />
+      )}
+
+      {switchOpen && current && !persona && (
+        <PresetSwitchDialog
+          presets={allPresets}
+          preselectId={draftPreset.id}
+          fromName={presetView?.name ?? "通用助手"}
+          messageCount={current.messages.filter((m) => m.role !== "system").length}
+          onClose={() => setSwitchOpen(false)}
+          onCreate={createSwitchedSession}
+        />
+      )}
+    </aside>
+  );
+}
+
+/** 预设卡片（新会话选择与换预设对话框共用）：图标＋名字，选中描边。 */
+function PresetCard({
+  preset,
+  selected,
+  suffix,
+  onClick,
+}: {
+  preset: AssistantPreset;
+  selected: boolean;
+  /** 名字后的标记（如「（默认）」），换预设对话框里不显示。 */
+  suffix?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`ai-preset-card${selected ? " selected" : ""}`}
+      title={preset.description || preset.name}
+      onClick={onClick}
+    >
+      <PresetGlyph preset={preset} />
+      <span className="ai-preset-card-name">
+        {preset.name}
+        {suffix}
+      </span>
+    </button>
+  );
+}
+
+/** 「换预设＝复制为新会话」小对话框（工单 T07，spec §四）：选目标预设＋
+ *  是否带上现在的可见对话；确认后另开新会话，不在原会话里混人格。 */
+function PresetSwitchDialog({
+  presets,
+  preselectId,
+  fromName,
+  messageCount,
+  onClose,
+  onCreate,
+}: {
+  presets: AssistantPreset[];
+  preselectId: string;
+  fromName: string;
+  messageCount: number;
+  onClose: () => void;
+  onCreate: (target: AssistantPreset, includeVisible: boolean) => void;
+}) {
+  const [pickedId, setPickedId] = useState(preselectId);
+  const [copyVisible, setCopyVisible] = useState(true);
+  const selected = presets.find((p) => p.id === pickedId) ?? null;
+  return (
+    <div
+      className="dialog-overlay"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="dialog">
+        <h3>换个助手，开新会话</h3>
+        <p className="hint">
+          「{fromName}」的会话保持不变；新会话从下面选的助手开始。
+        </p>
+        {presets.length === 0 ? (
+          <p className="hint">预设表读取失败：先去「设置 → AI」看看预设管理。</p>
+        ) : (
+          <div className="ai-preset-cards in-dialog">
+            {presets.map((p) => (
+              <PresetCard
+                key={p.id}
+                preset={p}
+                selected={p.id === pickedId}
+                onClick={() => setPickedId(p.id)}
+              />
+            ))}
+          </div>
+        )}
+        <label className="ai-preset-copy">
+          <input
+            type="checkbox"
+            checked={copyVisible}
+            onChange={(e) => setCopyVisible(e.target.checked)}
+          />
+          带上现在的 {messageCount} 条对话（AI 只看得到带进新会话的内容）
+        </label>
+        <div className="dialog-actions">
+          <button className="btn" onClick={onClose}>
+            取消
+          </button>
+          <button
+            className="btn primary"
+            disabled={!selected}
+            onClick={() => selected && onCreate(selected, copyVisible)}
+          >
+            创建新会话
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdoptActions({
+  kind,
+  content,
+  adopted,
+  onAdopt,
+}: {
+  kind: AiCommandKind;
+  content: string;
+  adopted: boolean;
+  onAdopt: () => void;
+}) {
+  // 报告类命令只出建议，没有采纳动作（spec §二、§五）。
+  if (isReportKind(kind)) return null;
+  if (kind === "标注") {
+    const parsed = parseTropeSuggestion(content);
+    return (
+      <div className="ai-adopt">
+        <button
+          className="btn small with-icon"
+          disabled={!parsed || adopted}
+          title={parsed ? "按建议预填桥段标注，确认后才写入 .yaml" : "未能从回复解析出类型/解法"}
+          onClick={onAdopt}
+        >
+          {adopted ? (
+            <>
+              <Icon as={Check} size={ICON_SIZE_DENSE} />已预填标注
+            </>
+          ) : (
+            "按建议预填桥段标注"
+          )}
+        </button>
+        {parsed && (
+          <span className="hint">
+            类型：{parsed.types.join("、")}
+            {parsed.solution ? ` ｜ 解法：${parsed.solution}` : ""}
+          </span>
+        )}
+      </div>
+    );
+  }
+  const label =
+    kind === "梳理" ? "采纳为「点评」块插入" : kind === "润色" ? "替换选中正文" : "采纳为「小结」块插入";
+  return (
+    <div className="ai-adopt">
+      <button
+        className="btn small with-icon"
+        disabled={adopted}
+        title={kind === "润色" ? "用润色稿替换正文里那段选区（可 Ctrl+Z 撤销）" : undefined}
+        onClick={onAdopt}
+      >
+        {adopted ? (
+          <>
+            <Icon as={Check} size={ICON_SIZE_DENSE} />
+            {kind === "润色" ? "已替换" : "已插入"}
+          </>
+        ) : (
+          label
+        )}
+      </button>
+    </div>
+  );
+}
