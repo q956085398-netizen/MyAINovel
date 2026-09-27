@@ -154,7 +154,7 @@ export default function RailProjectPanel({
             kind: "ideation" as const,
             key: `${item.tab}:${item.name}`,
             title: item.name,
-            label: item.detail ?? "待处理",
+            label: item.summary ?? "待处理",
             detail: item.tab,
             item,
           }));
@@ -193,7 +193,7 @@ export default function RailProjectPanel({
       const meta = (BOARD_META as Partial<Record<string, (typeof BOARD_META)[PendingLine["board"]]>>)[task.line.board];
       if (meta) onOpenBoard(project, meta.tab);
     } else if (task.kind === "ideation" && project) {
-      onOpenBoard(project, task.item.tab as ProjectTab, task.item.focus ?? undefined);
+      onOpenBoard(project, task.item.tab as ProjectTab);
     } else if (task.kind === "inspiration") {
       onOpenInspiration(task.card);
     } else if (task.kind === "book") {

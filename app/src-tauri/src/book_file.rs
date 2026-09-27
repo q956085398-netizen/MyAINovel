@@ -168,7 +168,22 @@ pub(crate) fn snapshot_with_gap(
     old_bytes: &[u8],
     min_gap: std::time::Duration,
 ) -> Result<(), String> {
-    if String::from_utf8_lossy(old_bytes).trim().is_empty() {
+    snapshot_with_policy(dir, old_bytes, min_gap, false)
+}
+
+/// 显式事务的强制恢复点：即使内容为空也落一份。
+/// 不用于高频自动保存，因此不套“空白不留快照”和时间节流。
+pub(crate) fn snapshot_restore_point(dir: &Path, bytes: &[u8]) -> Result<(), String> {
+    snapshot_with_policy(dir, bytes, std::time::Duration::ZERO, true)
+}
+
+fn snapshot_with_policy(
+    dir: &Path,
+    old_bytes: &[u8],
+    min_gap: std::time::Duration,
+    allow_empty: bool,
+) -> Result<(), String> {
+    if !allow_empty && String::from_utf8_lossy(old_bytes).trim().is_empty() {
         return Ok(());
     }
     if let Some(latest) = snapshot_files(dir).pop() {
@@ -521,11 +536,7 @@ pub(crate) fn has_md_extension(path: &Path) -> bool {
 
 /// 目标文件名被占用时续号（标题-2、标题-3……）；self_path 即目标时
 /// 不续（编辑既有文件不算冲突）。
-pub(crate) fn unique_file_path(
-    dir: &Path,
-    file_name: &str,
-    self_path: Option<&Path>,
-) -> PathBuf {
+pub(crate) fn unique_file_path(dir: &Path, file_name: &str, self_path: Option<&Path>) -> PathBuf {
     let first = dir.join(file_name);
     if !first.exists() || Some(first.as_path()) == self_path {
         return first;
@@ -1448,7 +1459,8 @@ mod tests {
 
     #[test]
     fn 书档解析_空值不算_多块取首块() {
-        let content = "开场白\n\n> [!书档]\n> 书名：甲\n> 成绩：\n\n正文\n\n> [!书档]\n> 书名：乙\n";
+        let content =
+            "开场白\n\n> [!书档]\n> 书名：甲\n> 成绩：\n\n正文\n\n> [!书档]\n> 书名：乙\n";
         let header = parse_book_header(content).unwrap();
         assert_eq!(header.title.as_deref(), Some("甲"));
         assert_eq!(header.track_record, None);
@@ -1531,7 +1543,10 @@ mod tests {
         let text = read_text(&md).unwrap();
         assert!(text.contains("书名：纸面上的"));
         assert!(!text.contains("yaml里的"), "md 为准、不搬值");
-        assert!(!root.join("书乙.yaml").exists(), "只剩四键的 yaml 整文件删除");
+        assert!(
+            !root.join("书乙.yaml").exists(),
+            "只剩四键的 yaml 整文件删除"
+        );
     }
 
     #[test]

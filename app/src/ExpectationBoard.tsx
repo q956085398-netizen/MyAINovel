@@ -1,6 +1,7 @@
+import { useSearchDestination } from "./globalSearchNavigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ExpectationBoard, ExpectationView } from "./types";
+import type { ExpectationBoard, ExpectationView, SaveResult } from "./types";
 import {
   EXPECTATION_HORIZONS,
   EXPECTATION_HORIZON_MID,
@@ -16,8 +17,13 @@ import {
   expectationOverdueChapters,
 } from "./types";
 import { chapterHead } from "./chapterFile";
+import {
+  expectationPageSections,
+  isExpectationSearchDestination,
+} from "./expectationBoardView.ts";
 import { errMsg } from "./util";
 import { ExpectationFormDialog } from "./ExpectationDialog";
+import PendingZone from "./PendingZone";
 
 interface ExpectationBoardProps {
   project: string;
@@ -128,6 +134,7 @@ export default function ExpectationBoard({
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const destination = useSearchDestination();
   const [selected, setSelected] = useState<string | null>(null);
   const focusedName = useRef<string | null>(null);
 
@@ -150,15 +157,30 @@ export default function ExpectationBoard({
 
   const label = expectationKindLabel(kind);
   const goalTab = kind === EXPECTATION_KIND_GOAL;
-  const items = (board?.items ?? []).filter((v) =>
-    goalTab ? v.kind === EXPECTATION_KIND_GOAL : v.kind !== EXPECTATION_KIND_GOAL,
+  const searchDestinationHere = isExpectationSearchDestination(destination?.hit, project, kind);
+  useEffect(() => {
+    setSelected(
+      searchDestinationHere && destination?.hit.kind === "期待线" ? destination.hit.title : null,
+    );
+  }, [destination, project, searchDestinationHere]);
+  const { items, pending: polishing, grid: visibleItems } = expectationPageSections(
+    board?.items ?? [],
+    kind,
   );
   const axis = board?.maxChapter ?? 0;
-  const placed = items.filter((v) => geometry(v, axis) !== null);
-  const pending = items.filter((v) => geometry(v, axis) === null);
+  const placed = visibleItems.filter((v) => geometry(v, axis) !== null);
+  const unplaced = visibleItems.filter((v) => geometry(v, axis) === null);
   const selectedView = items.find((v) => v.name === selected) ?? null;
+  const selectedPending = selectedView?.pending ? selectedView : null;
   const overdueCount = items.filter((v) => v.overdue).length;
   const known = EXPECTATION_HORIZONS as readonly string[];
+
+  useEffect(() => {
+    if (!searchDestinationHere || !selectedPending) return;
+    document
+      .getElementById(`expectation-pending-${encodeURIComponent(selectedPending.name)}`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [searchDestinationHere, selectedPending?.name, selectedPending?.pending]);
 
   useEffect(() => {
     if (!focusName || !board || focusedName.current === focusName) return;
@@ -178,6 +200,7 @@ export default function ExpectationBoard({
     );
     return () => cancelAnimationFrame(frame);
   }, [focusName, selected, selectedView]);
+
 
   // 行＝短/中/长；手写的未知档位单列一行（只提示不校验）。
   const rowDefs: { key: string; label: string; sub: string | null; bars: Bar[] }[] = [
@@ -248,6 +271,47 @@ export default function ExpectationBoard({
     }
   }
 
+  async function togglePending(name: string, pending: boolean) {
+    if (busy) return;
+    const fingerprint = board?.tableFingerprint;
+    if (!fingerprint) {
+      window.alert("期待线列表缺少版本信息，请重新载入后再切换待打磨状态。");
+      await scan();
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await invoke<SaveResult>("set_expectation_pending", {
+        project,
+        name,
+        fingerprint,
+        pending,
+      });
+      if (result.status === "conflict") {
+        window.alert("磁盘上的期待线列表已变化。已重新载入，请确认后再切换待打磨状态。");
+        await scan();
+        return;
+      }
+      setBoard((current) =>
+        current
+          ? {
+              ...current,
+              tableFingerprint: result.fingerprint,
+              items: current.items.map((item) =>
+                item.name === name ? { ...item, pending } : item,
+              ),
+            }
+          : current,
+      );
+      setSelected(name);
+      onChanged();
+    } catch (e) {
+      window.alert(`切换期待线待打磨失败：${errMsg(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function create(name: string, kind: string, horizon: string) {
     setBusy(true);
     try {
@@ -260,6 +324,73 @@ export default function ExpectationBoard({
     } finally {
       setBusy(false);
     }
+  }
+
+  function itemControls(view: ExpectationView) {
+    return (
+      <div className="card-actions">
+        <button
+          className="btn small"
+          disabled={busy}
+          onClick={() => void togglePending(view.name, !view.pending)}
+        >
+          {view.pending ? "整理完成" : "待打磨"}
+        </button>
+        <select
+          className="select small"
+          value={view.kind}
+          disabled={busy}
+          title="类别（约定值只提示不校验）；改成另一类会换到另一个页签"
+          onChange={(e) => void changeMeta(view.name, e.target.value, view.horizon)}
+        >
+          {!(EXPECTATION_KINDS as readonly string[]).includes(view.kind) && (
+            <option value={view.kind}>{expectationKindLabel(view.kind)}</option>
+          )}
+          {EXPECTATION_KINDS.map((k) => (
+            <option key={k} value={k}>
+              {expectationKindLabel(k)}
+            </option>
+          ))}
+        </select>
+        <select
+          className="select small"
+          value={view.horizon}
+          disabled={busy}
+          title="档位（时间线网格的行）"
+          onChange={(e) => void changeMeta(view.name, view.kind, e.target.value)}
+        >
+          {!known.includes(view.horizon) && <option value={view.horizon}>{view.horizon}</option>}
+          {EXPECTATION_HORIZONS.map((h) => (
+            <option key={h} value={h}>
+              {h}
+            </option>
+          ))}
+        </select>
+        <select
+          className="select small"
+          value={view.state}
+          disabled={busy}
+          title="期待线状态（与待打磨独立）"
+          onChange={(e) => void changeState(view.name, e.target.value)}
+        >
+          {!(EXPECTATION_STATES as readonly string[]).includes(view.state) && (
+            <option value={view.state}>{view.state}</option>
+          )}
+          {EXPECTATION_STATES.map((state) => (
+            <option key={state} value={state}>
+              {state}
+            </option>
+          ))}
+        </select>
+        <button
+          className="btn small danger"
+          disabled={busy}
+          onClick={() => void remove(view.name)}
+        >
+          删除
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -284,6 +415,88 @@ export default function ExpectationBoard({
       {error && <div className="error-box">{error}</div>}
       {loading && <p className="hint">正在读取……</p>}
 
+      {!loading && !error && polishing.length > 0 && (
+        <PendingZone
+          label={`待打磨的期待线（${label}）`}
+          count={polishing.length}
+          hint="完整保留线索内容；整理完成后回到原类别、档位和次序。"
+        >
+          <div className="exp-pending-notes">
+            {polishing.map((view) => (
+              <article
+                key={view.name}
+                id={`expectation-pending-${encodeURIComponent(view.name)}`}
+                className={`card-item exp-pending-note ${
+                  view.name === selected ? "is-search-hit" : ""
+                }`}
+              >
+                <div className="card-title-row">
+                  <button className="card-title" type="button" onClick={() => setSelected(view.name)}>
+                    {view.name}
+                  </button>
+                  <span className="card-cat">类别：{expectationKindLabel(view.kind)}</span>
+                  <span className="card-cat">档位：{view.horizon}</span>
+                  <span className="card-cat">状态：{view.state}</span>
+                  {view.overdue && (
+                    <span className="card-cat danger">超期 {view.unadvancedChapters} 章</span>
+                  )}
+                  {!view.overdue && view.unadvancedChapters !== null && (
+                    <span className="card-cat">已 {view.unadvancedChapters} 章未推进</span>
+                  )}
+                </div>
+                <p className="hint">{STATE_HINTS[view.state] ?? "手写的状态值（只提示不校验）。"}</p>
+                {itemControls(view)}
+
+                <div className="exp-pending-section">
+                  <h4>埋设</h4>
+                  {view.planted.length === 0 ? (
+                    <p className="hint">尚无埋设。</p>
+                  ) : (
+                    view.planted.map((anchor, index) => (
+                      <p key={index} className="foreshadow-anchor">
+                        <button
+                          className="link-btn"
+                          title="跳到书写板块这一章，选中引文"
+                          onClick={() => onOpenChapter(anchor.chapter, anchor.quote)}
+                        >
+                          埋于 {chapterHead(anchor.chapter, chapterPrefix)}
+                        </button>
+                        {anchor.quote && <span className="foreshadow-quote">「{anchor.quote}」</span>}
+                        {anchor.stale && <span className="card-cat danger">引文失配</span>}
+                      </p>
+                    ))
+                  )}
+                </div>
+
+                <div className="exp-pending-section">
+                  <h4>兑现</h4>
+                  {view.fulfilled.length === 0 ? (
+                    <p className="hint">尚无兑现记录。</p>
+                  ) : (
+                    view.fulfilled.map((payoff, index) => (
+                      <p key={index} className="foreshadow-anchor">
+                        <button
+                          className="link-btn"
+                          title="跳到书写板块这一章，选中引文"
+                          onClick={() => onOpenChapter(payoff.chapter, payoff.quote)}
+                        >
+                          兑现于 {chapterHead(payoff.chapter, chapterPrefix)} · {payoff.kind}
+                        </button>
+                        {payoff.quote && <span className="foreshadow-quote">「{payoff.quote}」</span>}
+                        {payoff.note && (
+                          <span className="foreshadow-note">说明：{payoff.note}</span>
+                        )}
+                        {payoff.stale && <span className="card-cat danger">引文失配</span>}
+                      </p>
+                    ))
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        </PendingZone>
+      )}
+
       {!loading && !error && items.length === 0 && (
         <div className="empty-state">
           <p>还没有{label}。</p>
@@ -297,11 +510,11 @@ export default function ExpectationBoard({
 
       {!loading && !error && items.length > 0 && (
         <>
-          {pending.length > 0 && (
+          {unplaced.length > 0 && (
             <>
               <div className="exp-lane">
                 <span className="exp-lane-label">还没落位（待埋）</span>
-                {pending.map((v) => (
+                {unplaced.map((v) => (
                   <button
                     key={v.name}
                     className={`exp-chip ${v.name === selected ? "active" : ""}`}
@@ -419,7 +632,7 @@ export default function ExpectationBoard({
             </p>
           )}
 
-          {selectedView && (
+          {selectedView && !selectedView.pending && (
             <section id="expectation-detail" className="exp-detail">
               <div className="exp-detail-head">
                 <h3>{selectedView.name}</h3>
@@ -433,67 +646,7 @@ export default function ExpectationBoard({
                 {!selectedView.overdue && selectedView.unadvancedChapters !== null && (
                   <span className="card-cat">已 {selectedView.unadvancedChapters} 章未推进</span>
                 )}
-                <div className="card-actions">
-                  <select
-                    className="select small"
-                    value={selectedView.kind}
-                    disabled={busy}
-                    title="类别（约定值只提示不校验）；改成另一类会换到另一个页签"
-                    onChange={(e) =>
-                      void changeMeta(selectedView.name, e.target.value, selectedView.horizon)
-                    }
-                  >
-                    {!(EXPECTATION_KINDS as readonly string[]).includes(selectedView.kind) && (
-                      <option value={selectedView.kind}>{expectationKindLabel(selectedView.kind)}</option>
-                    )}
-                    {EXPECTATION_KINDS.map((k) => (
-                      <option key={k} value={k}>
-                        {expectationKindLabel(k)}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="select small"
-                    value={selectedView.horizon}
-                    disabled={busy}
-                    title="档位（时间线网格的行）"
-                    onChange={(e) =>
-                      void changeMeta(selectedView.name, selectedView.kind, e.target.value)
-                    }
-                  >
-                    {!known.includes(selectedView.horizon) && (
-                      <option value={selectedView.horizon}>{selectedView.horizon}</option>
-                    )}
-                    {EXPECTATION_HORIZONS.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="select small"
-                    value={selectedView.state}
-                    disabled={busy}
-                    title="改状态（约定值只提示不校验）"
-                    onChange={(e) => void changeState(selectedView.name, e.target.value)}
-                  >
-                    {!(EXPECTATION_STATES as readonly string[]).includes(selectedView.state) && (
-                      <option value={selectedView.state}>{selectedView.state}</option>
-                    )}
-                    {EXPECTATION_STATES.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="btn small danger"
-                    disabled={busy}
-                    onClick={() => void remove(selectedView.name)}
-                  >
-                    删除
-                  </button>
-                </div>
+                {itemControls(selectedView)}
               </div>
               <p className="hint">
                 {STATE_HINTS[selectedView.state] ?? "手写的状态值（只提示不校验）。"}

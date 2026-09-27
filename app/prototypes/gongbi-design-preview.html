@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>工笔 · 视觉预览</title>
+  <style>
+    :root {
+      --ink: #25211d;
+      --muted: #80766b;
+      --paper: #f3efe7;
+      --surface: #fffdf8;
+      --surface-2: #ebe5da;
+      --line: #d9d0c3;
+      --accent: #ae432e;
+      --accent-soft: #f2ddd6;
+      --sidebar: #292823;
+      --sidebar-ink: #f8f2e7;
+      --note: #f3e4a9;
+      --mint: #dce9dc;
+      --blue: #dfe8ef;
+      --shadow: 0 12px 34px rgba(60, 45, 31, .09);
+      --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, serif;
+      --sans: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: var(--paper); font-family: var(--sans); }
+    button { color: inherit; font: inherit; }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 236px minmax(0, 1fr); }
+    .sidebar { position: sticky; top: 0; height: 100vh; padding: 28px 20px 22px; display: flex; flex-direction: column; gap: 24px; background: var(--sidebar); color: var(--sidebar-ink); }
+    .brand { display: flex; align-items: center; gap: 11px; font: 700 27px var(--serif); letter-spacing: .08em; }
+    .brand-mark { width: 29px; height: 29px; border: 2px solid #d8a73d; border-radius: 50%; position: relative; }
+    .brand-mark::before,.brand-mark::after { content:""; position:absolute; width:8px; height:8px; border:2px solid #55a4ac; border-radius:50%; }
+    .brand-mark::before { left: 1px; top: 7px; } .brand-mark::after { right: 1px; top: 7px; }
+    .nav-group { display: grid; gap: 5px; }
+    .nav-label { margin: 3px 12px 6px; color: #a79f93; font-size: 11px; letter-spacing: .14em; }
+    .nav-item { border: 0; border-radius: 9px; padding: 10px 12px; display: flex; align-items: center; gap: 11px; background: transparent; color: #ded8cc; text-align: left; cursor: pointer; }
+    .nav-item.active { background: rgba(255,255,255,.12); color: #fff; box-shadow: inset 3px 0 var(--accent); }
+    .nav-icon { width: 20px; text-align: center; opacity: .92; }
+    .project-slot { flex: 1; min-height: 0; border-top: 1px solid rgba(255,255,255,.1); border-bottom: 1px solid rgba(255,255,255,.1); padding: 18px 4px; }
+    .book-title { font: 600 15px var(--serif); margin: 0 0 10px; }
+    .continue { border-left: 2px solid #d8a73d; padding: 8px 10px; background: rgba(255,255,255,.05); font-size: 12px; line-height: 1.6; }
+    .todo { margin-top: 14px; color: #bdb5a8; font-size: 12px; line-height: 1.8; }
+    .main { min-width: 0; padding: 24px 30px 100px; }
+    .topbar { min-height: 57px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); }
+    .eyebrow { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { margin: 5px 0 0; font: 700 clamp(25px, 2.3vw, 36px) var(--serif); }
+    h2 { margin: 0; font: 700 21px var(--serif); }
+    h3 { margin: 0; font: 700 17px var(--serif); }
+    p { margin: 0; line-height: 1.75; }
+    .screen-tabs { display: flex; flex-wrap: wrap; gap: 5px; }
+    .screen-tabs button { border: 1px solid transparent; border-radius: 999px; padding: 8px 12px; background: transparent; cursor: pointer; color: var(--muted); font-size: 13px; }
+    .screen-tabs button.active { border-color: var(--line); background: var(--surface); color: var(--ink); }
+    .screen { display: none; padding-top: 26px; }
+    .screen.active { display: block; }
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 18px; margin-bottom: 15px; }
+    .section-sub { margin-top: 5px; color: var(--muted); font-size: 13px; }
+    .btn { border: 1px solid var(--line); border-radius: 9px; padding: 9px 13px; background: var(--surface); cursor: pointer; }
+    .btn.primary { border-color: var(--accent); background: var(--accent); color: white; }
+    .btn.quiet { background: transparent; }
+    .note-rack { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; margin: 14px 0 28px; }
+    .sticky { position: relative; min-height: 150px; padding: 21px 20px 18px; background: var(--note); box-shadow: 3px 7px 0 rgba(72,53,23,.08); transform: rotate(-.35deg); }
+    .sticky:nth-child(2) { background: var(--mint); transform: rotate(.45deg); }
+    .sticky:nth-child(3) { background: var(--blue); transform: rotate(-.15deg); }
+    .sticky::before { content:""; position:absolute; top:-8px; left:46%; width:54px; height:15px; background:rgba(255,255,255,.55); transform:rotate(-2deg); }
+    .meta { display:flex; flex-wrap:wrap; gap:7px; margin: 9px 0; color: var(--muted); font-size: 12px; }
+    .tag { display: inline-flex; align-items:center; border-radius: 999px; padding: 3px 8px; background: var(--accent-soft); color: var(--accent); font-size: 11px; }
+    .card-wall { columns: 2 330px; column-gap: 16px; }
+    .content-card { break-inside: avoid; margin: 0 0 16px; padding: 21px 22px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: 0 2px 0 rgba(55,39,22,.03); }
+    .content-card p + p { margin-top: 8px; }
+    .card-actions { display:flex; justify-content:space-between; align-items:center; padding-top:15px; margin-top:15px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+    .people-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+    .person { padding: 20px; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; }
+    .person-top { display:flex; gap:14px; align-items:center; }
+    .avatar { width:58px; height:58px; border-radius:50%; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); font:700 20px var(--serif); }
+    .org-avatar { border-radius: 13px; background: var(--mint); color:#315a43; }
+    .fact-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px 16px; margin-top:16px; font-size:13px; }
+    .fact-grid span { color:var(--muted); display:block; font-size:11px; margin-bottom:2px; }
+    .canvas-shell { margin-top:18px; border:1px solid var(--line); border-radius:14px; overflow:hidden; background-color:#fbfaf6; background-image:radial-gradient(#d8d0c3 1px,transparent 1px); background-size:22px 22px; }
+    .canvas-tools { display:flex; justify-content:space-between; gap:10px; padding:11px 14px; background:rgba(255,253,248,.92); border-bottom:1px solid var(--line); }
+    .canvas { position:relative; height:410px; overflow:hidden; }
+    .canvas svg { position:absolute; inset:0; width:100%; height:100%; }
+    .node { position:absolute; z-index:2; width:90px; height:90px; border:2px solid var(--accent); border-radius:50%; background:var(--surface); display:grid; place-items:center; text-align:center; box-shadow:var(--shadow); font-size:12px; cursor:grab; }
+    .node.org { width:115px; height:72px; border-radius:12px; border-color:#477661; }
+    .node small { display:block; color:var(--muted); margin-top:3px; }
+    .map-layout { display:grid; grid-template-columns:minmax(280px,.78fr) minmax(480px,1.6fr); gap:16px; }
+    .map-list { display:grid; gap:12px; align-content:start; }
+    .region { border-left:4px solid var(--accent); padding:18px; border-radius:10px; background:var(--surface); box-shadow:0 2px 0 rgba(0,0,0,.03); }
+    .map-canvas { height:610px; margin-top:0; }
+    .land { position:absolute; z-index:2; padding:17px; border:2px solid; background:rgba(255,253,248,.94); box-shadow:var(--shadow); }
+    .land.kingdom { border-radius:50%; border-color:#8c6346; width:145px; height:145px; display:grid; place-items:center; text-align:center; }
+    .land.region-node { border-radius:18px; border-color:#527b70; width:150px; min-height:88px; }
+    .land.secret { border-style:dashed; border-color:#9c7331; }
+    .settings-shell { display:grid; grid-template-columns:190px minmax(0,1fr); min-height:650px; border:1px solid var(--line); border-radius:16px; overflow:hidden; background:var(--surface); }
+    .setting-nav { padding:20px 12px; border-right:1px solid var(--line); background:#f7f3ec; }
+    .setting-nav button { width:100%; border:0; border-radius:8px; padding:11px 12px; text-align:left; background:transparent; }
+    .setting-nav button.active { background:var(--accent-soft); color:var(--accent); font-weight:700; }
+    .setting-body { padding:28px 34px; }
+    .setting-row { display:grid; grid-template-columns:minmax(160px,.55fr) minmax(300px,1fr); gap:28px; padding:22px 0; border-bottom:1px solid var(--line); }
+    .choice-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+    .swatch { min-height:95px; border:2px solid transparent; border-radius:12px; padding:12px; background:var(--paper); }
+    .swatch.selected { border-color:var(--accent); }
+    .mini-colors { display:flex; gap:4px; margin-top:13px; }
+    .mini-colors i { width:24px; height:24px; border-radius:50%; display:block; }
+    .preset { padding:14px; border:1px solid var(--line); border-radius:10px; margin-top:10px; }
+    .editor-shell { min-height:680px; border:1px solid var(--line); background:var(--surface); box-shadow:var(--shadow); }
+    .editor-titlebar { display:grid; grid-template-columns:auto minmax(180px,1fr) auto; gap:16px; align-items:center; padding:15px 18px; border-bottom:1px solid var(--line); }
+    .editor-tools { display:flex; gap:8px; flex-wrap:wrap; padding:11px 18px; border-bottom:1px solid var(--line); background:#faf7f1; }
+    .selection-bar { display:inline-flex; gap:4px; margin:13px 18px 0; padding:6px; border-radius:10px; background:var(--accent-soft); color:var(--accent); }
+    .editor-paper { max-width:790px; margin:42px auto; padding:0 36px 100px; }
+    .chapter-kicker { color:var(--accent); font-size:12px; letter-spacing:.2em; }
+    .chapter-title { margin:12px 0 25px; font:700 31px var(--serif); }
+    .prose { font:17px/2 var(--serif); text-align:justify; text-indent:2em; }
+    .prose + .prose { margin-top:12px; }
+    .palette-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+    .palette-card { overflow:hidden; border:1px solid var(--line); border-radius:15px; background:var(--surface); }
+    .palette-preview { height:230px; display:grid; grid-template-columns:68px 1fr; }
+    .palette-side { padding:16px 10px; color:white; }
+    .palette-page { padding:19px; }
+    .palette-line { height:9px; margin:9px 0; border-radius:99px; opacity:.75; }
+    .palette-copy { padding:18px; }
+    .prototype-switcher { position:fixed; left:50%; bottom:18px; z-index:20; transform:translateX(-50%); display:flex; align-items:center; gap:5px; padding:7px; border-radius:14px; background:rgba(31,30,27,.94); color:white; box-shadow:0 12px 34px rgba(0,0,0,.28); backdrop-filter:blur(12px); }
+    .prototype-switcher span { padding:0 9px; color:#aaa49a; font-size:11px; }
+    .prototype-switcher button { border:0; border-radius:9px; padding:9px 12px; background:transparent; color:#d9d3ca; cursor:pointer; }
+    .prototype-switcher button.active { background:#fff; color:#25211d; }
+    .prototype-flag { position:fixed; right:14px; bottom:18px; z-index:19; padding:8px 10px; border:1px dashed rgba(37,33,29,.3); border-radius:8px; background:rgba(255,253,248,.88); color:var(--muted); font-size:10px; }
+
+    /* B：编辑部工作台。导航变成窄轨，内容区更像编务案头。 */
+    body.variant-b { --paper:#e8ece9; --surface:#fdfcf7; --line:#cbd3cf; --accent:#2f6f68; --accent-soft:#dbeae6; --sidebar:#18302e; --note:#f0dda2; }
+    body.variant-b .app { grid-template-columns:78px minmax(0,1fr); }
+    body.variant-b .sidebar { padding:22px 11px; align-items:center; }
+    body.variant-b .brand { font-size:0; } body.variant-b .brand-mark { width:33px; height:33px; }
+    body.variant-b .nav-group { width:100%; } body.variant-b .nav-label,.variant-b .nav-item span:not(.nav-icon),.variant-b .project-slot { display:none; }
+    body.variant-b .nav-item { justify-content:center; padding:12px 4px; }
+    body.variant-b .nav-item.active { box-shadow:inset 0 -3px #d8a73d; }
+    body.variant-b .main { padding-left:42px; padding-right:42px; }
+    body.variant-b .topbar { align-items:end; padding-bottom:14px; }
+    body.variant-b .content-card,.variant-b .person,.variant-b .region { border-radius:3px; box-shadow:none; }
+    body.variant-b .sticky { transform:none; clip-path:polygon(0 0,94% 0,100% 14%,100% 100%,0 100%); }
+    body.variant-b .card-wall { columns:3 280px; }
+
+    /* C：沉浸阅读架。导航上移，长内容居中，工具退后。 */
+    body.variant-c { --paper:#f1eee9; --surface:#fcfaf5; --line:#d8d0c7; --accent:#334f78; --accent-soft:#e0e6ef; --sidebar:#f1eee9; --sidebar-ink:#25211d; --note:#e6dec1; }
+    body.variant-c .app { display:block; }
+    body.variant-c .sidebar { position:sticky; z-index:10; width:100%; height:auto; padding:12px 28px; flex-direction:row; align-items:center; color:var(--ink); border-bottom:1px solid var(--line); }
+    body.variant-c .brand { font-size:22px; white-space:nowrap; }
+    body.variant-c .nav-group { display:flex; gap:2px; }
+    body.variant-c .nav-label,.variant-c .project-slot { display:none; }
+    body.variant-c .nav-item { padding:8px 10px; color:var(--muted); }
+    body.variant-c .nav-item.active { color:var(--ink); background:var(--surface); box-shadow:inset 0 -2px var(--accent); }
+    body.variant-c .sidebar .nav-group:last-child { margin-left:auto; }
+    body.variant-c .main { max-width:1300px; margin:auto; padding:28px 54px 100px; }
+    body.variant-c .topbar { display:block; text-align:center; padding:10px 0 23px; }
+    body.variant-c .screen-tabs { justify-content:center; margin-top:20px; }
+    body.variant-c .section-head { max-width:950px; margin-left:auto; margin-right:auto; }
+    body.variant-c .note-rack { grid-template-columns:repeat(2,minmax(0,1fr)); max-width:950px; margin-left:auto; margin-right:auto; }
+    body.variant-c .card-wall { columns:1; max-width:950px; margin:auto; }
+    body.variant-c .content-card { padding:28px 34px; border-width:0 0 1px; border-radius:0; box-shadow:none; }
+    body.variant-c .people-grid,.variant-c .canvas-shell,.variant-c .settings-shell,.variant-c .editor-shell,.variant-c .palette-grid,.variant-c .map-layout { max-width:1100px; margin-left:auto; margin-right:auto; }
+
+    @media (max-width: 900px) {
+      .app,.variant-b .app { grid-template-columns:78px minmax(0,1fr); }
+      .sidebar { padding:20px 10px; align-items:center; }
+      .brand { font-size:0; } .nav-label,.nav-item span:not(.nav-icon),.project-slot { display:none; }
+      .nav-item { justify-content:center; } .main { padding:18px 18px 96px; }
+      .note-rack,.people-grid,.palette-grid,.choice-grid { grid-template-columns:1fr; }
+      .map-layout { grid-template-columns:1fr; } .settings-shell { grid-template-columns:1fr; }
+      .setting-nav { display:flex; overflow:auto; border-right:0; border-bottom:1px solid var(--line); }
+      .setting-row { grid-template-columns:1fr; }
+      .prototype-flag { display:none; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark"></span><span>工笔</span></div>
+    <nav class="nav-group">
+      <div class="nav-label">创作流程</div>
+      <button class="nav-item"><span class="nav-icon">▱</span><span>拆书</span></button>
+      <button class="nav-item active"><span class="nav-icon">✦</span><span>灵感库</span></button>
+      <button class="nav-item"><span class="nav-icon">◇</span><span>构思</span></button>
+      <button class="nav-item"><span class="nav-icon">✎</span><span>书写</span></button>
+    </nav>
+    <div class="project-slot">
+      <div class="nav-label">正在写</div>
+      <p class="book-title">《雾港拾遗》</p>
+      <div class="continue">继续写：第 18 章<br>潮声越过防波堤</div>
+      <div class="todo">待打磨 3 条<br>未安排桥段 5 张<br>人物秘密 2 条未兑现</div>
+    </div>
+    <nav class="nav-group">
+      <button class="nav-item"><span class="nav-icon">◌</span><span>AI 助手</span></button>
+      <button class="nav-item"><span class="nav-icon">⚙</span><span>设置</span></button>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div><div class="eyebrow">GONGBI DESIGN STUDY / 2026</div><h1 id="page-title">灵感库 · 内容正在发酵</h1></div>
+      <nav class="screen-tabs" aria-label="场景切换">
+        <button data-screen="cards">卡片与便笺</button><button data-screen="people">人物与关系</button><button data-screen="map">地图与地域</button><button data-screen="settings">设置</button><button data-screen="editor">书写</button><button data-screen="palette">主题</button>
+      </nav>
+    </header>
+
+    <section class="screen" data-screen-panel="cards">
+      <div class="section-head"><div><h2>待打磨 <span class="tag">3</span></h2><p class="section-sub">尚在发酵的内容集中在这里；整理完成后回到原类别和原排序。</p></div><button class="btn primary">＋ 记一条灵感</button></div>
+      <div class="note-rack">
+        <article class="sticky"><h3>港口为什么从不鸣笛？</h3><div class="meta">世界观 · 刚刚</div><p>如果雾里存在会循声而来的旧神，港口的静默就不只是气氛，而是全城共同维持的生存规则。</p></article>
+        <article class="sticky"><h3>读者会期待的第一次破局</h3><div class="meta">读者遐想 · 今天</div><p>侦探题材会让人等待“所有人都忽略的细节”。主角第一次胜利应该来自观察，而不是外挂直接给答案。</p></article>
+        <article class="sticky"><h3>祁雁与钟楼守夜人的旧账</h3><div class="meta">人物 · 昨天</div><p>两人都说自己救过对方，但记忆中的年份差了整整七年。这个矛盾可以连到主线的失踪档案。</p></article>
+      </div>
+      <div class="section-head"><div><h2>全部内容</h2><p class="section-sub">默认完整展示，不用横向扫视；只有你主动收起时才折叠。</p></div><button class="btn">筛选与排序</button></div>
+      <div class="card-wall">
+        <article class="content-card"><span class="tag">桥段</span><h3>在停电的档案馆交换证词</h3><div class="meta">类型：信息差　→　解法：错位证词</div><p>全城停电，祁雁和陆循隔着移动书架交换各自掌握的半段证词。两人都不知道对方省略了最关键的人名。</p><p>读者先看见矛盾，随后从保安记录发现两份证词其实来自同一个夜晚。</p><div class="card-actions"><span>关联：第三单元 · 雾中来客</span><span>收起　⋯</span></div></article>
+        <article class="content-card"><span class="tag">人物</span><h3>祁雁</h3><div class="meta">港务局档案员 · 31 岁 · 克制 / 固执 / 敏锐</div><p><b>当前目标：</b>找到七年前失踪船队的原始靠港记录。</p><p><b>弱点与代价：</b>听力在雾天持续恶化，却不愿让搭档知道。</p><p><b>个人秘密：</b>她亲手改过一次档案日期，而那次改动救了一个人。</p><div class="card-actions"><span>海关旧署 · 前调查员</span><span>转为待打磨　⋯</span></div></article>
+        <article class="content-card"><span class="tag">地图</span><h3>雾港</h3><div class="meta">中型港城 · 半日步行跨越 · 常住人口约九万</div><p>三面临海，一面被盐碱沼泽包围。旧城、港区与新修的高地行政区彼此看得见，却很少真正往来。</p><p><b>主线：</b>找回从城市公共记录中消失的第七码头。</p><p><b>核心秘密：</b>地图每隔十二年会少掉一条街。</p><div class="card-actions"><span>5 个地域 · 3 条转场</span><span>打开画布　⋯</span></div></article>
+        <article class="content-card"><span class="tag">组织</span><h3>海关旧署</h3><div class="meta">半官方调查组织 · 现已撤销</div><p><b>目的：</b>封存无法公开解释的海难与失踪记录。</p><p><b>内部矛盾：</b>老成员希望守住承诺，新成员认为隐瞒本身正在制造灾难。</p><p><b>秘密：</b>撤销只是名义上的，旧署仍通过三家灯塔维修行传递消息。</p><div class="card-actions"><span>4 名成员 · 2 个敌对组织</span><span>查看关系　⋯</span></div></article>
+      </div>
+    </section>
+
+    <section class="screen" data-screen-panel="people">
+      <div class="section-head"><div><h2>人物与组织</h2><p class="section-sub">卡片负责完整理解，画布负责看清关系。二者引用同一份数据。</p></div><div><button class="btn">组织</button> <button class="btn primary">＋ 新建人物</button></div></div>
+      <div class="people-grid">
+        <article class="person"><div class="person-top"><div class="avatar">祁</div><div><h3>祁雁</h3><div class="meta">主角 · 港务局档案员</div></div></div><div class="fact-grid"><div><span>一句话身份</span>在被篡改的档案里追一艘不存在的船</div><div><span>当前目标</span>找到第七码头</div><div><span>能力 / 强项</span>笔迹辨认、港史记忆</div><div><span>弱点 / 代价</span>雾天听力下降</div><div><span>组织</span>港务局（现任）／旧署（前成员）</div><div><span>个人秘密</span>曾改过一份靠港日期</div></div></article>
+        <article class="person"><div class="person-top"><div class="avatar org-avatar">署</div><div><h3>海关旧署</h3><div class="meta">组织 · 半官方调查机构</div></div></div><div class="fact-grid"><div><span>公开目的</span>整理旧港海难档案</div><div><span>真正目的</span>隔离不可公开的航线</div><div><span>所在地域</span>旧城 · 钟楼下层</div><div><span>当前矛盾</span>守密派与公开派决裂</div></div></article>
+      </div>
+      <div class="canvas-shell"><div class="canvas-tools"><span><b>关系画布</b>　人物 ○　组织 □　拖拽后自动保存</span><span><button class="btn quiet">只整理未固定节点</button> <button class="btn">全部重排</button></span></div><div class="canvas">
+        <svg viewBox="0 0 1000 410" preserveAspectRatio="none"><path d="M190 208 C300 100, 360 105, 445 125" stroke="#ae432e" stroke-width="2" fill="none"/><path d="M505 150 C630 150, 650 235, 760 235" stroke="#477661" stroke-width="2" fill="none"/><path d="M215 220 C375 300, 500 315, 635 300" stroke="#9c7331" stroke-width="2" stroke-dasharray="7 6" fill="none"/><text x="300" y="120" fill="#80766b" font-size="12">隐瞒真相</text><text x="620" y="178" fill="#80766b" font-size="12">前成员</text><text x="405" y="312" fill="#80766b" font-size="12">共同守密</text></svg>
+        <div class="node" style="left:12%;top:34%">祁雁<small>主角 · 固定</small></div><div class="node" style="left:42%;top:12%">陆循<small>搭档</small></div><div class="node org" style="left:70%;top:47%">海关旧署<small>组织</small></div><div class="node org" style="left:55%;top:68%">灯塔维修行<small>组织</small></div>
+      </div></div>
+    </section>
+
+    <section class="screen" data-screen-panel="map">
+      <div class="section-head"><div><h2>地图 · 雾港</h2><p class="section-sub">地图是整体故事空间；地域是地图内部的区域。画布从现有内容生成。</p></div><div><button class="btn">全貌　地域　转场　历史</button> <button class="btn primary">＋ 新建地域</button></div></div>
+      <div class="map-layout">
+        <div class="map-list">
+          <article class="region"><span class="tag">地域</span><h3>旧城</h3><p>石砌街区，步行约四十分钟横穿。住着码头旧工与被新港区淘汰的修船匠。</p><div class="meta">人物 4 · 组织 2 · 矛盾 3</div><p><b>主线：</b>追查钟楼下封存的航海日志。<br><b>秘密：</b>每张旧地图都画着不同的巷道。</p></article>
+          <article class="region"><span class="tag">地域</span><h3>盐沼</h3><p>城外低地，退潮后可步行进入；涨潮时与城市完全断开。</p><div class="meta">人物 1 · 组织 1 · 转场 2</div><p><b>矛盾：</b>采盐者与灯塔维修行争夺一条夜间通道。</p></article>
+          <article class="region"><span class="tag">转场</span><h3>旧城 → 盐沼</h3><p>乘潮汐小艇约一小时；代价是必须把金属物品留在岸上。雨季路线失效。</p></article>
+        </div>
+        <div class="canvas-shell map-canvas"><div class="canvas-tools"><span><b>地域画布</b>　显示：人物 ✓　组织 ✓　主线 ✓</span><span><button class="btn quiet">采纳「莲花」布局</button> <button class="btn">整理画布</button></span></div><div class="canvas" style="height:555px">
+          <svg viewBox="0 0 900 555" preserveAspectRatio="none"><path d="M180 285 C290 180,350 145,430 145" stroke="#8c6346" stroke-width="3" fill="none"/><path d="M500 165 C620 210,660 295,705 350" stroke="#527b70" stroke-width="3" fill="none"/><path d="M200 330 C360 430,510 450,690 405" stroke="#9c7331" stroke-width="2" stroke-dasharray="8 7" fill="none"/><text x="285" y="174" fill="#80766b" font-size="12">石阶路 · 25 分钟</text><text x="565" y="238" fill="#80766b" font-size="12">潮汐小艇 · 1 小时</text></svg>
+          <div class="land kingdom" style="left:8%;top:36%"><div><b>雾港</b><small>全貌中心</small></div></div><div class="land region-node" style="left:44%;top:14%"><b>旧城</b><p>钟楼 · 旧署 · 档案线</p></div><div class="land region-node secret" style="left:73%;top:59%"><b>盐沼</b><p>夜路 · 维修行 · 失踪线</p></div><div class="node" style="left:53%;top:55%;width:72px;height:72px">祁雁<small>人物</small></div>
+        </div></div>
+      </div>
+    </section>
+
+    <section class="screen" data-screen-panel="settings">
+      <div class="section-head"><div><h2>设置</h2><p class="section-sub">应用级选项在独立页面集中管理；AI 侧栏只留下会话动作。</p></div><button class="btn primary">保存设置</button></div>
+      <div class="settings-shell"><nav class="setting-nav"><button class="active">外观</button><button>编辑器</button><button>AI</button><button>库与数据</button></nav><div class="setting-body">
+        <h2>外观</h2><p class="section-sub">先选一套气质，再决定浅色、深色或跟随系统。</p>
+        <div class="setting-row"><div><h3>界面主题</h3><p class="section-sub">自动随板块变化的强调色保持克制。</p></div><div class="choice-grid"><div class="swatch selected"><b>朱砂纸墨</b><div class="mini-colors"><i style="background:#292823"></i><i style="background:#f3efe7"></i><i style="background:#ae432e"></i></div></div><div class="swatch"><b>竹青松烟</b><div class="mini-colors"><i style="background:#18302e"></i><i style="background:#e8ece9"></i><i style="background:#2f6f68"></i></div></div><div class="swatch"><b>靛青月白</b><div class="mini-colors"><i style="background:#1e2735"></i><i style="background:#f1eee9"></i><i style="background:#334f78"></i></div></div></div></div>
+        <div class="setting-row"><div><h3>明暗模式</h3><p class="section-sub">每套主题都支持三态。</p></div><div><button class="btn primary">浅色</button> <button class="btn">深色</button> <button class="btn">跟随系统</button></div></div>
+        <div class="setting-row"><div><h3>AI 助手预设</h3><p class="section-sub">只影响普通对话，不覆盖固定命令。</p></div><div><div class="preset"><b>构思搭档</b><div class="meta">默认 · 竹青 · 跟随全局模型</div><p>通过追问帮助我澄清故事，不替我决定，不直接续写正文。</p></div><div class="preset"><b>文字编辑</b><div class="meta">朱砂 · 固定模型：长文本</div><p>指出表达和结构问题，提供小范围修订建议，等待我采纳。</p></div><button class="btn" style="margin-top:10px">＋ 新建预设</button></div></div>
+      </div></div>
+    </section>
+
+    <section class="screen" data-screen-panel="editor">
+      <div class="editor-shell"><div class="editor-titlebar"><button class="btn">← 返回</button><div><b>《雾港拾遗》</b>　<span class="meta" style="display:inline">已保存 · 14:32</span></div><button class="btn primary">开下一章</button></div><div class="editor-tools"><button class="btn">插入⌄</button><button class="btn">AI⌄</button><button class="btn">排版⌄</button><span style="flex:1"></span><button class="btn quiet">章节卡</button><button class="btn quiet">快速便笺</button><button class="btn quiet">⌕ Ctrl+K</button></div><div class="selection-bar"><button class="btn quiet">点评</button><button class="btn quiet">如果是我写</button><button class="btn quiet">润色</button></div><article class="editor-paper"><div class="chapter-kicker">第十八章</div><div class="chapter-title">潮声越过防波堤</div><p class="prose">雾从旧城的瓦缝里漫出来时，祁雁才发现钟楼没有影子。她在档案袋背面写下时间，又划掉——今夜所有钟都慢了七分钟。</p><p class="prose">防波堤外没有船灯。陆循站在潮湿的石阶下，手里提着那只不该存在的铜铃。他没有摇它，只问：“你还记得第七码头是什么时候拆的吗？”</p><p class="prose">祁雁没有回答。远处的潮声越过堤岸，一层一层压进城里，像有人正在黑暗中翻动一整柜旧档案。</p></article></div>
+    </section>
+
+    <section class="screen" data-screen-panel="palette">
+      <div class="section-head"><div><h2>三套主题气质</h2><p class="section-sub">色彩可换，信息层级与写作气质保持一致；编辑器背景另行选择。</p></div><button class="btn">查看深色状态</button></div>
+      <div class="palette-grid">
+        <article class="palette-card"><div class="palette-preview"><div class="palette-side" style="background:#292823">工<br><br>拆<br>灵<br>构<br>写</div><div class="palette-page" style="background:#f3efe7"><span class="tag" style="background:#f2ddd6;color:#ae432e">朱砂</span><h3 style="margin-top:45px">纸墨之间<br>留一点锋芒</h3><div class="palette-line" style="background:#ae432e;width:76%"></div><div class="palette-line" style="background:#b9ab9a;width:90%"></div></div></div><div class="palette-copy"><h3>朱砂纸墨</h3><p>温暖、沉静，重点动作带手稿批注般的朱砂感。默认推荐。</p></div></article>
+        <article class="palette-card"><div class="palette-preview"><div class="palette-side" style="background:#18302e">工<br><br>拆<br>灵<br>构<br>写</div><div class="palette-page" style="background:#e8ece9"><span class="tag" style="background:#dbeae6;color:#2f6f68">竹青</span><h3 style="margin-top:45px">冷静梳理<br>复杂世界</h3><div class="palette-line" style="background:#2f6f68;width:76%"></div><div class="palette-line" style="background:#9eaaa4;width:90%"></div></div></div><div class="palette-copy"><h3>竹青松烟</h3><p>适合地图、关系和构思密集期，清晰但不过度工具化。</p></div></article>
+        <article class="palette-card"><div class="palette-preview"><div class="palette-side" style="background:#1e2735">工<br><br>拆<br>灵<br>构<br>写</div><div class="palette-page" style="background:#f1eee9"><span class="tag" style="background:#e0e6ef;color:#334f78">靛青</span><h3 style="margin-top:45px">夜色展开<br>长篇叙事</h3><div class="palette-line" style="background:#334f78;width:76%"></div><div class="palette-line" style="background:#a7a8aa;width:90%"></div></div></div><div class="palette-copy"><h3>靛青月白</h3><p>更安静、更偏阅读，适合长时间码字与夜间使用。</p></div></article>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="prototype-switcher"><span>结构方案</span><button data-variant="A">A 书页卡墙</button><button data-variant="B">B 编辑部案头</button><button data-variant="C">C 沉浸阅读架</button></div>
+<div class="prototype-flag">静态视觉预览 · 非生产界面</div>
+<script>
+  const titles={cards:'灵感库 · 内容正在发酵',people:'人物与组织 · 卡片与关系',map:'地图 · 整体与地域',settings:'设置 · 归拢所有偏好',editor:'书写 · 只留下正文',palette:'外观 · 三套创作气质'};
+  const params=new URLSearchParams(location.search);
+  let variant=(params.get('variant')||'A').toUpperCase();
+  let screen=params.get('screen')||'cards';
+  function paint(){
+    document.body.className='variant-'+variant.toLowerCase();
+    document.querySelectorAll('[data-variant]').forEach(b=>b.classList.toggle('active',b.dataset.variant===variant));
+    document.querySelectorAll('[data-screen]').forEach(b=>b.classList.toggle('active',b.dataset.screen===screen));
+    document.querySelectorAll('[data-screen-panel]').forEach(p=>p.classList.toggle('active',p.dataset.screenPanel===screen));
+    document.getElementById('page-title').textContent=titles[screen];
+    params.set('variant',variant);params.set('screen',screen);history.replaceState(null,'','?'+params.toString());
+  }
+  document.querySelectorAll('[data-variant]').forEach(b=>b.onclick=()=>{variant=b.dataset.variant;paint()});
+  document.querySelectorAll('[data-screen]').forEach(b=>b.onclick=()=>{screen=b.dataset.screen;paint()});
+  addEventListener('keydown',e=>{const order=['A','B','C']; if(e.key==='ArrowRight'||e.key==='ArrowLeft'){let i=order.indexOf(variant)+(e.key==='ArrowRight'?1:-1);variant=order[(i+3)%3];paint();}});
+  paint();
+</script>
+</body>
+</html>

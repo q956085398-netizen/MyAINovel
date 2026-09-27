@@ -1,9 +1,11 @@
+import { useSearchDestination } from "./globalSearchNavigation";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AiCommandKind,
   AiSeed,
   ArrangementItem,
+  MapWorkspace,
   NoteEntry,
   NoteKind,
   ProjectEntry,
@@ -16,11 +18,14 @@ import ArrangementView from "./ArrangementView";
 import CircleView from "./CircleView";
 import ExpectationBoard from "./ExpectationBoard";
 import ForeshadowBoard from "./ForeshadowBoard";
+import MapsView from "./MapsView";
 import NoteList from "./NoteList";
 import ProjectMetaDialog from "./ProjectMetaDialog";
-import RelationshipCanvas from "./RelationshipCanvas";
+import SocialCanvas from "./SocialCanvas";
+import SocialView from "./SocialView";
 import PlanningView from "./PlanningView";
 import BridgeLibrary from "./BridgeLibrary";
+import PowerSystemHome from "./PowerSystemHome";
 import IdeationHome from "./IdeationHome";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
@@ -29,7 +34,7 @@ import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 const TABS = [
   "首页",
   "大纲",
-  "类型圈",
+  "读者遐想（类型圈）",
   "矛盾",
   "桥段库",
   "单元",
@@ -39,10 +44,12 @@ const TABS = [
   "排布",
   "人物",
   "世界观",
+  "地图",
   "开头",
 ] as const;
 const NAV_GROUPS = [
-  { step: "第一步", label: "定书", tabs: ["首页", "大纲", "类型圈", "人物", "世界观", "开头"] },
+  { step: "", label: "", tabs: ["首页"] },
+  { step: "第一步", label: "定书", tabs: ["大纲", "读者遐想（类型圈）", "人物", "世界观", "地图", "开头"] },
   { step: "第二步", label: "生情节", tabs: ["矛盾", "桥段库", "单元", "排布"] },
   { step: "第三步", label: "织张力", tabs: ["伏笔", "期待感", "目标"] },
 ] as const;
@@ -50,14 +57,10 @@ const NAV_GROUPS = [
 export type ProjectTab = (typeof TABS)[number];
 type Tab = ProjectTab;
 
-function tabLabel(tab: Tab): string {
-  return tab === "类型圈" ? "读者遐想（类型圈）" : tab;
-}
-
 const NOTE_TABS: NoteKind[] = ["矛盾", "单元", "人物", "世界观", "开头"];
 
 /** 「人物」页签的两面：名单（小传）与画布（关系网）。 */
-const CHARACTER_VIEWS = ["名单", "画布"] as const;
+const CHARACTER_VIEWS = ["名单", "组织与归属", "画布"] as const;
 type CharacterView = (typeof CHARACTER_VIEWS)[number];
 
 function isNoteTab(tab: Tab): tab is NoteKind {
@@ -67,7 +70,7 @@ function isNoteTab(tab: Tab): tab is NoteKind {
 interface ProjectPageProps {
   project: ProjectEntry;
   libraryPath: string | null;
-  /** 打开时落在哪个页签（默认「首页」）；仅挂载时生效。 */
+  /** 打开时落在哪个页签（默认构思首页）；仅挂载时生效。 */
   initialTab?: ProjectTab;
   /** 跨板块跳来的人名（灵感库关联 →「《书名》/人名」）：落到人物画布并选中。 */
   initialFocus?: string;
@@ -80,7 +83,7 @@ interface ProjectPageProps {
   onAiCommand: (seed: AiSeed) => void;
 }
 
-/** 构思项目页（工单 #4 的文件布局）：类型圈 / 矛盾池 / 单元 / 伏笔 / 排布 /
+/** 构思项目页：轻量首页 / 读者遐想（类型圈）/ 矛盾池 / 单元 / 伏笔 / 排布 /
  *  人物（名单｜画布）/ 世界观 / 开头。正文由「书写」板块承接（工单 #5）。 */
 export default function ProjectPage({
   project,
@@ -92,19 +95,23 @@ export default function ProjectPage({
   onOpenChapter,
   onAiCommand,
 }: ProjectPageProps) {
+  const searchDestination = useSearchDestination();
   const [tab, setTab] = useState<Tab>(initialTab ?? "首页");
+  const [worldviewCategory, setWorldviewCategory] = useState("");
   const [meta, setMeta] = useState<ProjectMeta>(emptyProjectMeta());
   const [metaWarning, setMetaWarning] = useState<string | undefined>();
   const [metaOpen, setMetaOpen] = useState(false);
   const [vocab, setVocab] = useState<Vocabulary | null>(null);
   const [units, setUnits] = useState<NoteEntry[]>([]);
   const [worldview, setWorldview] = useState<NoteEntry[]>([]);
+  const [mapWorkspace, setMapWorkspace] = useState<MapWorkspace>({ maps: [], regions: [] });
   const [arrangement, setArrangement] = useState<ArrangementItem[]>([]);
   const [arrangementError, setArrangementError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [characterView, setCharacterView] = useState<CharacterView>(
-    initialTab === "人物" && initialFocus ? "画布" : "名单",
+    searchDestination?.hit.projectDir === project.dir && searchDestination.hit.kind === "组织" ? "组织与归属" : initialFocus ? "画布" : "名单",
   );
+  const [relationFocus, setRelationFocus] = useState(initialFocus);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -136,6 +143,15 @@ export default function ProjectPage({
     }
   }, [project.dir]);
 
+  const loadMapWorkspace = useCallback(async () => {
+    try {
+      setMapWorkspace(await invoke<MapWorkspace>("read_map_workspace", { project: project.dir }));
+    } catch {
+      // 地图实体是新增的可选目录；损坏文件不应妨碍旧项目继续排布。
+      setMapWorkspace({ maps: [], regions: [] });
+    }
+  }, [project.dir]);
+
   const loadArrangement = useCallback(async () => {
     try {
       setArrangement(await invoke<ArrangementItem[]>("read_arrangement", { project: project.dir }));
@@ -161,10 +177,11 @@ export default function ProjectPage({
     void loadMeta();
     void loadUnits();
     void loadWorldview();
+    void loadMapWorkspace();
     void loadArrangement();
     void loadVocab();
     // 切页时重读跨页数据（单元/世界观/项目资料是排布页的输入）。
-  }, [loadMeta, loadUnits, loadWorldview, loadArrangement, loadVocab, tab, reloadKey]);
+  }, [loadMeta, loadUnits, loadWorldview, loadMapWorkspace, loadArrangement, loadVocab, tab, reloadKey]);
 
   /** 页内某处保存成功：只通知上层刷新项目列表计数，不重挂当前页
    *  （重挂会把排布/列表的滚动与刚存下的状态冲掉）。 */
@@ -223,6 +240,9 @@ export default function ProjectPage({
     ...worldview
       .filter((n) => n.category === "地理" && !meta.maps.includes(n.name))
       .map((n) => n.name),
+    ...mapWorkspace.maps
+      .map((map) => map.name)
+      .filter((name) => !meta.maps.includes(name) && !worldview.some((note) => note.category === "地理" && note.name === name)),
   ];
 
   return (
@@ -255,16 +275,19 @@ export default function ProjectPage({
           {NAV_GROUPS.map((group) => (
             <div className="project-nav-group" key={group.label}>
               <p className="project-nav-label">
-                <span>{group.step}</span>
+                {group.step && <span>{group.step}</span>}
                 {group.label}
               </p>
               {group.tabs.map((t) => (
                 <button
                   key={t}
                   className={`nav-item ${tab === t ? "active" : ""}`}
-                  onClick={() => setTab(t)}
+                  onClick={() => {
+                    setWorldviewCategory("");
+                    setTab(t);
+                  }}
                 >
-                  {tabLabel(t)}
+                  {t === "人物" ? "人物与组织" : t}
                   {t === "矛盾" && project.contradictionCount > 0 && (
                     <span className="nav-badge">{project.contradictionCount}</span>
                   )}
@@ -302,17 +325,26 @@ export default function ProjectPage({
 
         <div className="project-content" key={`${tab}-${reloadKey}`}>
           {tab === "首页" && (
+            <PowerSystemHome project={project.dir} onOpen={() => {
+              setWorldviewCategory("力量体系");
+              setTab("世界观");
+            }} />
+          )}
+          {tab === "首页" && (
             <IdeationHome
               project={project.dir}
-              onNavigate={(next) => setTab(next)}
-              onOpenMeta={() => setMetaOpen(true)}
+              onOpen={(target) => {
+                if ((TABS as readonly string[]).includes(target)) setTab(target as Tab);
+              }}
             />
           )}
           {tab === "大纲" && <PlanningView project={project.dir} unitNames={units.map((unit) => unit.name)} />}
-          {tab === "类型圈" && <CircleView project={project.dir} vocab={vocab} />}
+          {tab === "读者遐想（类型圈）" && <CircleView project={project.dir} vocab={vocab} />}
+          {tab === "地图" && <MapsView project={project.dir} onChanged={refreshAll} />}
           {tab === "桥段库" && (
             <BridgeLibrary
               project={project.dir}
+              vocab={vocab}
               units={units}
               onChanged={refreshAll}
             />
@@ -321,6 +353,8 @@ export default function ProjectPage({
             <NoteList
               project={project.dir}
               kind={tab}
+              worldviewCategory={tab === "世界观" ? worldviewCategory : undefined}
+              onWorldviewCategoryChange={setWorldviewCategory}
               vocab={vocab}
               orderedNames={tab === "单元" ? arrangement.map((item) => item.unit) : undefined}
               focusName={initialTab === tab ? initialFocus : undefined}
@@ -351,11 +385,16 @@ export default function ProjectPage({
                     onChanged={refreshAll}
                     onPromoted={() => setTab("单元")}
                     onChat={(name) => void chatWith(name)}
+                    onRelations={(name) => { setRelationFocus(name); setCharacterView("画布"); }}
+                    onOrganizations={() => setCharacterView("组织与归属")}
                   />
+                ) : characterView === "组织与归属" ? (
+                  <SocialView project={project.dir} onChanged={refreshAll} onRelations={(name) => { setRelationFocus(`组织:${name}`); setCharacterView("画布"); }} />
                 ) : (
-                  <RelationshipCanvas
+                  <SocialCanvas
                     project={project.dir}
-                    focusName={initialFocus}
+                    onUpgrade={() => setCharacterView("组织与归属")}
+                    focusName={relationFocus}
                     onAiCommand={(names) => void runAiCommand("人物关系梳理", names)}
                     onChat={(name) => void chatWith(name)}
                     onPromoted={() => setTab("矛盾")}

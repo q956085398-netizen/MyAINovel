@@ -1,3 +1,4 @@
+import { useRevealSearchResult } from "./globalSearchNavigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { NoteDraft, NoteEntry, NoteKind, Vocabulary } from "./types";
@@ -5,8 +6,12 @@ import { emptyNoteDraft } from "./types";
 import { errMsg } from "./util";
 import NoteDialog from "./NoteDialog";
 import ContentSurface from "./ContentSurface";
+import CharacterArchive from "./CharacterArchive";
+import GeoUpgradeDialog from "./GeoUpgradeDialog";
 import PendingZone from "./PendingZone";
 import { usePendingToggle } from "./pendingToggle";
+import { noteDetailRows } from "./contentDetailRows";
+import { createPowerSystemDraft, POWER_SYSTEM_CATEGORY } from "./powerSystem";
 import {
   CONTENT_SURFACE_STORAGE_KEY,
   contentCardDomId,
@@ -33,6 +38,11 @@ interface NoteListProps {
   onAiCommand?: () => void;
   /** 人物页专属：「跟 TA 聊」进人物对话（工单 #16）。 */
   onChat?: (name: string) => void;
+  onRelations?: (name: string) => void;
+  onOrganizations?: () => void;
+  /** 首页进入力量体系时按类别筛看；仍编辑同一份世界观词条。 */
+  worldviewCategory?: string;
+  onWorldviewCategoryChange?: (category: string) => void;
 }
 
 const KIND_HEADINGS: Record<NoteKind, string> = {
@@ -47,7 +57,7 @@ const KIND_HINTS: Record<NoteKind, string> = {
   矛盾: "构思期尚模糊的剧情种子：一句话核心＋类型，展开后提为单元（矛盾留档、状态改「已成单元」）。",
   单元: "矛盾展开后的形态：约 4~5 个桥段的完整故事，桥段清单写在正文（自由文本）。",
   人物: "一人一文件、文件名即人名；小传写在这里，关系连在「画布」视图（类型/方向/秘密）。",
-  世界观: "设定词条：类别（力量体系/地理/势力/其他）；地图＝「地理」类词条，排布按名引用。",
+  世界观: "自由设定词条，类别只作提示；力量体系可从可删提示或空白正文开始。地图与地域在「地图」页编辑。",
   开头: "开篇构思的多版本形态：每版一文件，标「备选/选定」；多份「选定」应用会提醒你。",
 };
 
@@ -73,39 +83,20 @@ function NoteBadges({ kind, note }: { kind: NoteKind; note: NoteEntry }) {
   );
 }
 
-/** 一句话核心／来源等字段行；便笺与紧凑卡共用。 */
+/** 已填写字段行；便笺与紧凑卡共用同一份完整字段投影。 */
 function NoteCoreLines({ kind, note }: { kind: NoteKind; note: NoteEntry }) {
-  if (
-    !note.core &&
-    !note.emotionGoal &&
-    note.startChapter === null &&
-    note.endChapter === null &&
-    !note.source &&
-    note.links.length === 0
-  ) {
-    return null;
-  }
   return (
     <>
-      {note.core && (
-        <p className="card-core" title={kind === "单元" ? "核心矛盾" : "一句话核心"}>
-          {kind === "单元" ? "核心矛盾" : "一句话核心"}：{note.core}
+      {noteDetailRows(kind, note).map(([label, value]) => (
+        <p
+          key={label}
+          className={label === "核心矛盾" || label === "一句话核心" ? "card-core" : "card-meta"}
+        >
+          <span className="card-source" title={label}>
+            {label}：{value}
+          </span>
         </p>
-      )}
-      {note.emotionGoal && <p className="card-meta">单元情绪目标：{note.emotionGoal}</p>}
-      {(note.startChapter !== null || note.endChapter !== null) && (
-        <p className="card-meta">
-          单元区间：{note.startChapter ?? "？"} ~ {note.endChapter ?? "？"} 章
-        </p>
-      )}
-      {(note.source || note.links.length > 0) && (
-        <p className="card-meta">
-          {note.source && <span className="card-source">来源：{note.source}</span>}
-          {note.links.map((link) => (
-            <span key={link} className="card-source">关联：{link}</span>
-          ))}
-        </p>
-      )}
+      ))}
     </>
   );
 }
@@ -123,7 +114,12 @@ export default function NoteList({
   onPromoted,
   onAiCommand,
   onChat,
+  onRelations,
+  onOrganizations,
+  worldviewCategory,
+  onWorldviewCategoryChange,
 }: NoteListProps) {
+  const categoryFilter = kind === "世界观" ? worldviewCategory ?? "" : "";
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,10 +127,13 @@ export default function NoteList({
     null,
   );
   const [promoting, setPromoting] = useState<string | null>(null);
+  const [upgrading, setUpgrading] = useState<NoteEntry | null>(null);
   const [collapsedCards, setCollapsedCards] = useState(() =>
     readCollapsedCardPaths(localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY), NOTE_CARD_SURFACE),
   );
   const focusedName = useRef<string | null>(null);
+
+  useRevealSearchResult(notes, (item) => { setEditing({ draft: item, prevPath: item.path }); });
 
   const scan = useCallback(async () => {
     setLoading(true);
@@ -195,6 +194,9 @@ export default function NoteList({
     }
   }
 
+  const visibleNotes = notes.filter((n) => !categoryFilter || n.category === categoryFilter);
+  const powerSystem = kind === "世界观" && categoryFilter === POWER_SYSTEM_CATEGORY;
+
   const sortInStoryOrder = (items: NoteEntry[]) =>
     kind === "单元" && orderedNames?.length
       ? [...items].sort((left, right) => {
@@ -208,8 +210,8 @@ export default function NoteList({
           return leftIndex - rightIndex;
         })
       : items;
-  const polishing = sortInStoryOrder(notes.filter((n) => n.pending));
-  const listedNotes = sortInStoryOrder(notes.filter((n) => !n.pending));
+  const polishing = sortInStoryOrder(visibleNotes.filter((n) => n.pending));
+  const listedNotes = sortInStoryOrder(visibleNotes.filter((n) => !n.pending));
 
   function toggleCollapsed(path: string) {
     setCollapsedCards((current) =>
@@ -226,11 +228,24 @@ export default function NoteList({
       ? notes.filter((n) => n.status === "选定").length
       : 0;
 
+  if (kind === "人物") return <>
+    <CharacterArchive project={project} notes={notes} loading={loading} error={error} switching={switching}
+      onNew={() => setEditing({ draft: emptyNoteDraft(kind), prevPath: null })}
+      onEdit={(note) => setEditing({ draft: note, prevPath: note.path })}
+      onTogglePending={(path, pending) => void togglePending(path, pending)}
+      onChat={onChat} onRelations={onRelations} onOrganizations={onOrganizations} />
+    {editing && <NoteDialog key={editing.prevPath ?? "new"} project={project}
+      initial={editing.draft} prevPath={editing.prevPath} vocab={vocab}
+      onClose={() => setEditing(null)}
+      onSaved={() => { setEditing(null); onChanged(); void scan(); }}
+      onDeleted={() => { setEditing(null); onChanged(); void scan(); }} />}
+  </>;
+
   return (
     <div className="note-pane">
       <div className="pane-head">
         <div>
-          <h2>{KIND_HEADINGS[kind]}</h2>
+          <h2>{powerSystem ? "力量体系／修炼体系" : KIND_HEADINGS[kind]}</h2>
           <p className="hint">{KIND_HINTS[kind]}</p>
         </div>
         <div className="page-actions">
@@ -243,14 +258,26 @@ export default function NoteList({
               AI 矛盾梳理
             </button>
           )}
+          {powerSystem && (
+            <button className="btn" onClick={() => setEditing({ draft: createPowerSystemDraft(false), prevPath: null })}>
+              从空白正文开始
+            </button>
+          )}
           <button
             className="btn primary"
-            onClick={() => setEditing({ draft: emptyNoteDraft(kind), prevPath: null })}
+            onClick={() => setEditing({ draft: powerSystem ? createPowerSystemDraft(true) : emptyNoteDraft(kind), prevPath: null })}
           >
-            新建{kind}
+            {powerSystem ? "新建力量体系（带可删提示）" : `新建${kind}`}
           </button>
         </div>
       </div>
+
+      {kind === "世界观" && (
+        <div className="subtabs">
+          <button className={`subtab ${!categoryFilter ? "active" : ""}`} onClick={() => onWorldviewCategoryChange?.("")}>全部词条</button>
+          <button className={`subtab ${powerSystem ? "active" : ""}`} onClick={() => onWorldviewCategoryChange?.(POWER_SYSTEM_CATEGORY)}>力量体系</button>
+        </div>
+      )}
 
       <PendingZone
         label={`待打磨的${kind}`}
@@ -301,9 +328,9 @@ export default function NoteList({
       {error && <div className="error-box">{error}</div>}
       {loading && <p className="hint">正在读取……</p>}
 
-      {!loading && !error && notes.length === 0 && (
+      {!loading && !error && visibleNotes.length === 0 && (
         <div className="empty-state">
-          <p>还没有{kind}。</p>
+          <p>还没有{powerSystem ? "力量体系词条" : kind}。</p>
           <p className="hint">新建一篇，或直接在 Obsidian 里往 构思/{kind}/ 丢 .md 文件。</p>
         </div>
       )}
@@ -329,15 +356,6 @@ export default function NoteList({
                 >
                   待打磨
                 </button>
-                {kind === "人物" && onChat && (
-                  <button
-                    className="btn small"
-                    title="开一个与 TA 的 AI 对话找灵感（小传＋关系＋读者遐想（类型圈）当人格底座）"
-                    onClick={() => onChat(note.name)}
-                  >
-                    跟 TA 聊
-                  </button>
-                )}
                 {kind === "矛盾" && (
                   <button
                     className="btn small"
@@ -346,6 +364,15 @@ export default function NoteList({
                     onClick={() => void promote(note)}
                   >
                     {promoting === note.path ? "正在提…" : "提为单元"}
+                  </button>
+                )}
+                {kind === "世界观" && note.category === "地理" && (
+                  <button
+                    className="btn small"
+                    title="先查看将创建与备份的文件位置，再决定是否升级为地图或地域"
+                    onClick={() => setUpgrading(note)}
+                  >
+                    升级为地图／地域
                   </button>
                 )}
               </>
@@ -372,6 +399,18 @@ export default function NoteList({
           }}
           onDeleted={() => {
             setEditing(null);
+            onChanged();
+            void scan();
+          }}
+        />
+      )}
+      {upgrading && (
+        <GeoUpgradeDialog
+          project={project}
+          source={upgrading}
+          onClose={() => setUpgrading(null)}
+          onUpgraded={() => {
+            setUpgrading(null);
             onChanged();
             void scan();
           }}

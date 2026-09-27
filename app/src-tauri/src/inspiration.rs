@@ -12,12 +12,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_yaml::Value;
 
 use crate::book_file::{
-    map_list, frontmatter_mapping, has_md_extension, is_hidden, map_scalar, push_split,
-    read_text, sanitize_file_name, set_map_list, set_map_scalar, split_frontmatter, strip_bom,
+    frontmatter_mapping, has_md_extension, is_hidden, map_list, map_scalar, push_split, read_text,
+    sanitize_file_name, set_map_list, set_map_scalar, split_frontmatter, strip_bom,
     unique_file_path, write_frontmatter,
 };
 
@@ -282,6 +283,22 @@ pub fn save_card(
     draft: &CardDraft,
     prev_path: Option<&Path>,
 ) -> Result<InspirationCard, String> {
+    save_card_with_pending(root, draft, prev_path, false)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedChapter {
+    pub project: crate::project::ProjectEntry,
+    pub chapter: crate::chapter::ChapterEntry,
+}
+
+fn save_card_with_pending(
+    root: &Path,
+    draft: &CardDraft,
+    prev_path: Option<&Path>,
+    pending: bool,
+) -> Result<InspirationCard, String> {
     let title = sanitize_title(&draft.title)?;
     let dir = root.join(LIBRARY_DIR).join(draft.category.name());
     fs::create_dir_all(&dir).map_err(|e| format!("无法创建文件夹 {}：{e}", dir.display()))?;
@@ -297,6 +314,9 @@ pub fn save_card(
     set_map_scalar(&mut map, "来源", draft.source.as_deref());
     set_map_list(&mut map, "关联", &draft.links);
     set_map_scalar(&mut map, "一句话核心", draft.core.as_deref());
+    if pending {
+        map.insert(Value::String("待打磨".to_string()), Value::Bool(true));
+    }
 
     // 改名/换类别先挪再写：挪失败时盘上无变化；挪成功后写失败，
     // 卡片仍在（内容是旧的）——两种失败都不产生重复卡。
@@ -324,6 +344,73 @@ pub fn save_quick_capture(root: &Path, body: &str) -> Result<InspirationCard, St
         body: body.to_string(),
     };
     save_card(root, &draft, None)
+}
+
+/// 写作中的速记：在同一张未分类卡中写入章节关联与待打磨状态。
+pub fn save_linked_quick_capture(
+    root: &Path,
+    project: &Path,
+    chapter: &Path,
+    body: &str,
+) -> Result<InspirationCard, String> {
+    let title = quick_capture_title(body)?;
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|e| format!("无法读取库文件夹：{e}"))?;
+    let canonical_project = project
+        .canonicalize()
+        .map_err(|e| format!("无法读取项目：{e}"))?;
+    let canonical_chapter = chapter
+        .canonicalize()
+        .map_err(|e| format!("当前章节已失效：{e}"))?;
+    if canonical_project.parent()
+        != Some(canonical_root.join(crate::library::PROJECTS_DIR).as_path())
+        || canonical_chapter.parent() != Some(canonical_project.join("正文").as_path())
+        || !has_md_extension(&canonical_chapter)
+    {
+        return Err("章节关联必须指向当前库项目的正文文件".to_string());
+    }
+    let project_name = project.file_name().unwrap().to_string_lossy();
+    let chapter_name = chapter.file_name().unwrap().to_string_lossy();
+    let draft = CardDraft {
+        category: CardCategory::Uncategorized,
+        title,
+        tags: Vec::new(),
+        source: None,
+        links: vec![format!(
+            "章:{}/{}",
+            utf8_percent_encode(&project_name, NON_ALPHANUMERIC),
+            utf8_percent_encode(&chapter_name, NON_ALPHANUMERIC)
+        )],
+        core: None,
+        body: body.to_string(),
+    };
+    save_card_with_pending(root, &draft, None, true)
+}
+
+/// 从便笺关联找回权威章节；删改后失效时返回 None，便笺本身不动。
+pub fn resolve_chapter_link(root: &Path, link: &str) -> Result<Option<LinkedChapter>, String> {
+    let encoded = link.strip_prefix("章:").ok_or("不是章节关联")?;
+    let (project_part, chapter_part) = encoded.split_once('/').ok_or("章节关联格式已损坏")?;
+    if chapter_part.contains('/') {
+        return Err("章节关联格式已损坏".to_string());
+    }
+    let project_name = percent_decode_str(project_part)
+        .decode_utf8()
+        .map_err(|_| "项目名编码已损坏")?;
+    let chapter_name = percent_decode_str(chapter_part)
+        .decode_utf8()
+        .map_err(|_| "章节名编码已损坏")?;
+    let Some(project) = crate::project::scan_projects(root)?
+        .into_iter()
+        .find(|project| project.name == project_name)
+    else {
+        return Ok(None);
+    };
+    let chapter = crate::chapter::scan_chapters(&project.dir)?
+        .into_iter()
+        .find(|chapter| chapter.file_name == chapter_name);
+    Ok(chapter.map(|chapter| LinkedChapter { project, chapter }))
 }
 
 fn quick_capture_title(body: &str) -> Result<String, String> {
@@ -676,7 +763,9 @@ mod tests {
         assert!(card.tags.is_empty());
         assert_eq!(card.source, None);
         assert!(card.links.is_empty());
-        assert!(card.path.ends_with("灵感库/未分类/主角在雨夜捡到一封密信。.md"));
+        assert!(card
+            .path
+            .ends_with("灵感库/未分类/主角在雨夜捡到一封密信。.md"));
     }
 
     #[test]
@@ -697,6 +786,51 @@ mod tests {
 
         assert!(save_quick_capture(&root, " \n\t ").is_err());
         assert!(scan_inspirations(&root).unwrap().is_empty());
+    }
+
+    #[test]
+    fn 书写速记_关联项目章节并以待打磨便笺重开() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let project = root.join("项目/《大魏读书人》");
+        let chapter = project.join("正文/0007 风雪夜.md");
+        write(&chapter, "写到一半的正文");
+
+        let saved =
+            save_linked_quick_capture(root, &project, &chapter, "边写边想到的伏笔。\n以后再整理")
+                .unwrap();
+        assert_eq!(saved.category, CardCategory::Uncategorized);
+        assert!(saved.pending);
+        assert_eq!(saved.links.len(), 1);
+        let encoded = saved.links[0].strip_prefix("章:").unwrap();
+        let decoded = percent_encoding::percent_decode_str(encoded).decode_utf8_lossy();
+        assert_eq!(decoded, "《大魏读书人》/0007 风雪夜.md");
+        assert_eq!(scan_inspirations(root).unwrap(), vec![saved.clone()]);
+        assert_eq!(fs::read_to_string(chapter).unwrap(), "写到一半的正文");
+        let linked = resolve_chapter_link(root, &saved.links[0])
+            .unwrap()
+            .unwrap();
+        assert_eq!(linked.project.name, "《大魏读书人》");
+        assert_eq!(linked.chapter.ordinal, Some(7));
+        fs::remove_file(&linked.chapter.path).unwrap();
+        assert!(resolve_chapter_link(root, &saved.links[0])
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            scan_inspirations(root).unwrap().len(),
+            1,
+            "失效关联不删便笺"
+        );
+    }
+
+    #[test]
+    fn 书写速记_章节引用失效时拒绝新建卡片() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        let project = root.join("项目/《大魏读书人》");
+        let missing = project.join("正文/0007 风雪夜.md");
+        assert!(save_linked_quick_capture(root, &project, &missing, "先别忘").is_err());
+        assert!(scan_inspirations(root).unwrap().is_empty());
     }
 
     #[test]
@@ -959,7 +1093,11 @@ mod tests {
             scanned.iter().filter(|c| c.pending).count() == 0,
             "读模型里待打磨区为空（前端整个区域不渲染）"
         );
-        assert_eq!(crate::book_file::count_files_recursive(&root), before, "进出待打磨不建副本或便笺库");
+        assert_eq!(
+            crate::book_file::count_files_recursive(&root),
+            before,
+            "进出待打磨不建副本或便笺库"
+        );
         // 状态操作不顶「最近在前」的排序：mtime 复原，卡片回原位置。
         let after = fs::metadata(&card.path).unwrap().modified().unwrap();
         assert_eq!(after, mtime, "切换待打磨不改修改时间（排序键不动）");
@@ -980,8 +1118,13 @@ mod tests {
         assert_eq!(saved.path, card.path, "编辑不挪文件");
         assert!(saved.pending, "保存合并后仍是待打磨");
         assert_eq!(saved.body, "在便笺里改过的正文");
-        assert_eq!(scan_inspirations(&root).unwrap()[0].body, "在便笺里改过的正文");
-        assert!(fs::read_to_string(&card.path).unwrap().contains("待打磨: true"));
+        assert_eq!(
+            scan_inspirations(&root).unwrap()[0].body,
+            "在便笺里改过的正文"
+        );
+        assert!(fs::read_to_string(&card.path)
+            .unwrap()
+            .contains("待打磨: true"));
 
         // 改名/换类别的编辑同样带状态走（底图取旧位置）。
         d.title = "换个名字".to_string();
@@ -995,20 +1138,36 @@ mod tests {
     fn 待打磨_旧内容与手写false_按普通内容() {
         let root = TempDir::new().unwrap().path().to_path_buf();
         // 旧内容：没有该键。
-        write(&root.join("灵感库/故事卡/老卡.md"), "---\n标签: [掉马甲]\n---\n\n旧正文");
+        write(
+            &root.join("灵感库/故事卡/老卡.md"),
+            "---\n标签: [掉马甲]\n---\n\n旧正文",
+        );
         // 手写 false：不算待打磨，键值原样保留。
-        write(&root.join("灵感库/故事卡/手写卡.md"), "---\n待打磨: false\n---\n\n手写正文");
+        write(
+            &root.join("灵感库/故事卡/手写卡.md"),
+            "---\n待打磨: false\n---\n\n手写正文",
+        );
 
         let cards = scan_inspirations(&root).unwrap();
         assert!(cards.iter().all(|c| !c.pending), "旧内容按普通内容处理");
         let 手写卡 = cards.iter().find(|c| c.title == "手写卡").unwrap();
-        assert!(fs::read_to_string(&手写卡.path)
-            .unwrap()
-            .contains("待打磨: false"), "不认识的值不改动");
+        assert!(
+            fs::read_to_string(&手写卡.path)
+                .unwrap()
+                .contains("待打磨: false"),
+            "不认识的值不改动"
+        );
 
         // 手写 false 的卡再进入：true 覆盖；退出：整键移除。
         crate::book_file::set_pending(&手写卡.path, true).unwrap();
-        assert!(scan_inspirations(&root).unwrap().iter().find(|c| c.title == "手写卡").unwrap().pending);
+        assert!(
+            scan_inspirations(&root)
+                .unwrap()
+                .iter()
+                .find(|c| c.title == "手写卡")
+                .unwrap()
+                .pending
+        );
         crate::book_file::set_pending(&手写卡.path, false).unwrap();
         let text = fs::read_to_string(&手写卡.path).unwrap();
         assert!(!text.contains("待打磨"), "{text}");
@@ -1026,7 +1185,10 @@ mod tests {
         assert!(scan_inspirations(&root).unwrap()[0].pending);
 
         // 损坏头与保存同一口径：整文件入正文、重建头，内容不丢。
-        write(&root.join("灵感库/未分类/坏头.md"), "---\n{{{{不是 yaml\n---\n\n正文在下面");
+        write(
+            &root.join("灵感库/未分类/坏头.md"),
+            "---\n{{{{不是 yaml\n---\n\n正文在下面",
+        );
         crate::book_file::set_pending(&root.join("灵感库/未分类/坏头.md"), true).unwrap();
         let scanned = scan_inspirations(&root).unwrap();
         let 坏头 = scanned.iter().find(|c| c.title == "坏头").unwrap();

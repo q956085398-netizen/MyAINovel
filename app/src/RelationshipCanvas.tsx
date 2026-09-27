@@ -187,12 +187,15 @@ export default function RelationshipCanvas({
    *  保存不会把画不出来的边悄悄丢掉。 */
   const save = useCallback(
     async (table: RelationshipTable) => {
-      const nextView = await invoke<RelationshipView>("save_relationships", { project, table });
+      const nextView = await invoke<RelationshipView>("save_relationships", {
+        project,
+        table: { ...table, fingerprint: view?.fingerprint ?? null },
+      });
       setView(nextView);
       onChanged();
       return nextView;
     },
-    [project, onChanged],
+    [project, onChanged, view?.fingerprint],
   );
 
   const layoutData = useMemo(() => layout(persons), [persons]);
@@ -640,7 +643,7 @@ interface PromoteDialogProps {
 }
 
 /** 选中数人「提为矛盾」（工单 #8 §6.1）：只预填人名与边，不生成剧情内容。 */
-function PromoteDialog({ names, project, onClose, onDone }: PromoteDialogProps) {
+export function PromoteDialog({ names, project, onClose, onDone }: PromoteDialogProps) {
   const [name, setName] = useState(names.join("·"));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

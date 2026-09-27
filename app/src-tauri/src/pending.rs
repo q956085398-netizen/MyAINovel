@@ -53,9 +53,7 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    use crate::expectation::{
-        annotate_expectation, KIND_EXPECTATION, KIND_GOAL, HORIZON_SHORT,
-    };
+    use crate::expectation::{annotate_expectation, HORIZON_SHORT, KIND_EXPECTATION, KIND_GOAL};
     use crate::foreshadow::{annotate_foreshadow, recover_foreshadow, RECOVERY_FINAL};
 
     fn write(path: &std::path::Path, content: &str) {
@@ -95,7 +93,15 @@ mod tests {
         // 伏笔埋在第 1 章 → 距 30 章已 29 章未收（≥20 超期）。
         annotate_foreshadow(&p, "黄铜钥匙", 1, "他摸了摸口袋里的黄铜钥匙").unwrap();
         // 短档期待线埋在第 20 章 → 距 30 章已 10 章未兑现（短档阈值 8，超期）。
-        annotate_expectation(&p, "主角何时亮出金手指", 20, "第20章的正文", KIND_EXPECTATION, HORIZON_SHORT).unwrap();
+        annotate_expectation(
+            &p,
+            "主角何时亮出金手指",
+            20,
+            "第20章的正文",
+            KIND_EXPECTATION,
+            HORIZON_SHORT,
+        )
+        .unwrap();
         // 长档目标线埋在第 29 章 → 只过 1 章，不超期，不该出现。
         annotate_expectation(&p, "打上界", 29, "第29章的正文", KIND_GOAL, "长").unwrap();
 
@@ -127,7 +133,10 @@ mod tests {
     fn 线表坏了_错误上抛不吞() {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
-        write(&crate::foreshadow::foreshadow_path(&p), "顶层不是列表: true\n");
+        write(
+            &crate::foreshadow::foreshadow_path(&p),
+            "顶层不是列表: true\n",
+        );
         assert!(project_pending(&p).is_err());
     }
 

@@ -1,3 +1,5 @@
+import { useSearchDestination } from "./globalSearchNavigation";
+import { chapterInspirationLink } from "./chapterInspirationLink";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -20,16 +22,22 @@ import ContentSurface from "./ContentSurface";
 import PendingZone from "./PendingZone";
 import SearchHighlight from "./SearchHighlight";
 import { usePendingToggle } from "./pendingToggle";
+import { useLibrarySession } from "./librarySession";
 import {
   cardMatchesQuery,
   CONTENT_SURFACE_STORAGE_KEY,
   contentCardDomId,
   readCollapsedCardPaths,
+  serializeCollapsedCardPaths,
   shouldExpandContentCard,
-  toggleCollapsedCardPath,
 } from "./contentSurfaceState";
 
 const INSPIRATION_SURFACE = "inspiration";
+
+function linkLabel(link: string): string {
+  const chapter = chapterInspirationLink(link);
+  return chapter ? `${chapter.project} / ${chapter.fileName}` : link;
+}
 
 function formatCount(n: number): string {
   return n.toLocaleString("zh-Hans-CN");
@@ -200,7 +208,7 @@ function InspirationCardItem({
               title="打开关联的卡片或拆书稿"
               onClick={() => void onOpenLink(link)}
             >
-              <SearchHighlight text={link} query={searchQuery} />
+              <SearchHighlight text={linkLabel(link)} query={searchQuery} />
             </button>
           ))}
         </p>
@@ -222,6 +230,7 @@ interface InspirationLibraryProps {
   onOpenBook: (book: BookEntry) => void;
   /** 「关联」里的项目去向（《书名》/名字）→ 打开该项目的页签；给出人名则落到画布。 */
   onOpenProject: (project: ProjectEntry, tab?: ProjectTab, focus?: string) => void;
+  onOpenChapter: (project: ProjectEntry, path: string) => void;
   /** 转生时没有项目可去：切到「构思」板块新建。 */
   onGoIdeation: () => void;
   /** 侧栏真实待办点卡片：直接打开这张灵感卡。 */
@@ -237,6 +246,7 @@ export default function InspirationLibrary({
   onCreateLibrary,
   onOpenBook,
   onOpenProject,
+  onOpenChapter,
   onGoIdeation,
   openCard,
   onCardOpened,
@@ -265,21 +275,51 @@ export default function InspirationLibrary({
     target: TransmuteTarget;
   } | null>(null);
 
+  const destination = useSearchDestination();
+  const librarySession = useLibrarySession();
+  useEffect(() => {
+    if (destination?.hit.kind !== "灵感" || !libraryPath) return;
+    let cancelled = false;
+    const session = librarySession.id;
+    void invoke<InspirationCard[]>("scan_inspirations", { root: libraryPath }).then((fresh) => {
+      if (cancelled || !librarySession.isCurrent(session)) return;
+      setCards(fresh);
+      const card = fresh.find((card) => card.path === destination.hit.path);
+      if (!card) { setError("灵感已移动或删除，请重新搜索。"); return; }
+      setActiveCategory(card.category); setQuery("");
+      setEditing({ draft: card, prevPath: card.path });
+    }).catch((e) => { if (!cancelled && librarySession.isCurrent(session)) setError(errMsg(e)); });
+    return () => { cancelled = true; };
+  }, [destination, libraryPath, librarySession]);
+
   const scan = useCallback(async (root: string) => {
+    const session = librarySession.id;
     setScanning(true);
     setError(null);
     try {
-      setCards(await invoke<InspirationCard[]>("scan_inspirations", { root }));
+      const result = await invoke<InspirationCard[]>("scan_inspirations", { root });
+      if (!librarySession.isCurrent(session)) return;
+      setCards(result);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       setCards([]);
       setError(`扫描失败：${errMsg(e)}`);
     } finally {
-      setScanning(false);
+      if (librarySession.isCurrent(session)) setScanning(false);
     }
-  }, []);
+  }, [librarySession]);
 
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);
+  }, [libraryPath, scan]);
+
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const change = event as CustomEvent<{ root: string }>;
+      if (libraryPath && change.detail?.root === libraryPath) void scan(libraryPath);
+    };
+    window.addEventListener("gongbi:inspirations-changed", onChanged);
+    return () => window.removeEventListener("gongbi:inspirations-changed", onChanged);
   }, [libraryPath, scan]);
 
   useEffect(() => {
@@ -295,12 +335,32 @@ export default function InspirationLibrary({
     }, [libraryPath, scan]),
   );
 
+
   /** 关联跳转：卡片标题 → 打开卡片；「《书名》/名字」（转生去向）→ 打开
    *  该项目的对应页签（先单元、再人物、再矛盾/世界观/开头，工单 #8 §五）；
    *  拆书稿书名 → 打开拆书稿。 */
   async function openLink(text: string) {
     if (!libraryPath) return;
+    const session = librarySession.id;
+    const isCurrent = () => librarySession.isCurrent(session);
     const t = text.trim();
+    if (t.startsWith("章:")) {
+      try {
+        const linked = await invoke<{ project: ProjectEntry; chapter: { path: string } } | null>(
+          "resolve_chapter_inspiration_link", { root: libraryPath, link: t },
+        );
+        if (!isCurrent()) return;
+        if (linked) {
+          onOpenChapter(linked.project, linked.chapter.path);
+          return;
+        }
+        window.alert(`关联的章节「${linkLabel(t)}」已失效，便笺仍保留。`);
+      } catch (e) {
+        if (!isCurrent()) return;
+        window.alert(`查找章节关联失败：${errMsg(e)}`);
+      }
+      return;
+    }
     const card = cards.find((c) => c.title === t);
     if (card) {
       setEditing({ draft: card, prevPath: card.path });
@@ -312,6 +372,7 @@ export default function InspirationLibrary({
         const title = stripBookMarks(t.slice(0, slash));
         const name = t.slice(slash + 1).trim();
         const projects = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
+        if (!isCurrent()) return;
         const project = projects.find(
           (p) => p.title === title || p.name === title || p.name === `《${title}》`,
         );
@@ -321,6 +382,7 @@ export default function InspirationLibrary({
           // 同名歧义由这个固定次序裁决。
           for (const kind of ["单元", "人物", "矛盾", "世界观", "开头"] as const) {
             const notes = await invoke<NoteEntry[]>("scan_notes", { project: project.dir, kind });
+            if (!isCurrent()) return;
             if (notes.some((n) => n.name === name)) {
               onOpenProject(project, kind, kind === "人物" ? name : undefined);
               return;
@@ -334,6 +396,7 @@ export default function InspirationLibrary({
         }
       }
       const books = await invoke<BookEntry[]>("scan_library", { root: libraryPath });
+      if (!isCurrent()) return;
       const book = books.find((b) => b.name === t || b.meta.title === t);
       if (book) {
         onOpenBook(book);
@@ -341,6 +404,7 @@ export default function InspirationLibrary({
       }
       window.alert(`没有找到「${t}」对应的灵感卡片、构思项目或拆书稿。`);
     } catch (e) {
+      if (!isCurrent()) return;
       window.alert(`查找关联失败：${errMsg(e)}`);
     }
   }
@@ -368,18 +432,21 @@ export default function InspirationLibrary({
 
   async function saveQuickCapture() {
     if (!libraryPath || !quickCapture.trim() || capturing) return;
+    const session = librarySession.id;
     setCapturing(true);
     try {
       await invoke<InspirationCard>("capture_inspiration", {
         root: libraryPath,
         body: quickCapture,
       });
+      if (!librarySession.isCurrent(session)) return;
       setQuickCapture("");
       await scan(libraryPath);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`灵感速记保存失败：${errMsg(e)}`);
     } finally {
-      setCapturing(false);
+      if (librarySession.isCurrent(session)) setCapturing(false);
     }
   }
 
@@ -431,23 +498,37 @@ export default function InspirationLibrary({
   }, [listed, polishing, unclassified, query]);
 
   useEffect(() => {
-    if (!query.trim()) return;
-    const firstMatch = visible[0];
+    const firstMatch = [...polishing, ...unclassified, ...listed].find((card) =>
+      searchMatches.has(card.path),
+    );
     if (!firstMatch) return;
     const frame = requestAnimationFrame(() => {
       const cardElement = document.getElementById(contentCardDomId(firstMatch.path));
-      cardElement?.scrollIntoView({ block: "center" });
+      const matchElement = cardElement?.querySelector<HTMLElement>("mark[data-search-hit='true']");
+      (matchElement ?? cardElement)?.scrollIntoView({
+        block: "center",
+      });
     });
     return () => cancelAnimationFrame(frame);
-  }, [query, visible]);
-
-  useEffect(() => setExpandedSearchHits(new Set()), [query, activeCategory]);
+  }, [listed, polishing, unclassified, searchMatches]);
 
   function toggleCollapsed(path: string) {
-    setCollapsedCards((current) =>
-      toggleCollapsedCardPath(current, path, INSPIRATION_SURFACE),
-    );
+    setCollapsedCards((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      localStorage.setItem(
+        CONTENT_SURFACE_STORAGE_KEY,
+        serializeCollapsedCardPaths(
+          localStorage.getItem(CONTENT_SURFACE_STORAGE_KEY),
+          INSPIRATION_SURFACE,
+          next,
+        ),
+      );
+      return next;
+    });
   }
+  useEffect(() => setExpandedSearchHits(new Set()), [query, activeCategory]);
 
   return (
     <div className="page inspiration-library">

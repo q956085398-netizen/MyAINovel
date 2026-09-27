@@ -76,8 +76,8 @@ pub struct StoryLine {
     pub name: String,
     pub is_main: bool,
     pub milestones: Vec<Milestone>,
-    /// Obsidian 手补字段只在磁盘往返，不成为应用表单字段。
-    #[serde(skip, default)]
+    /// 未知字段穿过界面保存往返，再由主线 YAML 序列化器写回。
+    #[serde(default)]
     pub extra: Mapping,
 }
 
@@ -89,8 +89,20 @@ pub struct Milestone {
     pub reader_feeling: Option<String>,
     pub units: Vec<String>,
     pub note: Option<String>,
-    #[serde(skip, default)]
+    #[serde(default)]
+    pub pending: bool,
+    /// 当前主线表里的原始位置，只用于本次操作定位，不是持久身份。
+    #[serde(default)]
+    pub source: Option<MilestoneSource>,
+    #[serde(default)]
     pub extra: Mapping,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MilestoneSource {
+    pub line_index: usize,
+    pub milestone_index: usize,
 }
 
 fn mainlines_path(project: &Path) -> std::path::PathBuf {
@@ -121,6 +133,14 @@ pub fn read_mainlines(project: &Path) -> Result<MainlinePlan, String> {
     // 外部手写文件也遵循同一展示纪律：有内容时总高亮第一条主线，
     // 不在读取时回写，仍由作者下一次保存时落盘确认。
     ensure_one_mainline(&mut lines);
+    for (line_index, line) in lines.iter_mut().enumerate() {
+        for (milestone_index, milestone) in line.milestones.iter_mut().enumerate() {
+            milestone.source = Some(MilestoneSource {
+                line_index,
+                milestone_index,
+            });
+        }
+    }
     Ok(MainlinePlan {
         lines,
         fingerprint: Some(crate::book_file::content_fingerprint(&bytes).to_string()),
@@ -175,8 +195,22 @@ fn milestone_from_value(
         reader_feeling: take_scalar(&mut map, "读者感受"),
         units: take_list(&mut map, "单元"),
         note: take_scalar(&mut map, "备注"),
+        pending: take_pending(&mut map),
+        source: None,
         extra: map,
     })
+}
+
+fn take_pending(map: &mut Mapping) -> bool {
+    let key = Value::String("待打磨".into());
+    match map.get(&key) {
+        Some(Value::Bool(pending)) => {
+            let pending = *pending;
+            map.remove(&key);
+            pending
+        }
+        _ => false,
+    }
 }
 
 fn take_scalar(map: &mut Mapping, key: &str) -> Option<String> {
@@ -259,6 +293,69 @@ pub fn save_mainlines(
     })
 }
 
+/// 只切换既有里程碑上的待打磨键。整表内容指纹保证传来的原始位置仍
+/// 指向同一条目；外部编辑或重排后返回冲突，绝不按陈旧索引写入。
+pub fn set_milestone_pending(
+    project: &Path,
+    source: &MilestoneSource,
+    expected_fingerprint: &str,
+    pending: bool,
+) -> Result<crate::book_file::SaveResult, String> {
+    let path = mainlines_path(project);
+    let bytes = fs::read(&path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("{} 已不存在，请重新载入主线图", path.display())
+        } else {
+            format!("无法读取文件 {}：{error}", path.display())
+        }
+    })?;
+    let disk_fingerprint = crate::book_file::content_fingerprint(&bytes).to_string();
+    if disk_fingerprint != expected_fingerprint {
+        return Ok(crate::book_file::SaveResult::Conflict);
+    }
+
+    let mut value: Value = serde_yaml::from_slice(&bytes)
+        .map_err(|error| format!("无法解析 {}，请修复后重新载入：{error}", path.display()))?;
+    let Value::Sequence(lines) = &mut value else {
+        return Err(format!("{} 应为主线列表，请重新载入", path.display()));
+    };
+    let line = lines
+        .get_mut(source.line_index)
+        .ok_or_else(|| format!("里程碑定位已失效，请重新载入 {}", path.display()))?;
+    let Value::Mapping(line) = line else {
+        return Err(format!("目标情节线格式异常，请重新载入 {}", path.display()));
+    };
+    let milestones_key = Value::String("里程碑".into());
+    let milestones = line
+        .get_mut(&milestones_key)
+        .ok_or_else(|| format!("目标里程碑已不存在，请重新载入 {}", path.display()))?;
+    let Value::Sequence(milestones) = milestones else {
+        return Err(format!(
+            "目标情节线的里程碑列表损坏，请重新载入 {}",
+            path.display()
+        ));
+    };
+    let milestone = milestones
+        .get_mut(source.milestone_index)
+        .ok_or_else(|| format!("里程碑定位已失效，请重新载入 {}", path.display()))?;
+    let Value::Mapping(milestone) = milestone else {
+        return Err(format!("目标里程碑格式异常，请重新载入 {}", path.display()));
+    };
+
+    let pending_key = Value::String("待打磨".into());
+    if pending {
+        milestone.insert(pending_key, Value::Bool(true));
+    } else {
+        milestone.remove(&pending_key);
+    }
+    let text =
+        serde_yaml::to_string(&value).map_err(|error| format!("无法生成主线.yaml：{error}"))?;
+    crate::book_file::write_text_atomic(&path, &text)?;
+    Ok(crate::book_file::SaveResult::Saved {
+        fingerprint: crate::book_file::content_fingerprint(text.as_bytes()).to_string(),
+    })
+}
+
 fn ensure_one_mainline(lines: &mut [StoryLine]) {
     let Some(first_main) = lines
         .iter()
@@ -313,6 +410,12 @@ fn milestone_to_value(milestone: &Milestone) -> Result<Value, String> {
     } else {
         map.insert(Value::String("单元".into()), Value::Sequence(units));
     }
+    let pending_key = Value::String("待打磨".into());
+    if milestone.pending {
+        map.insert(pending_key, Value::Bool(true));
+    } else if matches!(map.get(&pending_key), Some(Value::Bool(_))) {
+        map.remove(&pending_key);
+    }
     Ok(Value::Mapping(map))
 }
 
@@ -351,7 +454,31 @@ pub struct BridgeDraft {
     pub key_turn: Option<String>,
     pub expectation_hook: Option<String>,
     pub beat_plan: Option<String>,
+    #[serde(default)]
+    pub type_solutions: Vec<BridgeTypeSolution>,
+    #[serde(default)]
+    pub type_solutions_fingerprint: Option<String>,
     pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BridgeTypeSolution {
+    pub kind: String,
+    pub solution: String,
+    /// 只经 IPC 往返，不写入创作文件。编辑/删除后仍能找到原条目及未知键。
+    #[serde(default)]
+    pub source: Option<BridgePairSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BridgePairSource {
+    pub index: usize,
+    pub fingerprint: String,
+}
+
+fn pair_fingerprint(value: &Value) -> Result<String, String> {
+    let text = serde_yaml::to_string(value).map_err(|e| format!("无法读取类型解法条目：{e}"))?;
+    Ok(crate::book_file::content_fingerprint(text.as_bytes()).to_string())
 }
 
 impl BridgeDraft {
@@ -367,6 +494,7 @@ impl BridgeDraft {
 #[serde(rename_all = "camelCase")]
 pub struct Bridge {
     pub path: std::path::PathBuf,
+    pub pending: bool,
     #[serde(flatten)]
     pub draft: BridgeDraft,
 }
@@ -444,25 +572,36 @@ pub fn find_chapter_intent(project: &Path, ordinal: u32) -> Result<ChapterIntent
         .filter(|bridge| bridge.unit.as_deref() == Some(unit_brief.name.as_str()))
         .collect::<Vec<_>>();
     let mut warnings = chapter_intent_warnings(unit_brief, &bridges);
-    let mut matches = bridges
-        .into_iter()
-        .filter(|bridge| {
-            matches!(
-                (bridge.start_chapter, bridge.end_chapter),
-                (Some(start), Some(end)) if start <= end && start <= ordinal && ordinal <= end
-            )
-        })
-        .collect::<Vec<_>>();
-    matches.sort_by(compare_bridge_order);
+    let matches = bridges_for_chapter(&bridges, &unit_brief.name, ordinal);
     if matches.len() > 1 {
         warnings.push("多个桥段覆盖本章，按桥段次序显示最靠前的一项。".into());
     }
 
     Ok(ChapterIntent {
         unit,
-        bridge: matches.into_iter().next(),
+        bridge: matches.first().map(|bridge| (*bridge).clone()),
         warnings,
     })
+}
+
+/// 章节卡与书写侧栏共用的桥段选择规则：同章重叠时按人工次序取首项。
+pub(crate) fn bridges_for_chapter<'a>(
+    bridges: &'a [Bridge],
+    unit_name: &str,
+    ordinal: u32,
+) -> Vec<&'a Bridge> {
+    let mut matches = bridges
+        .iter()
+        .filter(|bridge| {
+            bridge.unit.as_deref() == Some(unit_name)
+                && matches!(
+                    (bridge.start_chapter, bridge.end_chapter),
+                    (Some(start), Some(end)) if start <= end && start <= ordinal && ordinal <= end
+                )
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(|left, right| compare_bridge_order(left, right));
+    matches
 }
 
 fn chapter_intent_warnings(unit: &crate::chapter::UnitBrief, bridges: &[Bridge]) -> Vec<String> {
@@ -513,9 +652,12 @@ fn read_bridge(path: &Path) -> Bridge {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default(),
     );
+    // 无表也是一次载入状态，防止编辑期间外部新增表被空草稿抹掉。
+    draft.type_solutions_fingerprint = pair_fingerprint(&Value::Null).ok();
     let Ok(raw) = crate::book_file::read_text(path) else {
         return Bridge {
             path: path.to_path_buf(),
+            pending: false,
             draft,
         };
     };
@@ -524,6 +666,7 @@ fn read_bridge(path: &Path) -> Bridge {
         draft.body = raw.to_string();
         return Bridge {
             path: path.to_path_buf(),
+            pending: false,
             draft,
         };
     };
@@ -531,6 +674,7 @@ fn read_bridge(path: &Path) -> Bridge {
         draft.body = raw.to_string();
         return Bridge {
             path: path.to_path_buf(),
+            pending: false,
             draft,
         };
     };
@@ -542,9 +686,14 @@ fn read_bridge(path: &Path) -> Bridge {
     draft.key_turn = crate::book_file::map_scalar(&map, "关键转折");
     draft.expectation_hook = crate::book_file::map_scalar(&map, "期待钩子");
     draft.beat_plan = crate::book_file::map_scalar(&map, "章节拍安排");
+    draft.type_solutions = read_bridge_type_solutions(&map).unwrap_or_default();
+    if let Some(value) = map.get(Value::String("类型解法".into())) {
+        draft.type_solutions_fingerprint = pair_fingerprint(value).ok();
+    }
     draft.body = body;
     Bridge {
         path: path.to_path_buf(),
+        pending: crate::book_file::is_pending(&map),
         draft,
     }
 }
@@ -563,8 +712,67 @@ pub fn save_bridge(
     let base = prev_path
         .filter(|previous| *previous != path)
         .unwrap_or(&path);
-    let mut map = crate::book_file::frontmatter_mapping(base).unwrap_or_default();
+    let mut map = if base.exists() {
+        let raw = crate::book_file::read_text(base)?;
+        match crate::book_file::split_frontmatter(crate::book_file::strip_bom(&raw)) {
+            Some((yaml, _)) => match serde_yaml::from_str::<Value>(&yaml) {
+                Ok(Value::Mapping(map)) => map,
+                _ => return Err("桥段结构无法读取，拒绝覆盖".into()),
+            },
+            None => Mapping::new(),
+        }
+    } else {
+        Mapping::new()
+    };
+    read_bridge_type_solutions(&map)?;
+    if let Some(expected) = &draft.type_solutions_fingerprint {
+        let current = map
+            .get(Value::String("类型解法".into()))
+            .unwrap_or(&Value::Null);
+        if pair_fingerprint(current)? != *expected {
+            return Err("类型解法已被外部修改，请重新打开桥段".into());
+        }
+    }
     apply_bridge_draft(&mut map, draft);
+    let previous_pairs = map
+        .get(Value::String("类型解法".into()))
+        .and_then(Value::as_sequence)
+        .cloned()
+        .unwrap_or_default();
+    let mut pairs = Vec::new();
+    for pair in &draft.type_solutions {
+        if pair.source.is_none() && pair.kind.trim().is_empty() && pair.solution.trim().is_empty() {
+            continue;
+        }
+        let mut item = if let Some(source) = &pair.source {
+            let original = previous_pairs
+                .get(source.index)
+                .ok_or("类型解法已被外部修改，请重新打开桥段")?;
+            if pair_fingerprint(original)? != source.fingerprint {
+                return Err("类型解法已被外部修改，请重新打开桥段".into());
+            }
+            original
+                .as_mapping()
+                .cloned()
+                .ok_or("无法读取原类型解法条目")?
+        } else {
+            Mapping::new()
+        };
+        item.insert(
+            Value::String("类型".into()),
+            Value::String(pair.kind.clone()),
+        );
+        item.insert(
+            Value::String("解法".into()),
+            Value::String(pair.solution.clone()),
+        );
+        pairs.push(Value::Mapping(item));
+    }
+    if pairs.is_empty() {
+        map.remove(Value::String("类型解法".into()));
+    } else {
+        map.insert(Value::String("类型解法".into()), Value::Sequence(pairs));
+    }
     if let Some(previous) = prev_path {
         if previous != path {
             fs::rename(previous, &path)
@@ -573,6 +781,39 @@ pub fn save_bridge(
     }
     crate::book_file::write_frontmatter(&path, map, &draft.body)?;
     Ok(read_bridge(&path))
+}
+
+fn read_bridge_type_solutions(map: &Mapping) -> Result<Vec<BridgeTypeSolution>, String> {
+    let Some(value) = map.get(Value::String("类型解法".into())) else {
+        return Ok(Vec::new());
+    };
+    let items = value
+        .as_sequence()
+        .ok_or("桥段的类型解法应为列表，拒绝覆盖")?;
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let fields = item
+                .as_mapping()
+                .ok_or("桥段的类型解法条目应为对象，拒绝覆盖")?;
+            let text = |key: &str| -> Result<String, String> {
+                match fields.get(Value::String(key.into())) {
+                    None | Some(Value::Null) => Ok(String::new()),
+                    Some(Value::String(value)) => Ok(value.clone()),
+                    _ => Err(format!("桥段类型解法的{key}应为文字，拒绝覆盖")),
+                }
+            };
+            Ok(BridgeTypeSolution {
+                kind: text("类型")?,
+                solution: text("解法")?,
+                source: Some(BridgePairSource {
+                    index,
+                    fingerprint: pair_fingerprint(item)?,
+                }),
+            })
+        })
+        .collect()
 }
 
 fn apply_bridge_draft(map: &mut Mapping, draft: &BridgeDraft) {
@@ -664,6 +905,98 @@ pub fn move_bridge(project: &Path, path: &Path, direction: i32) -> Result<Vec<Br
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn 桥段类型解法与待打磨_保存重开保持正文与未知键() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path();
+        let dir = project.join("构思/桥段");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("夜探.md");
+        fs::write(&path, "---\n待打磨: true\n手补: 保留\n---\n原正文").unwrap();
+        let mut input = serde_json::to_value(BridgeDraft::new("夜探")).unwrap();
+        input["body"] = serde_json::json!("原正文");
+        input["typeSolutions"] = serde_json::json!([
+            {"kind": "自定义爽点", "solution": "借对手之口揭晓"},
+            {"kind": "掉马甲", "solution": ""}
+        ]);
+        let draft: BridgeDraft = serde_json::from_value(input).unwrap();
+        save_bridge(project, &draft, Some(&path)).unwrap();
+        let reopened = serde_json::to_value(&scan_bridges(project).unwrap()[0]).unwrap();
+        assert_eq!(reopened["typeSolutions"][0]["kind"], "自定义爽点");
+        assert_eq!(reopened["typeSolutions"][0]["solution"], "借对手之口揭晓");
+        assert_eq!(reopened["typeSolutions"][1]["kind"], "掉马甲");
+        assert_eq!(reopened["typeSolutions"][1]["solution"], "");
+        assert_eq!(reopened["pending"], true);
+        assert_eq!(reopened["body"], "原正文");
+        assert!(fs::read_to_string(&path).unwrap().contains("手补: 保留"));
+        let before = fs::metadata(&path).unwrap().modified().unwrap();
+        crate::book_file::set_pending(&path, false).unwrap();
+        assert!(!scan_bridges(project).unwrap()[0].pending);
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before);
+        assert_eq!(scan_bridges(project).unwrap()[0].body, "原正文");
+        let mut cleared = draft.clone();
+        cleared.type_solutions.clear();
+        save_bridge(project, &cleared, Some(&path)).unwrap();
+        assert!(scan_bridges(project).unwrap()[0].type_solutions.is_empty());
+        assert!(!fs::read_to_string(&path).unwrap().contains("类型解法:"));
+    }
+
+    #[test]
+    fn 桥段类型解法损坏_保存拒绝覆盖() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("构思/桥段");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("夜探.md");
+        for original in [
+            "---\n类型解法: 不是列表\n---\n保留正文",
+            "---\n类型解法: [坏条目]\n---\n保留正文",
+            "---\n类型解法: [\n---\n保留正文",
+        ] {
+            fs::write(&path, original).unwrap();
+            assert!(save_bridge(tmp.path(), &BridgeDraft::new("夜探"), Some(&path)).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        }
+    }
+
+    #[test]
+    fn 删除首组类型解法_剩余条目保留自己的未知键() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("构思/桥段");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("夜探.md");
+        fs::write(&path, "---\n类型解法:\n- 类型: 甲\n  解法: 一\n  手补: 甲的字段\n- 类型: 乙\n  解法: 二\n  手补: 乙的字段\n---\n正文").unwrap();
+        let mut draft = scan_bridges(tmp.path()).unwrap()[0].draft.clone();
+        draft.type_solutions.remove(0);
+        save_bridge(tmp.path(), &draft, Some(&path)).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("乙的字段"));
+        assert!(!text.contains("甲的字段"));
+        let mut stale = scan_bridges(tmp.path()).unwrap()[0].draft.clone();
+        stale.type_solutions.clear();
+        let external = text.replace("乙的字段", "外部新增说明");
+        fs::write(&path, &external).unwrap();
+        assert!(save_bridge(tmp.path(), &stale, Some(&path)).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), external);
+    }
+
+    #[test]
+    fn 桥段旧空类型解法保留手补_原无表时也保护外部新增() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("构思/桥段");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("夜探.md");
+        fs::write(&path, "---\n类型解法:\n- 手补: 待研究\n---\n正文").unwrap();
+        let mut draft = scan_bridges(tmp.path()).unwrap()[0].draft.clone();
+        draft.body = "新正文".into();
+        save_bridge(tmp.path(), &draft, Some(&path)).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("待研究"));
+        fs::write(&path, "旧桥段无表").unwrap();
+        let loaded = scan_bridges(tmp.path()).unwrap()[0].draft.clone();
+        let external = "---\n类型解法:\n- 类型: 外部新增\n---\n旧桥段无表";
+        fs::write(&path, external).unwrap();
+        assert!(save_bridge(tmp.path(), &loaded, Some(&path)).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), external);
+    }
     use std::fs;
     use tempfile::tempdir;
 
@@ -738,6 +1071,8 @@ mod tests {
                         reader_feeling: None,
                         units: vec!["初入京城".into()],
                         note: None,
+                        pending: false,
+                        source: None,
                         extra: serde_yaml::Mapping::from_iter([(
                             serde_yaml::Value::String("手补说明".into()),
                             serde_yaml::Value::String("保留".into()),
@@ -749,6 +1084,8 @@ mod tests {
                         reader_feeling: Some("痛快".into()),
                         units: vec!["大朝会".into()],
                         note: Some("终局".into()),
+                        pending: false,
+                        source: None,
                         extra: serde_yaml::Mapping::new(),
                     },
                 ],
@@ -762,8 +1099,218 @@ mod tests {
 
         save_mainlines(&project, &plan, false).unwrap();
         let loaded = read_mainlines(&project).unwrap();
-        assert_eq!(loaded.lines, plan.lines);
+        assert_eq!(loaded.lines[0].name, plan.lines[0].name);
+        assert_eq!(
+            loaded.lines[0].milestones[0].title,
+            plan.lines[0].milestones[0].title
+        );
+        assert_eq!(
+            loaded.lines[0].milestones[0].extra,
+            plan.lines[0].milestones[0].extra
+        );
+        assert_eq!(
+            loaded.lines[0].milestones[0].source,
+            Some(MilestoneSource {
+                line_index: 0,
+                milestone_index: 0
+            })
+        );
         assert_eq!(loaded.lines[0].milestones[0].title, "得知冤案");
+    }
+
+    #[test]
+    fn 主线里程碑待打磨_同名精确定位保存退出恢复次序与未知字段() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let path = mainlines_path(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "- 名称: 主线甲\n  主线: true\n  线手补: 甲线字段\n  里程碑:\n    - 标题: 重复标题\n      变化: 从避祸转为追查\n      待打磨: false\n      碑手补: 第一条字段\n    - 标题: 重复标题\n      待打磨: true\n      碑手补: 第二条字段\n- 名称: 支线乙\n  线手补: 乙线字段\n  里程碑:\n    - 标题: 重复标题\n      变化: 找到旧账\n      读者感受: 期待\n      单元: [单元乙]\n      备注: 证据仍有缺口\n      碑手补: 支线字段\n",
+        )
+        .unwrap();
+
+        let loaded = read_mainlines(&project).unwrap();
+        assert!(
+            !loaded.lines[0].milestones[0].pending,
+            "缺失或 false 都是普通状态"
+        );
+        assert!(loaded.lines[0].milestones[1].pending);
+        assert!(!loaded.lines[1].milestones[0].pending);
+        assert_eq!(
+            loaded.lines[0].milestones[0].source,
+            Some(MilestoneSource {
+                line_index: 0,
+                milestone_index: 0
+            })
+        );
+        assert_eq!(
+            loaded.lines[0].milestones[1].source,
+            Some(MilestoneSource {
+                line_index: 0,
+                milestone_index: 1
+            })
+        );
+        assert_eq!(
+            loaded.lines[1].milestones[0].source,
+            Some(MilestoneSource {
+                line_index: 1,
+                milestone_index: 0
+            })
+        );
+
+        let source = loaded.lines[1].milestones[0].source.clone().unwrap();
+        let first_write = set_milestone_pending(
+            &project,
+            &source,
+            loaded.fingerprint.as_deref().unwrap(),
+            true,
+        )
+        .unwrap();
+        assert!(matches!(
+            first_write,
+            crate::book_file::SaveResult::Saved { .. }
+        ));
+        let pending = read_mainlines(&project).unwrap();
+        assert!(
+            pending.lines[1].milestones[0].pending,
+            "只切换支线里的同名里程碑"
+        );
+        assert!(
+            pending.lines[0].milestones[1].pending,
+            "其他同名里程碑保持原状态"
+        );
+        assert_eq!(pending.lines[0].name, "主线甲");
+        assert_eq!(pending.lines[1].name, "支线乙");
+        assert_eq!(pending.lines[1].milestones[0].units, vec!["单元乙"]);
+        assert_eq!(
+            pending.lines[1].milestones[0].note.as_deref(),
+            Some("证据仍有缺口")
+        );
+
+        let wire = serde_json::to_value(&pending).unwrap();
+        let mut edited: MainlinePlan = serde_json::from_value(wire).unwrap();
+        edited.lines[1].milestones[0].note = Some("补齐证人来历".into());
+        save_mainlines(&project, &edited, false).unwrap();
+        let edited = read_mainlines(&project).unwrap();
+        assert!(
+            edited.lines[1].milestones[0].pending,
+            "编辑后仍保留待打磨状态"
+        );
+        assert_eq!(
+            edited.lines[1].milestones[0].note.as_deref(),
+            Some("补齐证人来历")
+        );
+        assert_eq!(
+            edited.lines[0].extra[Value::String("线手补".into())],
+            "甲线字段"
+        );
+        assert_eq!(
+            edited.lines[1].extra[Value::String("线手补".into())],
+            "乙线字段"
+        );
+        assert_eq!(
+            edited.lines[0].milestones[0].extra[Value::String("碑手补".into())],
+            "第一条字段"
+        );
+        assert_eq!(
+            edited.lines[0].milestones[1].extra[Value::String("碑手补".into())],
+            "第二条字段"
+        );
+        assert_eq!(
+            edited.lines[1].milestones[0].extra[Value::String("碑手补".into())],
+            "支线字段"
+        );
+
+        let source = edited.lines[1].milestones[0].source.clone().unwrap();
+        set_milestone_pending(
+            &project,
+            &source,
+            edited.fingerprint.as_deref().unwrap(),
+            false,
+        )
+        .unwrap();
+        let restored = read_mainlines(&project).unwrap();
+        assert!(!restored.lines[1].milestones[0].pending);
+        assert!(restored.lines[0].milestones[1].pending);
+        assert_eq!(restored.lines[0].milestones[0].title, "重复标题");
+        assert_eq!(restored.lines[0].milestones[1].title, "重复标题");
+        assert_eq!(restored.lines[1].milestones[0].title, "重复标题");
+        let value: Value = serde_yaml::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let lines = value.as_sequence().unwrap();
+        let second_line = lines[1].as_mapping().unwrap();
+        let milestones = second_line[Value::String("里程碑".into())]
+            .as_sequence()
+            .unwrap();
+        assert!(!milestones[0]
+            .as_mapping()
+            .unwrap()
+            .contains_key(Value::String("待打磨".into())));
+        assert_eq!(
+            crate::book_file::count_files_recursive(&project),
+            1,
+            "状态操作不建立副本"
+        );
+    }
+
+    #[test]
+    fn 主线里程碑待打磨_表指纹过期时外部重排拒写() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let path = mainlines_path(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "- 名称: 同名线\n  主线: true\n  里程碑:\n    - 标题: 重复标题\n      变化: 第一条\n- 名称: 同名线\n  里程碑:\n    - 标题: 重复标题\n      变化: 第二条\n",
+        )
+        .unwrap();
+        let loaded = read_mainlines(&project).unwrap();
+        let source = loaded.lines[0].milestones[0].source.clone().unwrap();
+        let mut external: Value = serde_yaml::from_slice(&fs::read(&path).unwrap()).unwrap();
+        external.as_sequence_mut().unwrap().swap(0, 1);
+        let external_text = serde_yaml::to_string(&external).unwrap();
+        fs::write(&path, &external_text).unwrap();
+
+        assert!(matches!(
+            set_milestone_pending(
+                &project,
+                &source,
+                loaded.fingerprint.as_deref().unwrap(),
+                true,
+            )
+            .unwrap(),
+            crate::book_file::SaveResult::Conflict
+        ));
+        assert_eq!(fs::read_to_string(&path).unwrap(), external_text);
+        let reloaded = read_mainlines(&project).unwrap();
+        assert_eq!(
+            reloaded.lines[0].milestones[0].change.as_deref(),
+            Some("第二条")
+        );
+        assert!(!reloaded.lines[0].milestones[0].pending);
+    }
+
+    #[test]
+    fn 主线里程碑待打磨_损坏_yaml拒写并保持原文件() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let path = mainlines_path(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let damaged = "- 名称: [损坏的 YAML";
+        fs::write(&path, damaged).unwrap();
+        let fingerprint = crate::book_file::content_fingerprint(damaged.as_bytes()).to_string();
+
+        assert!(set_milestone_pending(
+            &project,
+            &MilestoneSource {
+                line_index: 0,
+                milestone_index: 0
+            },
+            &fingerprint,
+            true,
+        )
+        .is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), damaged);
     }
 
     #[test]
@@ -780,6 +1327,8 @@ mod tests {
                     reader_feeling: None,
                     units: vec![],
                     note: None,
+                    pending: false,
+                    source: None,
                     extra: Mapping::new(),
                 }],
                 extra: Mapping::new(),

@@ -53,14 +53,12 @@ pub fn set_cover(dir: &Path, image: &Path) -> Result<PathBuf, String> {
         .map(|e| e.to_ascii_lowercase())
         .filter(|e| COVER_EXTS.contains(&e.as_str()))
         .ok_or_else(|| "封面只支持 png/jpg/webp 图片".to_string())?;
-    let bytes =
-        fs::read(image).map_err(|e| format!("无法读取图片 {}：{e}", image.display()))?;
+    let bytes = fs::read(image).map_err(|e| format!("无法读取图片 {}：{e}", image.display()))?;
     fs::create_dir_all(dir).map_err(|e| format!("无法创建文件夹 {}：{e}", dir.display()))?;
     for ext in COVER_EXTS {
         let old = dir.join(format!("{COVER_STEM}.{ext}"));
         if old.exists() {
-            fs::remove_file(&old)
-                .map_err(|e| format!("无法删除旧封面 {}：{e}", old.display()))?;
+            fs::remove_file(&old).map_err(|e| format!("无法删除旧封面 {}：{e}", old.display()))?;
         }
     }
     let dest = dir.join(format!("{COVER_STEM}.{ext}"));
@@ -114,7 +112,11 @@ mod tests {
         let dir = tmp.path().join("附件");
         write(&dir.join("封面.PNG"), "大写");
         write(&dir.join("封面.WebP"), "webp");
-        assert_eq!(find_cover(&dir), Some(dir.join("封面.PNG")), "png 仍压过 webp");
+        assert_eq!(
+            find_cover(&dir),
+            Some(dir.join("封面.PNG")),
+            "png 仍压过 webp"
+        );
     }
 
     #[test]

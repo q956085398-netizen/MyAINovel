@@ -26,10 +26,10 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_yaml::{Mapping, Value};
 
 use crate::book_file::{
-    has_md_extension, is_hidden, lossy_yaml_mapping, map_list, map_scalar, map_u32, read_text,
-    read_yaml_mapping, sanitize_file_name, set_map_list, set_map_scalar, set_map_u32,
-    split_frontmatter, strip_bom, unique_file_path, write_frontmatter, write_text_atomic,
-    write_yaml_mapping, frontmatter_mapping,
+    content_fingerprint, frontmatter_mapping, has_md_extension, is_hidden, lossy_yaml_mapping,
+    map_list, map_scalar, map_u32, read_text, read_yaml_mapping, sanitize_file_name, set_map_list,
+    set_map_scalar, set_map_u32, split_frontmatter, strip_bom, unique_file_path, write_frontmatter,
+    write_text_atomic, write_yaml_mapping,
 };
 use crate::library::PROJECTS_DIR;
 
@@ -86,7 +86,8 @@ pub fn scan_projects(root: &Path) -> Result<Vec<ProjectEntry>, String> {
         return Ok(Vec::new());
     }
     let mut out: Vec<ProjectEntry> = Vec::new();
-    let entries = fs::read_dir(&dir).map_err(|e| format!("无法读取文件夹 {}：{e}", dir.display()))?;
+    let entries =
+        fs::read_dir(&dir).map_err(|e| format!("无法读取文件夹 {}：{e}", dir.display()))?;
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() && !is_hidden(&path) {
@@ -103,9 +104,12 @@ pub fn create_project(root: &Path, title: &str) -> Result<ProjectEntry, String> 
     if !root.is_dir() {
         return Err(format!("不是有效的文件夹：{}", root.display()));
     }
-    let title = title.trim().trim_start_matches('《').trim_end_matches('》').trim();
-    let name =
-        sanitize_file_name(title).map_err(|_| "书名不能为空（或只剩符号）".to_string())?;
+    let title = title
+        .trim()
+        .trim_start_matches('《')
+        .trim_end_matches('》')
+        .trim();
+    let name = sanitize_file_name(title).map_err(|_| "书名不能为空（或只剩符号）".to_string())?;
     let dir = root.join(PROJECTS_DIR).join(format!("《{name}》"));
     if dir.exists() {
         return Err(format!("已存在同名项目「{name}」"));
@@ -156,7 +160,9 @@ fn project_entry(dir: &Path) -> ProjectEntry {
 
 /// 文件夹名去《》：书名缺省口径（项目列表与 AI 命令材料共用）。
 pub(crate) fn strip_book_marks(name: &str) -> String {
-    name.trim_start_matches('《').trim_end_matches('》').to_string()
+    name.trim_start_matches('《')
+        .trim_end_matches('》')
+        .to_string()
 }
 
 fn count_md(dir: &Path) -> u32 {
@@ -242,7 +248,8 @@ pub fn write_project_meta(project: &Path, meta: &ProjectMeta) -> Result<(), Stri
     set_map_scalar(&mut map, "章前缀", meta.chapter_prefix.as_deref());
     set_plot_lines(&mut map, &meta.plot_lines);
     set_map_list(&mut map, "地图", &meta.maps);
-    fs::create_dir_all(project).map_err(|e| format!("无法创建文件夹 {}：{e}", project.display()))?;
+    fs::create_dir_all(project)
+        .map_err(|e| format!("无法创建文件夹 {}：{e}", project.display()))?;
     write_yaml_mapping(&path, map)
 }
 
@@ -263,9 +270,8 @@ fn plot_lines_from(map: &Mapping, path: &Path) -> Result<Vec<PlotLine>, String> 
             ));
         };
         let mut extra = item_map.clone();
-        let name = take_scalar(&mut extra, "名").ok_or_else(|| {
-            format!("{} 的「情节线」第 {} 项缺「名」", path.display(), i + 1)
-        })?;
+        let name = take_scalar(&mut extra, "名")
+            .ok_or_else(|| format!("{} 的「情节线」第 {} 项缺「名」", path.display(), i + 1))?;
         out.push(PlotLine {
             name,
             color: take_scalar(&mut extra, "色"),
@@ -290,7 +296,10 @@ fn set_plot_lines(map: &mut Mapping, lines: &[PlotLine]) {
                 Value::String(line.name.trim().to_string()),
             );
             if let Some(color) = trimmed(line.color.as_deref()) {
-                out.insert(Value::String("色".to_string()), Value::String(color.to_string()));
+                out.insert(
+                    Value::String("色".to_string()),
+                    Value::String(color.to_string()),
+                );
             }
             for (k, v) in &line.extra {
                 if let Value::String(ks) = k {
@@ -328,7 +337,9 @@ fn maps_from(map: &Mapping, path: &Path) -> Result<Vec<String>, String> {
 fn take_scalar(map: &mut Mapping, key: &str) -> Option<String> {
     let k = Value::String(key.to_string());
     let value = map.get(&k).cloned()?;
-    let s = crate::book_file::scalar_to_string(&value)?.trim().to_string();
+    let s = crate::book_file::scalar_to_string(&value)?
+        .trim()
+        .to_string();
     if s.is_empty() {
         map.remove(&k);
         return None;
@@ -405,12 +416,62 @@ impl NoteKind {
     }
 }
 
+/// 人物的可选结构摘要；小传、外貌、说话方式与人物弧仍在自由正文。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CharacterProfile {
+    pub image: Option<String>,
+    pub identity: Option<String>,
+    pub age: Option<String>,
+    pub gender: Option<String>,
+    pub traits: Vec<String>,
+    pub goal: Option<String>,
+    pub ability: Option<String>,
+    pub weakness: Option<String>,
+    pub secret: Option<String>,
+}
+
+impl CharacterProfile {
+    fn read(map: &Mapping) -> Self {
+        Self {
+            image: map_scalar(map, "形象图"),
+            identity: map_scalar(map, "一句话身份"),
+            age: map_scalar(map, "年龄或年龄感"),
+            gender: map_scalar(map, "性别"),
+            traits: map_list(map, "性格关键词"),
+            goal: map_scalar(map, "当前目标"),
+            ability: map_scalar(map, "能力"),
+            weakness: map_scalar(map, "弱点或代价"),
+            secret: map_scalar(map, "个人秘密"),
+        }
+    }
+
+    fn apply(&self, map: &mut Mapping) {
+        for (key, value) in [
+            ("形象图", &self.image),
+            ("一句话身份", &self.identity),
+            ("年龄或年龄感", &self.age),
+            ("性别", &self.gender),
+            ("当前目标", &self.goal),
+            ("能力", &self.ability),
+            ("弱点或代价", &self.weakness),
+            ("个人秘密", &self.secret),
+        ] {
+            set_map_scalar(map, key, value.as_deref());
+        }
+        set_map_list(map, "性格关键词", &self.traits);
+    }
+}
+
 /// 笔记保存入参：五类共用一张宽表，落盘时只写本类别的键
 /// （矛盾＝一句话核心/类型/来源/关联/状态；单元＝核心矛盾/类型/情绪目标/单元区间；
-/// 人物＝分组/别名；世界观＝类别；开头＝状态）。
+/// 人物＝结构摘要/别名（分组只读兼容）；世界观＝类别；开头＝状态）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteDraft {
+    /// 编辑框载入时的内容版本；旧命令入参兼容缺省。
+    #[serde(default)]
+    pub fingerprint: Option<String>,
     pub kind: NoteKind,
     /// 标题＝文件名（矛盾/单元名、人名、词条名、版本名）。
     pub name: String,
@@ -421,6 +482,8 @@ pub struct NoteDraft {
     pub status: Option<String>,
     pub group: Option<String>,
     pub aliases: Vec<String>,
+    #[serde(default)]
+    pub character: CharacterProfile,
     pub category: Option<String>,
     /// 单元专用的整体情绪承诺；与桥段的局部情绪曲线并列，不相互推导。
     pub emotion_goal: Option<String>,
@@ -433,6 +496,7 @@ pub struct NoteDraft {
 impl NoteDraft {
     pub fn new(kind: NoteKind, name: impl Into<String>) -> NoteDraft {
         NoteDraft {
+            fingerprint: None,
             kind,
             name: name.into(),
             core: None,
@@ -442,6 +506,7 @@ impl NoteDraft {
             status: None,
             group: None,
             aliases: Vec::new(),
+            character: CharacterProfile::default(),
             category: None,
             emotion_goal: None,
             start_chapter: None,
@@ -454,6 +519,7 @@ impl NoteDraft {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteEntry {
+    pub fingerprint: String,
     pub path: PathBuf,
     pub kind: NoteKind,
     pub name: String,
@@ -464,6 +530,7 @@ pub struct NoteEntry {
     pub status: Option<String>,
     pub group: Option<String>,
     pub aliases: Vec<String>,
+    pub character: CharacterProfile,
     pub category: Option<String>,
     pub emotion_goal: Option<String>,
     pub start_chapter: Option<u32>,
@@ -500,7 +567,7 @@ enum NoteField {
     Source,
     Links,
     Status,
-    Group,
+    Character,
     Aliases,
     Category,
     EmotionGoal,
@@ -513,7 +580,7 @@ fn note_fields(kind: NoteKind) -> &'static [NoteField] {
     match kind {
         NoteKind::Contradiction => &[Core("一句话核心"), Types, Source, Links, Status],
         NoteKind::Unit => &[Core("核心矛盾"), Types, EmotionGoal, ChapterRange],
-        NoteKind::Character => &[Group, Aliases],
+        NoteKind::Character => &[Character, Aliases],
         NoteKind::Worldview => &[Category],
         NoteKind::Opening => &[Status],
     }
@@ -522,6 +589,7 @@ fn note_fields(kind: NoteKind) -> &'static [NoteField] {
 /// 读一篇构思笔记；文件读不到/损坏时降级为空内容（列表不因单文件拖垮）。
 fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
     let mut entry = NoteEntry {
+        fingerprint: String::new(),
         path: path.to_path_buf(),
         kind,
         name: file_stem_of(path),
@@ -532,6 +600,7 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
         status: None,
         group: None,
         aliases: Vec::new(),
+        character: CharacterProfile::default(),
         category: None,
         emotion_goal: None,
         start_chapter: None,
@@ -539,9 +608,11 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
         body: String::new(),
         pending: false,
     };
-    let Ok(raw) = read_text(path) else {
+    let Ok(bytes) = fs::read(path) else {
         return entry;
     };
+    entry.fingerprint = content_fingerprint(&bytes).to_string();
+    let raw = String::from_utf8_lossy(&bytes).into_owned();
     let raw = strip_bom(&raw);
     let Some((yaml_text, body)) = split_frontmatter(raw) else {
         entry.body = raw.to_string();
@@ -563,7 +634,10 @@ fn read_note(path: &Path, kind: NoteKind) -> NoteEntry {
             NoteField::Source => entry.source = map_scalar(&map, "来源"),
             NoteField::Links => entry.links = map_list(&map, "关联"),
             NoteField::Status => entry.status = map_scalar(&map, "状态"),
-            NoteField::Group => entry.group = map_scalar(&map, "分组"),
+            NoteField::Character => {
+                entry.group = map_scalar(&map, "分组"); // 只读兼容，不再新增或回写分组。
+                entry.character = CharacterProfile::read(&map);
+            }
             NoteField::Aliases => entry.aliases = map_list(&map, "别名"),
             NoteField::Category => entry.category = map_scalar(&map, "类别"),
             NoteField::EmotionGoal => entry.emotion_goal = map_scalar(&map, "情绪目标"),
@@ -591,6 +665,13 @@ pub fn save_note(
     let path = unique_file_path(&dir, &format!("{name}.md"), prev_path);
 
     let base = prev_path.filter(|p| *p != path).unwrap_or(&path);
+    if let Some(expected) = &draft.fingerprint {
+        let current =
+            fs::read(base).map_err(|e| format!("无法读取笔记 {}：{e}", base.display()))?;
+        if &content_fingerprint(&current).to_string() != expected {
+            return Err("笔记在载入后已改变，未覆盖外部修改；请重新打开核对".into());
+        }
+    }
     let mut map = frontmatter_mapping(base).unwrap_or_default();
     apply_draft(&mut map, draft);
 
@@ -612,7 +693,7 @@ fn apply_draft(map: &mut Mapping, draft: &NoteDraft) {
             NoteField::Source => set_map_scalar(map, "来源", draft.source.as_deref()),
             NoteField::Links => set_map_list(map, "关联", &draft.links),
             NoteField::Status => set_map_scalar(map, "状态", draft.status.as_deref()),
-            NoteField::Group => set_map_scalar(map, "分组", draft.group.as_deref()),
+            NoteField::Character => draft.character.apply(map),
             NoteField::Aliases => set_map_list(map, "别名", &draft.aliases),
             NoteField::Category => set_map_scalar(map, "类别", draft.category.as_deref()),
             NoteField::EmotionGoal => {
@@ -644,7 +725,10 @@ pub fn promote_contradiction(contradiction_path: &Path) -> Result<NoteEntry, Str
         .and_then(|p| p.file_name())
         .and_then(|n| n.to_str());
     if parent_name != Some(NoteKind::Contradiction.name()) || concept_name != Some(CONCEPT_DIR) {
-        return Err(format!("{} 不在 构思/矛盾/ 下", contradiction_path.display()));
+        return Err(format!(
+            "{} 不在 构思/矛盾/ 下",
+            contradiction_path.display()
+        ));
     }
     let project = contradiction_path
         .parent()
@@ -940,8 +1024,8 @@ pub fn save_arrangement(project: &Path, items: &[ArrangementItem]) -> Result<(),
     }
 
     let seq: Vec<Value> = merged.iter().map(item_to_value).collect();
-    let text = serde_yaml::to_string(&Value::Sequence(seq))
-        .map_err(|e| format!("无法生成 yaml：{e}"))?;
+    let text =
+        serde_yaml::to_string(&Value::Sequence(seq)).map_err(|e| format!("无法生成 yaml：{e}"))?;
     write_text_atomic(&path, &text)
 }
 
@@ -975,7 +1059,8 @@ pub struct MapCount {
 }
 
 /// 排布体检（派生视图，只提示不拦截）：升级:战斗比例、连续同节奏、
-/// 按名引用失效、未进排布的单元、地图分布。
+/// 按名引用失效、未进排布的单元、地图分布。地图定义兼容旧项目清单、
+/// 世界观「地理」词条与新版一等地图实体。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArrangementCheck {
@@ -1120,7 +1205,20 @@ pub fn check_project_arrangement(
             map_names.push(note.name);
         }
     }
-    Ok(check_arrangement(items, &unit_names, &line_names, &map_names))
+    for map in crate::map::map_workspace(project)
+        .map(|workspace| workspace.maps)
+        .unwrap_or_default()
+    {
+        if !map_names.contains(&map.name) {
+            map_names.push(map.name);
+        }
+    }
+    Ok(check_arrangement(
+        items,
+        &unit_names,
+        &line_names,
+        &map_names,
+    ))
 }
 
 #[cfg(test)]
@@ -1128,6 +1226,43 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn 力量体系提示删改留空后可重开且旧世界观未知字段保留() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path();
+        let legacy = project.join("构思/世界观/旧修炼体系.md");
+        write(
+            &legacy,
+            "---\n类别: 力量体系\n自定义境界: [听潮, 观海]\n---\n原有设定，不要求等级。\n",
+        );
+        let original = fs::read(&legacy).unwrap();
+        let old = scan_notes(project, NoteKind::Worldview).unwrap();
+        assert_eq!(old[0].body.trim(), "原有设定，不要求等级。");
+        assert_eq!(fs::read(&legacy).unwrap(), original);
+
+        let mut draft = NoteDraft::new(NoteKind::Worldview, "旧修炼体系");
+        draft.body = "## 我改写的提示\n\n力量来自承诺，无固定等级。".into();
+        let saved = save_note(project, &draft, Some(&legacy)).unwrap();
+        let reopened = scan_notes(project, NoteKind::Worldview).unwrap();
+        assert_eq!(reopened[0], saved);
+        assert_eq!(reopened[0].category, None);
+        assert_eq!(reopened[0].body, draft.body);
+        let raw = fs::read_to_string(&legacy).unwrap();
+        assert!(raw.contains("自定义境界"));
+        assert!(raw.contains("听潮"));
+
+        draft.body.clear();
+        save_note(project, &draft, Some(&legacy)).unwrap();
+        assert_eq!(
+            scan_notes(project, NoteKind::Worldview).unwrap()[0].body,
+            ""
+        );
+        assert_eq!(
+            fs::read_dir(project.join("构思/世界观")).unwrap().count(),
+            1
+        );
+    }
 
     fn write(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
@@ -1148,6 +1283,95 @@ mod tests {
 
     fn draft(kind: NoteKind, name: &str) -> NoteDraft {
         NoteDraft::new(kind, name)
+    }
+
+    #[test]
+    fn 人物完整档案与旧人物新组织混合重开() {
+        let temp = TempDir::new().unwrap();
+        let p = temp.path();
+        let old = p.join("构思/人物/旧人物.md");
+        write(&old, "---\n分组: 山门\n别名: [小陈]\n手补: 不可丢\n---\n\n小传、外貌、说话方式和人物弧自由写。\n");
+        let mut d = NoteDraft::new(NoteKind::Character, "新人");
+        d.character = CharacterProfile {
+            image: Some("../../附件/不存在.png".into()),
+            identity: Some("守门人".into()),
+            age: Some("看起来二十岁".into()),
+            gender: Some("女".into()),
+            traits: vec!["谨慎".into(), "执拗".into()],
+            goal: Some("寻回兄长".into()),
+            ability: Some("听风".into()),
+            weakness: Some("每次使用失聪一天".into()),
+            secret: Some("来自敌营".into()),
+        };
+        d.aliases = vec!["阿风".into()];
+        d.body = "## 小传\n不受固定表单限制。\n## 人物弧\n学会信任。".into();
+        let created = save_note(p, &d, None).unwrap();
+        crate::social::save_organization(
+            p,
+            &crate::social::OrganizationDraft {
+                name: "山门".into(),
+                purpose: Some("守护山道".into()),
+                body: "完整组织正文".into(),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        let reopened = scan_notes(p, NoteKind::Character).unwrap();
+        assert_eq!(
+            reopened.iter().find(|n| n.name == "新人").unwrap(),
+            &created
+        );
+        let legacy = reopened.iter().find(|n| n.name == "旧人物").unwrap();
+        assert_eq!(legacy.character, CharacterProfile::default());
+        assert_eq!(legacy.group.as_deref(), Some("山门"));
+        assert_eq!(
+            crate::social::workspace(p).unwrap().organizations[0]
+                .draft
+                .body,
+            "完整组织正文"
+        );
+        d.character = CharacterProfile::default();
+        let cleared = save_note(p, &d, Some(&created.path)).unwrap();
+        assert_eq!(cleared.character, CharacterProfile::default());
+        assert_eq!(cleared.body, d.body);
+        let mut legacy_draft = NoteDraft::new(NoteKind::Character, "旧人物");
+        legacy_draft.body = legacy.body.clone();
+        legacy_draft.aliases = legacy.aliases.clone();
+        legacy_draft.character.identity = Some("旧档补身份".into());
+        save_note(p, &legacy_draft, Some(&old)).unwrap();
+        let raw = fs::read_to_string(&old).unwrap();
+        assert!(raw.contains("手补: 不可丢"));
+        assert!(raw.contains("分组: 山门"));
+    }
+
+    #[test]
+    fn 人物编辑版本过期不覆盖外部改动() {
+        let temp = TempDir::new().unwrap();
+        let mut d = NoteDraft::new(NoteKind::Character, "甲");
+        d.body = "原小传".into();
+        let saved = save_note(temp.path(), &d, None).unwrap();
+        d.fingerprint = Some(saved.fingerprint);
+        d.character.identity = Some("新身份".into());
+        fs::write(&saved.path, "外部改写的小传").unwrap();
+        assert!(save_note(temp.path(), &d, Some(&saved.path)).is_err());
+        assert_eq!(fs::read_to_string(saved.path).unwrap(), "外部改写的小传");
+    }
+
+    #[test]
+    fn 人物指纹核对原始字节而不是有损解码文本() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("构思/人物/甲.md");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, [0xff]).unwrap();
+        let entry = scan_notes(temp.path(), NoteKind::Character)
+            .unwrap()
+            .remove(0);
+        let mut d = NoteDraft::new(NoteKind::Character, "甲");
+        d.fingerprint = Some(entry.fingerprint);
+        fs::write(&path, [0xfe]).unwrap();
+        assert!(save_note(temp.path(), &d, Some(&path)).is_err());
+        assert_eq!(fs::read(path).unwrap(), vec![0xfe]);
     }
 
     #[test]
@@ -1189,7 +1413,10 @@ mod tests {
     fn 扫描_直接子文件夹即项目_懒生成缺省书名() {
         let root = root();
         write(&project(&root).join("项目.yaml"), "书名: 大魏读书人\n");
-        write(&project(&root).join("正文/0001 初入江湖.md"), "第一章\n正文");
+        write(
+            &project(&root).join("正文/0001 初入江湖.md"),
+            "第一章\n正文",
+        );
         write(&project(&root).join("构思/单元/初入京城.md"), "---\n---\n");
         // 手建的项目（不带《》）也认；无 项目.yaml 时书名取文件夹名。
         write(&root.join("项目/手建的书/正文/0001.md"), "第一章");
@@ -1301,7 +1528,9 @@ mod tests {
         assert_eq!(meta.plot_lines.len(), 2);
         assert_eq!(meta.plot_lines[0].name, "主线");
         assert_eq!(meta.plot_lines[0].color.as_deref(), Some("#c0392b"));
-        assert!(meta.plot_lines[0].extra.contains_key(Value::String("备注".into())));
+        assert!(meta.plot_lines[0]
+            .extra
+            .contains_key(Value::String("备注".into())));
 
         write_project_meta(&dir, &meta).unwrap();
         let text = fs::read_to_string(meta_path(&dir)).unwrap();
@@ -1343,7 +1572,8 @@ mod tests {
         save_note(&dir, &unit, None).unwrap();
 
         let mut character = draft(NoteKind::Character, "陈平安");
-        character.group = Some("主角阵营".into());
+        character.character.identity = Some("主角的同门".into());
+        character.group = Some("主角阵营".into()); // 旧入参不再写单一分组。
         character.aliases = vec!["小陈".into()];
         save_note(&dir, &character, None).unwrap();
 
@@ -1366,7 +1596,8 @@ mod tests {
         assert!(!unit_text.contains("一句话核心"));
 
         let read = scan_notes(&dir, NoteKind::Character).unwrap();
-        assert_eq!(read[0].group.as_deref(), Some("主角阵营"));
+        assert_eq!(read[0].group, None);
+        assert_eq!(read[0].character.identity.as_deref(), Some("主角的同门"));
         assert_eq!(read[0].aliases, vec!["小陈"]);
 
         let read = scan_notes(&dir, NoteKind::Worldview).unwrap();
@@ -1408,7 +1639,8 @@ mod tests {
         let mut character = draft(NoteKind::Character, "陈平安");
         character.start_chapter = Some(3);
         save_note(&dir, &character, None).unwrap();
-        let text = fs::read_to_string(notes_dir(&dir, NoteKind::Character).join("陈平安.md")).unwrap();
+        let text =
+            fs::read_to_string(notes_dir(&dir, NoteKind::Character).join("陈平安.md")).unwrap();
         assert!(!text.contains("起章"), "人物不写章区间：{text}");
     }
 
@@ -1423,7 +1655,10 @@ mod tests {
 
         // 在 Obsidian 里手补一个未知键。
         let text = fs::read_to_string(&saved.path).unwrap();
-        write(&saved.path, &text.replacen("---\n", "---\n自定义键: 保留我\n", 1));
+        write(
+            &saved.path,
+            &text.replacen("---\n", "---\n自定义键: 保留我\n", 1),
+        );
 
         let mut renamed = d.clone();
         renamed.name = "初入京城-改".into();
@@ -1445,12 +1680,17 @@ mod tests {
         let root = root();
         let dir = project(&root);
         let mut d = draft(NoteKind::Character, "陈平安");
-        d.group = Some("主角阵营".into());
+        d.character.identity = Some("同门".into());
         save_note(&dir, &d, None).unwrap();
 
-        d.group = None;
+        d.character.identity = None;
         d.body = "只有正文".into();
-        let saved = save_note(&dir, &d, Some(&saved_path(&dir, NoteKind::Character, "陈平安"))).unwrap();
+        let saved = save_note(
+            &dir,
+            &d,
+            Some(&saved_path(&dir, NoteKind::Character, "陈平安")),
+        )
+        .unwrap();
         let text = fs::read_to_string(&saved.path).unwrap();
         assert_eq!(text, "只有正文", "映射为空时不落空 frontmatter 块");
     }
@@ -1495,7 +1735,11 @@ mod tests {
         let target = &before[1];
         crate::book_file::set_pending(&target.path, true).unwrap();
         let during = scan_notes(&dir, NoteKind::Unit).unwrap();
-        assert_eq!(order(&during), vec!["初入京城", "宫变前夜", "收尾"], "路径序不变");
+        assert_eq!(
+            order(&during),
+            vec!["初入京城", "宫变前夜", "收尾"],
+            "路径序不变"
+        );
         assert!(during[1].pending);
         assert!(!during[0].pending && !during[2].pending);
 
@@ -1514,13 +1758,21 @@ mod tests {
         // 退出：键移除，回到原类别原排序位置；文件数不变（没有第二份便笺）。
         crate::book_file::set_pending(&during[1].path, false).unwrap();
         let after = scan_notes(&dir, NoteKind::Unit).unwrap();
-        assert_eq!(order(&after), vec!["初入京城", "宫变前夜", "收尾"], "退出按原位置恢复");
+        assert_eq!(
+            order(&after),
+            vec!["初入京城", "宫变前夜", "收尾"],
+            "退出按原位置恢复"
+        );
         assert!(
             after.iter().filter(|n| n.pending).count() == 0,
             "读模型里待打磨区为空（前端整个区域不渲染）"
         );
         assert!(after[1].body.contains("在便笺里改过的正文"), "退出不动内容");
-        assert_eq!(crate::book_file::count_files_recursive(&dir), files_before, "进出待打磨不建便笺库");
+        assert_eq!(
+            crate::book_file::count_files_recursive(&dir),
+            files_before,
+            "进出待打磨不建便笺库"
+        );
     }
 
     #[test]
@@ -1536,20 +1788,29 @@ mod tests {
         assert_eq!(read[0].core.as_deref(), Some("背着通缉身份在京城立足"));
 
         // 旧内容（无键）与手写 false 都按普通内容处理，值原样保留。
-        write(&dir.join("构思/矛盾/手写false.md"), "---\n待打磨: false\n状态: 池中\n---\n\n正文");
+        write(
+            &dir.join("构思/矛盾/手写false.md"),
+            "---\n待打磨: false\n状态: 池中\n---\n\n正文",
+        );
         let read = scan_notes(&dir, NoteKind::Contradiction).unwrap();
         let 手写 = read.iter().find(|n| n.name == "手写false").unwrap();
         assert!(!手写.pending);
-        assert!(fs::read_to_string(&手写.path)
-            .unwrap()
-            .contains("待打磨: false"), "不认识的值不改动");
+        assert!(
+            fs::read_to_string(&手写.path)
+                .unwrap()
+                .contains("待打磨: false"),
+            "不认识的值不改动"
+        );
         assert_eq!(手写.status.as_deref(), Some("池中"));
 
         // 矛盾提为单元：读-合-写同样不抹待打磨键。
         let promoted = promote_contradiction(&saved.path).unwrap();
         assert!(!promoted.pending, "新单元默认不是待打磨");
         let back = scan_notes(&dir, NoteKind::Contradiction).unwrap();
-        assert!(back.iter().find(|n| n.name == "通缉身份").unwrap().pending, "提为单元不动原矛盾的状态");
+        assert!(
+            back.iter().find(|n| n.name == "通缉身份").unwrap().pending,
+            "提为单元不动原矛盾的状态"
+        );
     }
 
     #[test]
@@ -1579,7 +1840,10 @@ mod tests {
             .unwrap()
             .contains("自定义键: 保留我"));
 
-        assert_eq!(read_circle(&project(&root).join("不存在的项目")).unwrap(), Circle::default());
+        assert_eq!(
+            read_circle(&project(&root).join("不存在的项目")).unwrap(),
+            Circle::default()
+        );
     }
 
     #[test]
@@ -1650,7 +1914,10 @@ mod tests {
         save_arrangement(&dir, &items).unwrap();
 
         let text = fs::read_to_string(arrangement_path(&dir)).unwrap();
-        assert!(text.contains("备注: 盘上更新的"), "盘上更新的手补值应胜出：{text}");
+        assert!(
+            text.contains("备注: 盘上更新的"),
+            "盘上更新的手补值应胜出：{text}"
+        );
         assert!(text.contains("非标量保留"), "非标量已知键原样保留：{text}");
         assert!(text.contains("节奏: 紧绷"));
 
@@ -1719,14 +1986,30 @@ mod tests {
         let map_names = vec!["京城".to_string()];
 
         let items = vec![
-            item("初入京城", Some("主线"), Some("京城"), Some("升级"), Some("紧绷")),
-            item("宫变前夜", Some("主线"), Some("江南"), Some("升级"), Some("紧绷")),
+            item(
+                "初入京城",
+                Some("主线"),
+                Some("京城"),
+                Some("升级"),
+                Some("紧绷"),
+            ),
+            item(
+                "宫变前夜",
+                Some("主线"),
+                Some("江南"),
+                Some("升级"),
+                Some("紧绷"),
+            ),
             item("幽灵单元", Some("感情线"), None, Some("升级"), Some("紧绷")),
             item("初入京城", None, None, Some("战斗"), None),
         ];
         let check = check_arrangement(&items, &unit_names, &line_names, &map_names);
 
-        assert!(check.ratio_hint.contains("升级 3 : 战斗 1"), "{}", check.ratio_hint);
+        assert!(
+            check.ratio_hint.contains("升级 3 : 战斗 1"),
+            "{}",
+            check.ratio_hint
+        );
         assert_eq!(check.pace_hints.len(), 1);
         assert!(check.pace_hints[0].contains("第 1~3 项连续「紧绷」"));
         assert!(check.ref_hints.iter().any(|h| h.contains("感情线")));
@@ -1767,21 +2050,33 @@ mod tests {
             .collect();
         items.extend((0..3).map(|_| item("甲", None, None, Some("战斗"), None)));
         let check = check_arrangement(&items, &units, &[], &[]);
-        assert!(check.ratio_hint.contains("战斗偏少"), "{}", check.ratio_hint);
+        assert!(
+            check.ratio_hint.contains("战斗偏少"),
+            "{}",
+            check.ratio_hint
+        );
 
         let mut items: Vec<ArrangementItem> = (0..4)
             .map(|_| item("甲", None, None, Some("升级"), None))
             .collect();
         items.extend((0..2).map(|_| item("甲", None, None, Some("战斗"), None)));
         let check = check_arrangement(&items, &units, &[], &[]);
-        assert!(check.ratio_hint.contains("接近 2:1"), "{}", check.ratio_hint);
+        assert!(
+            check.ratio_hint.contains("接近 2:1"),
+            "{}",
+            check.ratio_hint
+        );
 
         let mut items: Vec<ArrangementItem> = (0..2)
             .map(|_| item("甲", None, None, Some("升级"), None))
             .collect();
         items.extend((0..3).map(|_| item("甲", None, None, Some("战斗"), None)));
         let check = check_arrangement(&items, &units, &[], &[]);
-        assert!(check.ratio_hint.contains("战斗偏多"), "{}", check.ratio_hint);
+        assert!(
+            check.ratio_hint.contains("战斗偏多"),
+            "{}",
+            check.ratio_hint
+        );
     }
 
     #[test]
@@ -1812,13 +2107,18 @@ mod tests {
             &[item("初入京城", Some("主线"), Some("京城"), None, None)],
         )
         .unwrap();
-        assert!(check.ref_hints.is_empty(), "地理词条应认作地图定义：{:?}", check.ref_hints);
+        assert!(
+            check.ref_hints.is_empty(),
+            "地理词条应认作地图定义：{:?}",
+            check.ref_hints
+        );
         assert!(check.missing_units.is_empty());
         assert!(check.unarranged_units.is_empty());
     }
 
     #[test]
-    fn 矛盾提为单元_预填字段_状态改已成单元_矛盾留档() {        let root = root();
+    fn 矛盾提为单元_预填字段_状态改已成单元_矛盾留档() {
+        let root = root();
         let dir = project(&root);
         let mut c = draft(NoteKind::Contradiction, "通缉身份");
         c.core = Some("背着通缉身份在京城立足".into());

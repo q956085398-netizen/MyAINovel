@@ -7,6 +7,7 @@ import DisplayToggle from "./DisplayToggle";
 import CoverArt, { pickAndSetCover } from "./CoverArt";
 import ProjectPage, { type ProjectTab } from "./ProjectPage";
 import { setCurrentProjectDir } from "./currentProject";
+import { useLibrarySession } from "./librarySession";
 
 /** 记住上次打开的项目（工单 #56 / T01）：重启回到构思时即回到那本书。 */
 const LAST_PROJECT_KEY = "gongbi.ideation.project";
@@ -64,6 +65,7 @@ export default function Ideation({
   const [busy, setBusy] = useState(false);
   // 展示模式（工单 #22）：项目列表档位与书写板块共用一个偏好。
   const [display, setDisplay] = useDisplayMode("projects");
+  const librarySession = useLibrarySession();
   /** 只在本板块首次扫盘时自动回到上次的项目（与书写板块同款）。 */
   const autoOpenRef = useRef(true);
 
@@ -80,10 +82,12 @@ export default function Ideation({
   }
 
   const scan = useCallback(async (root: string) => {
+    const session = librarySession.id;
     setScanning(true);
     setError(null);
     try {
       const list = await invoke<ProjectEntry[]>("scan_projects", { root });
+      if (!librarySession.isCurrent(session)) return;
       setProjects(list);
       if (autoOpenRef.current) {
         autoOpenRef.current = false;
@@ -98,12 +102,13 @@ export default function Ideation({
         return fresh ? { ...cur, project: fresh } : cur;
       });
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       setProjects([]);
       setError(`扫描失败：${errMsg(e)}`);
     } finally {
-      setScanning(false);
+      if (librarySession.isCurrent(session)) setScanning(false);
     }
-  }, []);
+  }, [librarySession]);
 
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);
@@ -112,14 +117,15 @@ export default function Ideation({
   // 跨板块跳转：直接开跳转方带来的项目快照，不等本板块自己的列表。
   // seq 递增让「再次跳到同一个项目」也重挂载——页签只在新挂载时生效。
   useEffect(() => {
-    if (!jump) return;
+    if (!jump || !librarySession.isCurrent(librarySession.id)) return;
     openProject(jump.project, jump.tab, jump.focus);
     onJumpConsumed();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jump, onJumpConsumed]);
+  }, [jump, onJumpConsumed, librarySession]);
 
   async function create() {
     if (!libraryPath || busy) return;
+    const session = librarySession.id;
     const title = newTitle.trim();
     if (!title) {
       window.alert("书名不能为空。");
@@ -128,14 +134,16 @@ export default function Ideation({
     setBusy(true);
     try {
       const project = await invoke<ProjectEntry>("create_project", { root: libraryPath, title });
+      if (!librarySession.isCurrent(session)) return;
       setCreating(false);
       setNewTitle("");
       await scan(libraryPath);
       openProject(project);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`新建项目失败：${errMsg(e)}`);
     } finally {
-      setBusy(false);
+      if (librarySession.isCurrent(session)) setBusy(false);
     }
   }
 

@@ -70,10 +70,7 @@ fn words_from_mapping(
     map: &serde_yaml::Mapping,
     path: &Path,
 ) -> Result<(Vec<String>, Vec<String>), String> {
-    Ok((
-        word_list(map, "类型", path)?,
-        word_list(map, "解法", path)?,
-    ))
+    Ok((word_list(map, "类型", path)?, word_list(map, "解法", path)?))
 }
 
 fn word_list(map: &serde_yaml::Mapping, key: &str, path: &Path) -> Result<Vec<String>, String> {
@@ -85,9 +82,11 @@ fn word_list(map: &serde_yaml::Mapping, key: &str, path: &Path) -> Result<Vec<St
     };
     seq.iter()
         .map(|v| {
-            v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).ok_or_else(
-                || format!("词表 {} 的「{key}」里有非字符串", path.display()),
-            )
+            v.as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| format!("词表 {} 的「{key}」里有非字符串", path.display()))
         })
         .collect()
 }
@@ -103,7 +102,10 @@ fn write_seed(path: &Path) -> Result<(), String> {
                 .collect(),
         ),
     );
-    map.insert(Value::String("解法".to_string()), Value::Sequence(Vec::new()));
+    map.insert(
+        Value::String("解法".to_string()),
+        Value::Sequence(Vec::new()),
+    );
     write_yaml_mapping(path, map)
 }
 
@@ -121,6 +123,21 @@ fn harvest(root: &Path) -> (WordCounts, WordCounts) {
     for book in &files {
         for trope in library::tropes_lossy(&book.primary_md) {
             count_trope(&mut type_counts, &mut solution_counts, &trope);
+        }
+    }
+    // 构思桥段与拆书共享提示；不修改词表，也不把其他项目字段当词汇。
+    for project in crate::project::scan_projects(root).unwrap_or_default() {
+        for bridge in crate::planning::scan_bridges(&project.dir).unwrap_or_default() {
+            for pair in &bridge.type_solutions {
+                let kind = pair.kind.trim();
+                let solution = pair.solution.trim();
+                if !kind.is_empty() {
+                    *type_counts.entry(kind.into()).or_insert(0) += 1;
+                }
+                if !solution.is_empty() {
+                    *solution_counts.entry(solution.into()).or_insert(0) += 1;
+                }
+            }
         }
     }
     (sort_by_count(type_counts), sort_by_count(solution_counts))
@@ -163,6 +180,27 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    #[test]
+    fn 构思桥段类型解法加入共享提示_不改词表() {
+        let tmp = TempDir::new().unwrap();
+        let project = crate::project::create_project(tmp.path(), "新书").unwrap();
+        let mut draft = crate::planning::BridgeDraft::new("夜探");
+        draft
+            .type_solutions
+            .push(crate::planning::BridgeTypeSolution {
+                kind: "自创类型".into(),
+                solution: "借对手之口".into(),
+                source: None,
+            });
+        crate::planning::save_bridge(&project.dir, &draft, None).unwrap();
+        load_vocab(tmp.path()).unwrap();
+        let before = fs::read(vocab_path(tmp.path())).unwrap();
+        let vocab = load_vocab(tmp.path()).unwrap();
+        assert!(vocab.types.contains(&"自创类型".into()));
+        assert!(vocab.solutions.contains(&"借对手之口".into()));
+        assert_eq!(fs::read(vocab_path(tmp.path())).unwrap(), before);
+    }
+
     fn write(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
@@ -191,7 +229,10 @@ mod tests {
     #[test]
     fn 已有词表_文件序在前_已用词按次数降序追加去重() {
         let root = TempDir::new().unwrap().path().to_path_buf();
-        write(&root.join("词表.yaml"), "类型:\n- 自定义甲\n- 掉马甲\n解法:\n- 写法一\n");
+        write(
+            &root.join("词表.yaml"),
+            "类型:\n- 自定义甲\n- 掉马甲\n解法:\n- 写法一\n",
+        );
         write(&root.join("书甲.md"), "第1章");
         write(
             &root.join("书甲.yaml"),
@@ -206,7 +247,10 @@ mod tests {
         let vocab = load_vocab(&root).unwrap();
         // 文件序在前；掉马甲（用 2 次）排在其后；同频（各 1 次）按字典序：
         // 「新」U+65B0 < 「更」U+66F4。
-        assert_eq!(vocab.types, vec!["自定义甲", "掉马甲", "新类型", "更少用的"]);
+        assert_eq!(
+            vocab.types,
+            vec!["自定义甲", "掉马甲", "新类型", "更少用的"]
+        );
         assert_eq!(vocab.solutions, vec!["写法一", "扫地僧式"]);
     }
 

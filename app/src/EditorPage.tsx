@@ -1,3 +1,5 @@
+import { useSearchDestination } from "./globalSearchNavigation";
+import { registerSearchNavigationGuard } from "./globalSearchNavigation";
 import { useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
@@ -20,6 +22,7 @@ import { emptyBookMeta } from "./types";
 import { errMsg } from "./util";
 import { autosaveIntervalMs, chapterPrefixOrDefault } from "./settings";
 import { registerFlushSaver } from "./saveFlush";
+import { settleForLeave } from "./safeLeave";
 import { baseEditorTheme, editorAppearance, useEditorAppearance } from "./editorTheme";
 import { dirName, editorRender, parseBookHeaderValues, applyBookHeaderValues } from "./editorRender";
 import type { BookHeaderValues } from "./editorRender";
@@ -30,6 +33,7 @@ import TropeDialog from "./TropeDialog";
 import HeaderMenu, { type HeaderMenuItem } from "./HeaderMenu";
 import SaveStateChip from "./SaveStateChip";
 import { saveStatusAfterEdit, type SaveStatus } from "./editorHeaderState";
+import { useLibrarySession } from "./librarySession";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 /** 六插入块（设计共识 §四＋工单 #30 书档入家族）：Obsidian 风格 callout，
@@ -103,6 +107,7 @@ export default function EditorPage({
   onAiCommand,
   registerBridge,
 }: EditorPageProps) {
+  const librarySession = useLibrarySession();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const prefixRef = useRef("");
@@ -112,8 +117,27 @@ export default function EditorPage({
   /** 冲突未裁决期间自动保存暂停（与书写编辑器同一纪律），手动保存仍可裁决。 */
   const conflictRef = useRef(false);
   const savingRef = useRef(false);
+  /** 在途保存的 Promise（工单 #77）：离开结算是等它完成，不是被门闩弹回。 */
+  const saveInFlightRef = useRef<Promise<boolean> | null>(null);
   const autosaveRef = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
+  const destination = useSearchDestination();
+  useEffect(() => {
+    if (!ready || destination?.hit.kind !== "拆书" || destination.hit.path !== book.primaryMd) return;
+    const frame = requestAnimationFrame(() => {
+      const view = viewRef.current;
+      if (!view) return;
+      const match = destination.hit.matches.find((match) => match.line > 0);
+      if (match) {
+        const line = view.state.doc.line(Math.min(match.line, view.state.doc.lines));
+        const index = line.text.indexOf(match.quote);
+        const from = line.from + Math.max(0, index);
+        view.dispatch({ selection: { anchor: from, head: index >= 0 ? from + match.quote.length : from }, scrollIntoView: true });
+      }
+      view.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [ready, destination, book.primaryMd]);
   const [loadError, setLoadError] = useState<string | null>(null);
   /** 头部保存五态（工单 #66 / T04）：干净/未保存/保存中/失败/冲突。 */
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -175,7 +199,42 @@ export default function EditorPage({
 
   /** 保存（门闩在此）：落定（保存成功/本无改动）返回 true。
    *  自动保存、手动保存、返回即存同走这一条链——指纹对账与冲突裁决不变。
-   *  quiet＝兜底路径（卸载/关窗）：不弹框，冲突时盘上为准（ADR 0004）。 */
+   *  quiet＝兜底路径（卸载/关窗）：不弹框，冲突时盘上为准（ADR 0004）。
+   *  返回 true 只证明本次请求的快照落盘；往返期间又输入的内容仍带脏标
+   *  ——导航放行与否看 settleNow（工单 #77）。 */
+  useEffect(() => registerSearchNavigationGuard(() => settleNow(true)));
+
+  /** 离开结算（工单 #77，safeLeave.ts）：返回书库/搜索跳转等会卸载编辑器
+   *  的导航先经此结算到「无未保存内容」再放行；失败/冲突/持续输入未收敛
+   *  → false，原稿与文字保持原样。busy（持续输入未收敛）且非 quiet 时
+   *  明确提示导航未完成。 */
+  async function settleNow(quiet = false): Promise<boolean> {
+    const view = viewRef.current;
+    if (!view) return true;
+    const outcome = await settleForLeave({
+      isDirty: () => dirtyRef.current,
+      inConflict: () => conflictRef.current,
+      inFlightSave: () => saveInFlightRef.current,
+      saveRound: async () => {
+        // 结算与自动保存赛跑的窄窗口里可能冒出在途保存：等它并如实
+        // 传播结果（失败＝本轮失败，停止结算，不静默吞掉）。
+        const inFlight = saveInFlightRef.current;
+        if (inFlight) {
+          try {
+            return await inFlight;
+          } catch {
+            return false;
+          }
+        }
+        return save(false, quiet);
+      },
+    });
+    if (outcome === "busy" && !quiet) {
+      window.alert("还有内容没保存完（可能仍在继续输入），先停笔让保存完成，再操作。");
+    }
+    return outcome === "done";
+  }
+
   async function save(force = false, quiet = false): Promise<boolean> {
     if (quiet && (!dirtyRef.current || conflictRef.current)) return true;
     if (savingRef.current) return false;
@@ -183,19 +242,24 @@ export default function EditorPage({
     if (!force && !dirtyRef.current) return true;
     savingRef.current = true;
     if (!quiet) setSaveStatus("saving");
-    try {
-      return await persist(force, quiet);
-    } catch (e) {
-      if (quiet) {
-        console.error("拆书兜底保存失败：", e);
-      } else {
-        setSaveStatus("error");
-        window.alert(`保存失败：${errMsg(e)}`);
+    const round = (async () => {
+      try {
+        return await persist(force, quiet);
+      } catch (e) {
+        if (quiet) {
+          console.error("拆书兜底保存失败：", e);
+        } else {
+          setSaveStatus("error");
+          window.alert(`保存失败：${errMsg(e)}`);
+        }
+        return false;
+      } finally {
+        savingRef.current = false;
+        saveInFlightRef.current = null;
       }
-      return false;
-    } finally {
-      savingRef.current = false;
-    }
+    })();
+    saveInFlightRef.current = round;
+    return round;
   }
 
   /** 保存本体（门闩由 save 持有）：落盘或进入冲突裁决。
@@ -221,9 +285,12 @@ export default function EditorPage({
       }
       return true;
     }
-    if (quiet) return false;
-    // 指纹对不上：盘上被外部程序改过，交人裁决（既有两段确认）。
+    // 指纹对不上：盘上被外部程序改过。冲突状态无论路径都亮出来（胶囊转
+    // 「保存冲突」、自动保存暂停）；quiet（导航守卫/兜底）不弹框直接拦下，
+    // 常规路径弹既有两段确认交人裁决。
     conflictRef.current = true;
+    setSaveStatus("conflict");
+    if (quiet) return false;
     if (
       window.confirm(
         "保存被拦下：文件在保存前已被其他程序修改（可能是在 Obsidian 里编辑过）。\n\n" +
@@ -250,7 +317,6 @@ export default function EditorPage({
       return await persist(true);
     }
     // 两次裁决都取消：冲突挂着，自动保存暂停，状态胶囊亮「保存冲突」。
-    setSaveStatus("conflict");
     return false;
   }
 
@@ -293,10 +359,12 @@ export default function EditorPage({
     return true;
   }
 
-  /** 返回即存（工单 #28）：先落盘再退回书库——返回永远不丢内容；
-   *  保存遇冲突时弹既有裁决框，裁决没落定（取消）就留在编辑器。 */
+  /** 返回即存（工单 #28；工单 #77 起先结算）：先落盘到稳定版本再退回
+   *  书库——返回永远不丢内容；冲突裁决没落定（取消）或持续输入未收敛
+   *  就留在编辑器。 */
   async function handleBack() {
-    if (dirtyRef.current && !(await save(false))) return;
+    const session = librarySession.id;
+    if (!(await settleNow()) || !librarySession.isCurrent(session)) return;
     onBack();
   }
 
@@ -307,13 +375,16 @@ export default function EditorPage({
   ) {
     const view = viewRef.current;
     if (!view) return;
+    const session = librarySession.id;
     let chapters: ChapterAnchor[];
     try {
       chapters = await invoke<ChapterAnchor[]>("list_chapters", {
         content: view.state.doc.toString(),
         template: prefixRef.current,
       });
+      if (!librarySession.isCurrent(session)) return;
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`章标题识别失败：${errMsg(e)}`);
       return;
     }
@@ -322,8 +393,10 @@ export default function EditorPage({
     try {
       tropes = await invoke<TropeSpan[]>("read_tropes", { mdPath: book.primaryMd });
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       warning = `已有 .yaml 解析失败：${errMsg(e)}。保存桥段会整文件覆盖，请先确认内容。`;
     }
+    if (!librarySession.isCurrent(session)) return;
     if (prefill) {
       if (chapters.length === 0) {
         // 建议不能静默丢：把结论亮出来，用户知道为什么没预填。
@@ -408,6 +481,8 @@ export default function EditorPage({
   useEffect(() => {
     let cancelled = false;
     let view: EditorView | null = null;
+    const session = librarySession.id;
+    const stale = () => cancelled || !librarySession.isCurrent(session);
 
     void (async () => {
       // 打开书先做书档一次性迁移（工单 #30，spec §五）：yaml 四键搬上纸面。
@@ -417,16 +492,19 @@ export default function EditorPage({
       } catch (e) {
         console.warn("书档迁移跳过（yaml 解析失败）：", e);
       }
+      if (stale()) return;
       let content: string;
       let fingerprint: string;
       try {
         const doc = await invoke<MdContent>("read_book_md", { path: book.primaryMd });
+        if (stale()) return;
         content = doc.content;
         fingerprint = doc.fingerprint;
       } catch (e) {
-        if (!cancelled) setLoadError(`读取拆书稿失败：${errMsg(e)}`);
+        if (!stale()) setLoadError(`读取拆书稿失败：${errMsg(e)}`);
         return;
       }
+      if (stale()) return;
 
       // 章前缀取值（spec §六）：书 yaml 自定义键 > 全局设置（默认 第{n}章）；
       // 空值由 Rust 侧回退默认，单一事实源。yaml 读取失败不拦编辑器。
@@ -436,7 +514,7 @@ export default function EditorPage({
       } catch (e) {
         console.warn("读取书 yaml 失败（章前缀回退全局设置）：", e);
       }
-      if (cancelled || !containerRef.current) return;
+      if (stale() || !containerRef.current) return;
       prefixRef.current = normalizePrefix(meta.chapterPrefix) || chapterPrefixOrDefault();
       fingerprintRef.current = fingerprint;
 

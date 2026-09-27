@@ -15,9 +15,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
-use crate::book_file::{
-    map_scalar, read_yaml_mapping, sanitize_file_name, write_yaml_mapping,
-};
+use crate::book_file::{map_scalar, read_yaml_mapping, sanitize_file_name, write_yaml_mapping};
 use crate::project::{self, NoteDraft, NoteEntry, NoteKind};
 
 pub const RELATION_FILE: &str = "人物关系.yaml";
@@ -60,6 +58,9 @@ pub struct LegendItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Relationship {
+    /// 新社会网的载入版本与条目位置，编辑端点时仍能归还该条目的未知键。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_row: Option<String>,
     pub from: String,
     pub to: String,
     /// 类型，按名引用图例项（图例外照画缺省样式，只提示）。
@@ -72,6 +73,8 @@ pub struct Relationship {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelationshipTable {
+    #[serde(default)]
+    pub fingerprint: Option<String>,
     pub legend: Vec<LegendItem>,
     pub edges: Vec<Relationship>,
 }
@@ -80,6 +83,7 @@ pub struct RelationshipTable {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelationshipView {
+    pub fingerprint: Option<String>,
     pub legend: Vec<LegendItem>,
     /// 文件里的**全部**边，保文件次序——**保存时的唯一底稿**：
     /// 失效引用的边也在里面，整表写回才不会把它们悄悄丢掉。
@@ -127,6 +131,9 @@ fn palette_color(index: usize) -> String {
 }
 
 pub fn relationship_path(project: &Path) -> PathBuf {
+    if crate::social::graph_path(project).exists() {
+        return crate::social::graph_path(project);
+    }
     project.join(project::CONCEPT_DIR).join(RELATION_FILE)
 }
 
@@ -138,14 +145,39 @@ pub fn read_table(project: &Path) -> Result<RelationshipTable, String> {
     let path = relationship_path(project);
     if !path.is_file() {
         return Ok(RelationshipTable {
+            fingerprint: None,
             legend: default_legend(),
             edges: Vec::new(),
         });
     }
-    let map = read_yaml_mapping(&path)?;
+    let mut map = read_yaml_mapping(&path)?;
+    if path == crate::social::graph_path(project) {
+        map = crate::social::read_graph(project)?;
+        // 旧人物画布仅投影人—人关系；组织边仍由同一社会网保存。
+        if let Some(Value::Sequence(rows)) = map.get_mut(Value::String("关系".into())) {
+            rows.retain(|v| {
+                v.as_mapping().is_some_and(|r| {
+                    map_scalar(r, "起类").as_deref().unwrap_or("人物") == "人物"
+                        && map_scalar(r, "止类").as_deref().unwrap_or("人物") == "人物"
+                })
+            });
+        }
+    }
+    let mut edges = edges_from(&map, &path)?;
+    let fingerprint = if path == crate::social::graph_path(project) {
+        let raw = std::fs::read(&path).map_err(|e| e.to_string())?;
+        let version = crate::book_file::content_fingerprint(&raw);
+        for (index, edge) in edges.iter_mut().enumerate() {
+            edge.source_row = Some(format!("{version}:{index}"));
+        }
+        Some(version.to_string())
+    } else {
+        None
+    };
     Ok(RelationshipTable {
+        fingerprint,
         legend: legend_from(&map, &path)?,
-        edges: edges_from(&map, &path)?,
+        edges,
     })
 }
 
@@ -155,9 +187,18 @@ pub fn read_table(project: &Path) -> Result<RelationshipTable, String> {
 /// 整张网换成空表。所以先按读路径校验一遍——语法坏、形状坏都不写。
 /// 条目内不认的键会被丢弃（应用受管，与伏笔.yaml 同一条纪律）。
 pub fn save_table(project: &Path, table: &RelationshipTable) -> Result<(), String> {
+    crate::social::ensure_idle(project)?;
     let legend = normalize_legend(&table.legend)?;
     let edges = normalize_edges(&table.edges)?;
     let path = relationship_path(project);
+    if path == crate::social::graph_path(project) {
+        return crate::social::save_person_relationships(
+            project,
+            &legend,
+            &edges,
+            table.fingerprint.as_deref(),
+        );
+    }
     read_table(project)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -169,7 +210,7 @@ pub fn save_table(project: &Path, table: &RelationshipTable) -> Result<(), Strin
     write_yaml_mapping(&path, map)
 }
 
-fn legend_from(map: &Mapping, path: &Path) -> Result<Vec<LegendItem>, String> {
+pub(crate) fn legend_from(map: &Mapping, path: &Path) -> Result<Vec<LegendItem>, String> {
     let Some(value) = map.get(Value::String("图例".into())) else {
         return Ok(Vec::new());
     };
@@ -183,7 +224,11 @@ fn legend_from(map: &Mapping, path: &Path) -> Result<Vec<LegendItem>, String> {
         .enumerate()
         .map(|(i, item)| {
             let Value::Mapping(row) = item else {
-                return Err(format!("{} 图例第 {} 项应为映射（名/色/方向）", path.display(), i + 1));
+                return Err(format!(
+                    "{} 图例第 {} 项应为映射（名/色/方向）",
+                    path.display(),
+                    i + 1
+                ));
             };
             let name = map_scalar(row, "名")
                 .filter(|n| !n.trim().is_empty())
@@ -238,6 +283,7 @@ fn edges_from(map: &Mapping, path: &Path) -> Result<Vec<Relationship>, String> {
                 }
             };
             Ok(Relationship {
+                source_row: None,
                 from: required("起")?,
                 to: required("止")?,
                 kind: required("类型")?,
@@ -249,7 +295,7 @@ fn edges_from(map: &Mapping, path: &Path) -> Result<Vec<Relationship>, String> {
 }
 
 /// 落盘前的收口：名称非空、图例不重名、两端不是同一个人（列表项本身可以重复）。
-fn normalize_legend(legend: &[LegendItem]) -> Result<Vec<LegendItem>, String> {
+pub(crate) fn normalize_legend(legend: &[LegendItem]) -> Result<Vec<LegendItem>, String> {
     let mut out: Vec<LegendItem> = Vec::new();
     for item in legend {
         let name = item.name.trim();
@@ -290,6 +336,7 @@ fn normalize_edges(edges: &[Relationship]) -> Result<Vec<Relationship>, String> 
                 return Err("关系要选一个类型".to_string());
             }
             Ok(Relationship {
+                source_row: edge.source_row.clone(),
                 from: from.to_string(),
                 to: to.to_string(),
                 kind: kind.to_string(),
@@ -312,7 +359,10 @@ fn legend_value(legend: &[LegendItem]) -> Value {
             .map(|item| {
                 let mut m = Mapping::new();
                 m.insert(Value::String("名".into()), Value::String(item.name.clone()));
-                m.insert(Value::String("色".into()), Value::String(item.color.clone()));
+                m.insert(
+                    Value::String("色".into()),
+                    Value::String(item.color.clone()),
+                );
                 m.insert(
                     Value::String("方向".into()),
                     Value::String(if item.directed { DIRECTED } else { UNDIRECTED }.to_string()),
@@ -331,9 +381,20 @@ fn edges_value(edges: &[Relationship]) -> Value {
                 let mut m = Mapping::new();
                 m.insert(Value::String("起".into()), Value::String(edge.from.clone()));
                 m.insert(Value::String("止".into()), Value::String(edge.to.clone()));
-                m.insert(Value::String("类型".into()), Value::String(edge.kind.clone()));
-                if let Some(note) = edge.note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
-                    m.insert(Value::String("描述".into()), Value::String(note.to_string()));
+                m.insert(
+                    Value::String("类型".into()),
+                    Value::String(edge.kind.clone()),
+                );
+                if let Some(note) = edge
+                    .note
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                {
+                    m.insert(
+                        Value::String("描述".into()),
+                        Value::String(note.to_string()),
+                    );
                 }
                 // 缺省否，只写 true（文件干净：没秘密的边不长尾巴）。
                 if edge.secret {
@@ -366,6 +427,7 @@ pub fn relationship_view(project: &Path) -> RelationshipView {
                 }
             }
             RelationshipView {
+                fingerprint: table.fingerprint,
                 legend: table.legend,
                 edges: table.edges,
                 missing,
@@ -374,6 +436,7 @@ pub fn relationship_view(project: &Path) -> RelationshipView {
             }
         }
         Err(e) => RelationshipView {
+            fingerprint: None,
             legend: default_legend(),
             edges: Vec::new(),
             missing: Vec::new(),
@@ -554,6 +617,7 @@ mod tests {
 
     fn edge(from: &str, to: &str, kind: &str) -> Relationship {
         Relationship {
+            source_row: None,
             from: from.to_string(),
             to: to.to_string(),
             kind: kind.to_string(),
@@ -582,6 +646,7 @@ mod tests {
         let p = project(tmp.path());
         let mut table = read_table(&p).unwrap();
         table.edges.push(Relationship {
+            source_row: None,
             from: "张三".into(),
             to: "李四".into(),
             kind: "师徒".into(),
@@ -628,7 +693,10 @@ mod tests {
         assert!(read_table(&p).is_err());
         write(&relationship_path(&p), "关系:\n- 起: 张三\n  止: 李四\n");
         assert!(read_table(&p).unwrap_err().contains("类型"));
-        write(&relationship_path(&p), "关系:\n- 起: 张三\n  止: 李四\n  类型: 师徒\n  秘密: 是\n");
+        write(
+            &relationship_path(&p),
+            "关系:\n- 起: 张三\n  止: 李四\n  类型: 师徒\n  秘密: 是\n",
+        );
         assert!(read_table(&p).unwrap_err().contains("秘密"));
     }
 
@@ -660,6 +728,7 @@ mod tests {
             let err = save_table(
                 &p,
                 &RelationshipTable {
+                    fingerprint: view.fingerprint,
                     legend: view.legend,
                     edges: view.edges,
                 },
@@ -742,10 +811,14 @@ mod tests {
 
         let view = relationship_view(&p);
         // 画布存回用的就是 view.edges——失效引用必须留在里面，不然一次保存就没了。
-        save_table(&p, &RelationshipTable {
-            legend: view.legend,
-            edges: view.edges,
-        })
+        save_table(
+            &p,
+            &RelationshipTable {
+                fingerprint: view.fingerprint,
+                legend: view.legend,
+                edges: view.edges,
+            },
+        )
         .unwrap();
         let back = read_table(&p).unwrap();
         assert_eq!(back.edges, table.edges);
@@ -810,6 +883,7 @@ mod tests {
         person(&p, "王五", "敌方");
         let mut table = read_table(&p).unwrap();
         table.edges.push(Relationship {
+            source_row: None,
             from: "张三".into(),
             to: "李四".into(),
             kind: "师徒".into(),
@@ -817,6 +891,7 @@ mod tests {
             secret: true,
         });
         table.edges.push(Relationship {
+            source_row: None,
             from: "李四".into(),
             to: "王五".into(),
             kind: "敌对".into(),
@@ -825,6 +900,7 @@ mod tests {
         });
         // 选中集之外的边不进预填。
         table.edges.push(Relationship {
+            source_row: None,
             from: "王五".into(),
             to: "赵六".into(),
             kind: "私情".into(),
@@ -842,9 +918,11 @@ mod tests {
         // 秘密边带「·秘密」，无向边用「－」。
         assert_eq!(note.body, "涉及人物：张三（师徒→李四·秘密）、李四");
 
-        assert!(promote_characters_to_contradiction(&p, &names, Some("师徒疑云"))
-            .unwrap_err()
-            .contains("同名矛盾"));
+        assert!(
+            promote_characters_to_contradiction(&p, &names, Some("师徒疑云"))
+                .unwrap_err()
+                .contains("同名矛盾")
+        );
         assert!(promote_characters_to_contradiction(&p, &["张三".to_string()], None).is_err());
         assert!(promote_characters_to_contradiction(
             &p,
@@ -893,6 +971,7 @@ mod tests {
         // 连边：图例用缺省四类种子，加一条秘密边。
         let mut table = read_table(&p).unwrap();
         table.edges.push(Relationship {
+            source_row: None,
             from: "张三".into(),
             to: "李四".into(),
             kind: "师徒".into(),
@@ -902,7 +981,10 @@ mod tests {
         save_table(&p, &table).unwrap();
 
         let raw = fs::read_to_string(relationship_path(&p)).unwrap();
-        assert!(raw.contains("名: 师徒") && raw.contains("秘密: true"), "{raw}");
+        assert!(
+            raw.contains("名: 师徒") && raw.contains("秘密: true"),
+            "{raw}"
+        );
 
         // 读回画布：图例、边、无失效引用。
         let view = relationship_view(&p);
@@ -916,7 +998,11 @@ mod tests {
         let found = character_confluence(&p, &names).unwrap();
         assert_eq!(found.edges.len(), 1);
         assert_eq!(
-            found.units.iter().map(|u| u.name.as_str()).collect::<Vec<_>>(),
+            found
+                .units
+                .iter()
+                .map(|u| u.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["初入京城"]
         );
 
@@ -927,11 +1013,13 @@ mod tests {
         assert!(p.join("构思/矛盾/张三·李四.md").is_file());
 
         // AI 材料（只读）：小传、边、类型圈、矛盾标题都在。
-        let material =
-            crate::ai_context::build_context("人物关系梳理", &p, None, &names).unwrap();
+        let material = crate::ai_context::build_context("人物关系梳理", &p, None, &names).unwrap();
         assert!(material.contains("- 张三 ｜ 分组：主角阵营"), "{material}");
         assert!(material.contains("张三 → 李四 ｜ 类型：师徒"), "{material}");
         assert!(material.contains("【类型圈】掉马甲"), "{material}");
-        assert!(material.contains("【已有矛盾】共 1 条：张三·李四"), "{material}");
+        assert!(
+            material.contains("【已有矛盾】共 1 条：张三·李四"),
+            "{material}"
+        );
     }
 }

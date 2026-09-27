@@ -47,8 +47,7 @@ pub fn save_config(path: &Path, config: &AiConfig) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("创建配置目录失败：{e}"))?;
     }
-    let text =
-        serde_json::to_string_pretty(config).map_err(|e| format!("配置序列化失败：{e}"))?;
+    let text = serde_json::to_string_pretty(config).map_err(|e| format!("配置序列化失败：{e}"))?;
     write_text_atomic(path, &text)
 }
 
@@ -73,6 +72,24 @@ pub struct ChatPersona {
     pub person: String,
 }
 
+/// 普通对话创建时绑定的助手预设快照（工单 T07，docs/spec/AI助手预设.md §四）：
+/// 创建那一刻定格，之后预设改名、改提示、改覆盖乃至删除都不再影响这个会话。
+/// 字段与 presets.rs::AssistantPreset 一一对应（去掉不入行为的 description）。
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatPreset {
+    pub id: String,
+    pub name: String,
+    /// 图标（emoji 等）；空串＝无。
+    pub icon: String,
+    /// 识别色（#rrggbb）；空串＝无。
+    pub color: String,
+    pub system_prompt: String,
+    /// null＝跟随全局当前供应商/模型。
+    pub provider_override: Option<String>,
+    pub model_override: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatSession {
@@ -85,6 +102,10 @@ pub struct ChatSession {
     /// 人物对话标签（普通 AI 会话为 None；旧会话文件缺此键＝None）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persona: Option<ChatPersona>,
+    /// 普通会话的助手预设快照（人物对话与旧会话文件缺此键＝None，
+    /// 旧会话按通用助手基线继续）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<ChatPreset>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -114,8 +135,7 @@ pub fn save_session(dir: &Path, session: &ChatSession) -> Result<(), String> {
         return Err(format!("非法会话 id：{}", session.id));
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("创建会话目录失败：{e}"))?;
-    let text =
-        serde_json::to_string_pretty(session).map_err(|e| format!("会话序列化失败：{e}"))?;
+    let text = serde_json::to_string_pretty(session).map_err(|e| format!("会话序列化失败：{e}"))?;
     write_text_atomic(&session_path(dir, &session.id), &text)
 }
 
@@ -123,8 +143,7 @@ pub fn load_session(dir: &Path, id: &str) -> Result<ChatSession, String> {
     if !valid_session_id(id) {
         return Err(format!("非法会话 id：{id}"));
     }
-    let text = read_text(&session_path(dir, id))
-        .map_err(|e| format!("读取会话失败：{e}"))?;
+    let text = read_text(&session_path(dir, id)).map_err(|e| format!("读取会话失败：{e}"))?;
     serde_json::from_str(&text).map_err(|e| format!("会话解析失败：{e}"))
 }
 
@@ -141,7 +160,9 @@ pub fn list_sessions(dir: &Path) -> Result<Vec<ChatSessionSummary>, String> {
             continue;
         }
         let Ok(text) = read_text(&path) else { continue };
-        let Ok(session) = serde_json::from_str::<ChatSession>(&text) else { continue };
+        let Ok(session) = serde_json::from_str::<ChatSession>(&text) else {
+            continue;
+        };
         out.push(ChatSessionSummary {
             id: session.id,
             title: session.title,
@@ -191,7 +212,10 @@ impl SseDecoder {
             if line.last() == Some(&b'\r') {
                 line = &line[..line.len() - 1];
             }
-            self.take_line(String::from_utf8_lossy(line).into_owned().as_str(), &mut events);
+            self.take_line(
+                String::from_utf8_lossy(line).into_owned().as_str(),
+                &mut events,
+            );
         }
         events
     }
@@ -408,7 +432,9 @@ pub async fn chat_stream(
             }
         }
     }
-    on_event(ChatStreamEvent::Done { reason: finish_reason });
+    on_event(ChatStreamEvent::Done {
+        reason: finish_reason,
+    });
     Ok(())
 }
 
@@ -440,7 +466,10 @@ mod tests {
     fn sse_basic_events_and_done() {
         let mut d = SseDecoder::new();
         let chunk = b"data: {\"a\":1}\n\ndata: [DONE]\n\n";
-        assert_eq!(d.feed(chunk), vec![r#"{"a":1}"#.to_string(), "[DONE]".to_string()]);
+        assert_eq!(
+            d.feed(chunk),
+            vec![r#"{"a":1}"#.to_string(), "[DONE]".to_string()]
+        );
         assert!(d.finish().is_empty());
     }
 
@@ -536,7 +565,10 @@ mod tests {
             active_provider_id: Some("p1".into()),
         };
         save_config(&path, &cfg).unwrap();
-        assert_eq!(load_config(&path).unwrap().providers[0].model, "deepseek-chat");
+        assert_eq!(
+            load_config(&path).unwrap().providers[0].model,
+            "deepseek-chat"
+        );
     }
 
     #[test]
@@ -553,10 +585,14 @@ mod tests {
                 meta: Some(json!({"kind":"小结","startLine":3})),
             }],
             persona: None,
+            preset: None,
         };
         save_session(dir.path(), &s).unwrap();
         let loaded = load_session(dir.path(), "s1").unwrap();
-        assert_eq!(loaded.messages[0].meta, Some(json!({"kind":"小结","startLine":3})));
+        assert_eq!(
+            loaded.messages[0].meta,
+            Some(json!({"kind":"小结","startLine":3}))
+        );
 
         let mut s2 = s.clone();
         s2.id = "s2".into();
@@ -582,6 +618,7 @@ mod tests {
             updated_at: 0,
             messages: vec![],
             persona: None,
+            preset: None,
         };
         assert!(save_session(dir.path(), &s).is_err());
         assert!(load_session(dir.path(), "../evil").is_err());
@@ -606,7 +643,10 @@ mod tests {
             r#"{"id":"legacy","title":"旧会话","createdAt":1,"updatedAt":2,"messages":[]}"#,
         )
         .unwrap();
-        assert!(load_session(dir.path(), "legacy").unwrap().persona.is_none());
+        assert!(load_session(dir.path(), "legacy")
+            .unwrap()
+            .persona
+            .is_none());
 
         // 人物对话会话：标签往返，列表摘要也带。
         let s = ChatSession {
@@ -619,6 +659,7 @@ mod tests {
                 project: "《大魏读书人》".into(),
                 person: "张三".into(),
             }),
+            preset: None,
         };
         save_session(dir.path(), &s).unwrap();
         assert_eq!(
@@ -630,7 +671,10 @@ mod tests {
         );
         let list = list_sessions(dir.path()).unwrap();
         assert_eq!(list[0].id, "persona");
-        assert_eq!(list[0].persona.as_ref().map(|p| p.person.as_str()), Some("张三"));
+        assert_eq!(
+            list[0].persona.as_ref().map(|p| p.person.as_str()),
+            Some("张三")
+        );
         assert!(list[1].persona.is_none());
 
         // 无标签会话存盘不落 persona 键——文件形状与旧会话完全一致。
@@ -641,10 +685,56 @@ mod tests {
             updated_at: 0,
             messages: vec![],
             persona: None,
+            preset: None,
         };
         save_session(dir.path(), &plain).unwrap();
         let text = std::fs::read_to_string(dir.path().join("plain.json")).unwrap();
         assert!(!text.contains("persona"), "{text}");
+    }
+
+    #[test]
+    fn session_preset_snapshot_round_trip_and_legacy() {
+        let dir = tempfile::tempdir().unwrap();
+        // 旧会话文件（没有 preset 键）读回来是 None，按通用助手基线继续。
+        std::fs::write(
+            dir.path().join("legacy.json"),
+            r#"{"id":"legacy","title":"旧会话","createdAt":1,"updatedAt":2,"messages":[]}"#,
+        )
+        .unwrap();
+        assert!(load_session(dir.path(), "legacy").unwrap().preset.is_none());
+
+        // 普通会话的预设快照：camelCase 往返，覆盖与模型空串/None 两态都保真。
+        let snapshot = ChatPreset {
+            id: "u-1".into(),
+            name: "我的军师".into(),
+            icon: "🧠".into(),
+            color: "#ae432e".into(),
+            system_prompt: "你是军师。".into(),
+            provider_override: Some("p-b".into()),
+            model_override: None,
+        };
+        let s = ChatSession {
+            id: "snap".into(),
+            title: "聊聊".into(),
+            created_at: 1,
+            updated_at: 5,
+            messages: vec![],
+            persona: None,
+            preset: Some(snapshot.clone()),
+        };
+        save_session(dir.path(), &s).unwrap();
+        assert_eq!(
+            load_session(dir.path(), "snap").unwrap().preset,
+            Some(snapshot)
+        );
+
+        // 无预设会话存盘不落 preset 键，文件形状与旧会话完全一致。
+        let mut bare = s.clone();
+        bare.id = "bare".into();
+        bare.preset = None;
+        save_session(dir.path(), &bare).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("bare.json")).unwrap();
+        assert!(!text.contains("preset"), "{text}");
     }
 
     #[test]

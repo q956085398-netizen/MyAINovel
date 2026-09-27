@@ -23,7 +23,8 @@ pub const PROJECTS_DIR: &str = "项目";
 /// 只作用于新建书。首次使用（点「拆书模板」入口或新建书）不存在则落
 /// 默认模板——书档头卡＋空行＋第1章；占位符仅 `{书名}` 一个。
 pub const TEMPLATE_FILE: &str = "拆书模板.md";
-pub const DEFAULT_TEMPLATE: &str = "> [!书档]\n> 书名：{书名}\n> 成绩：\n> 简介：\n> 金手指：\n\n第1章\n";
+pub const DEFAULT_TEMPLATE: &str =
+    "> [!书档]\n> 书名：{书名}\n> 成绩：\n> 简介：\n> 金手指：\n\n第1章\n";
 
 fn template_path(root: &Path) -> PathBuf {
     root.join(TEMPLATE_FILE)
@@ -97,9 +98,12 @@ pub fn create_book(root: &Path, title: &str) -> Result<BookEntry, String> {
     if !root.is_dir() {
         return Err(format!("不是有效的文件夹：{}", root.display()));
     }
-    let title = title.trim().trim_start_matches('《').trim_end_matches('》').trim();
-    let name =
-        sanitize_file_name(title).map_err(|_| "书名不能为空（或只剩符号）".to_string())?;
+    let title = title
+        .trim()
+        .trim_start_matches('《')
+        .trim_end_matches('》')
+        .trim();
+    let name = sanitize_file_name(title).map_err(|_| "书名不能为空（或只剩符号）".to_string())?;
     let dir = root.join(format!("《{name}》"));
     if dir.exists() {
         return Err(format!("已存在同名书「{name}」"));
@@ -483,7 +487,10 @@ mod tests {
         let root = TempDir::new().unwrap().path().to_path_buf();
         write(&root.join("书甲.md"), "第1章");
         write(&root.join("项目/《我的书》/项目.yaml"), "书名: 我的书\n");
-        write(&root.join("项目/《我的书》/正文/0001 初入江湖.md"), "第1章 初入江湖");
+        write(
+            &root.join("项目/《我的书》/正文/0001 初入江湖.md"),
+            "第1章 初入江湖",
+        );
         // 项目/ 根下的散 .md 也不该被当成一本叫「项目」的书。
         write(&root.join("项目/随手记.md"), "不属于拆书");
 
@@ -599,10 +606,7 @@ mod tests {
         let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 1);
         assert_eq!(books[0].name, "我的新书");
-        assert_eq!(
-            books[0].meta.track_record, None,
-            "模板空成绩列显示空"
-        );
+        assert_eq!(books[0].meta.track_record, None, "模板空成绩列显示空");
     }
 
     #[test]
@@ -645,10 +649,16 @@ mod tests {
         let entry = open_book_template(&root).unwrap();
         assert_eq!(entry.name, "拆书模板");
         assert_eq!(entry.primary_md, root.join(TEMPLATE_FILE));
-        assert_eq!(fs::read_to_string(&root.join(TEMPLATE_FILE)).unwrap(), DEFAULT_TEMPLATE);
+        assert_eq!(
+            fs::read_to_string(&root.join(TEMPLATE_FILE)).unwrap(),
+            DEFAULT_TEMPLATE
+        );
 
         // 用户改过的模板原样保留，不被默认值覆盖。
-        write(&root.join(TEMPLATE_FILE), "> [!书档]\n> 书名：{书名}\n\n第一章\n");
+        write(
+            &root.join(TEMPLATE_FILE),
+            "> [!书档]\n> 书名：{书名}\n\n第一章\n",
+        );
         assert_eq!(
             open_book_template(&root).unwrap().primary_md,
             root.join(TEMPLATE_FILE)
@@ -699,7 +709,10 @@ mod tests {
     fn 扫描与搜索_库根拆书模板_不算书() {
         let root = TempDir::new().unwrap().path().to_path_buf();
         write(&root.join("书甲.md"), "第1章");
-        write(&root.join(TEMPLATE_FILE), "> [!书档]\n> 书名：{书名}\n\n第1章\n");
+        write(
+            &root.join(TEMPLATE_FILE),
+            "> [!书档]\n> 书名：{书名}\n\n第1章\n",
+        );
 
         let books = scan_library(&root).unwrap();
         assert_eq!(books.len(), 1);
@@ -720,10 +733,7 @@ mod tests {
         write(&root.join("《书丙》/附件/封面.png"), "png");
 
         let books = scan_library(&root).unwrap();
-        assert_eq!(
-            books[0].cover,
-            Some(root.join("《书丙》/附件/封面.png"))
-        );
+        assert_eq!(books[0].cover, Some(root.join("《书丙》/附件/封面.png")));
         assert_eq!(books[0].cover_dir, root.join("《书丙》/附件"));
     }
 
@@ -780,7 +790,11 @@ mod tests {
 
         let books = scan_library(&root).unwrap();
         assert_eq!(books[0].cover.as_deref(), Some(dest.as_path()));
-        assert_eq!(fs::read(&dest).unwrap(), "png bytes".as_bytes(), "拷贝而非引用");
+        assert_eq!(
+            fs::read(&dest).unwrap(),
+            "png bytes".as_bytes(),
+            "拷贝而非引用"
+        );
     }
 
     #[test]
@@ -807,7 +821,10 @@ mod tests {
             &root.join("书甲.md"),
             "> [!书档]\n> 书名：纸面名\n> 成绩：纸面成绩\n> 金手指：纸面金手指\n\n第1章",
         );
-        write(&root.join("书甲.yaml"), "书名: yaml名\n成绩: yaml成绩\n金手指: yaml金手指\n");
+        write(
+            &root.join("书甲.yaml"),
+            "书名: yaml名\n成绩: yaml成绩\n金手指: yaml金手指\n",
+        );
         // 乙：只有 yaml 残键（还没打开过的旧书）。
         write(&root.join("书乙.md"), "第1章");
         write(&root.join("书乙.yaml"), "成绩: 均订两万\n");
@@ -815,14 +832,23 @@ mod tests {
         write(&root.join("书丙.md"), "第1章");
 
         let books = scan_library(&root).unwrap();
-        let 甲 = books.iter().find(|b| b.primary_md.ends_with("书甲.md")).unwrap();
+        let 甲 = books
+            .iter()
+            .find(|b| b.primary_md.ends_with("书甲.md"))
+            .unwrap();
         assert_eq!(甲.name, "纸面名");
         assert_eq!(甲.meta.track_record.as_deref(), Some("纸面成绩"));
         assert_eq!(甲.meta.golden_finger.as_deref(), Some("纸面金手指"));
-        let 乙 = books.iter().find(|b| b.primary_md.ends_with("书乙.md")).unwrap();
+        let 乙 = books
+            .iter()
+            .find(|b| b.primary_md.ends_with("书乙.md"))
+            .unwrap();
         assert_eq!(乙.name, "书乙", "无书档无yaml书名→文件夹名兜底");
         assert_eq!(乙.meta.track_record.as_deref(), Some("均订两万"));
-        let 丙 = books.iter().find(|b| b.primary_md.ends_with("书丙.md")).unwrap();
+        let 丙 = books
+            .iter()
+            .find(|b| b.primary_md.ends_with("书丙.md"))
+            .unwrap();
         assert_eq!(丙.name, "书丙");
         assert_eq!(丙.meta, BookMeta::default());
     }
@@ -838,11 +864,17 @@ mod tests {
         );
 
         // 扫描只读：迁移前后 yaml/md 都不动。
-        let before = (fs::read(&md).unwrap(), fs::read(&root.join("《旧书》/拆书.yaml")).unwrap());
+        let before = (
+            fs::read(&md).unwrap(),
+            fs::read(&root.join("《旧书》/拆书.yaml")).unwrap(),
+        );
         let books = scan_library(&root).unwrap();
         assert_eq!(books[0].name, "旧书", "yaml 残键过渡显示");
         assert_eq!(
-            (fs::read(&md).unwrap(), fs::read(&root.join("《旧书》/拆书.yaml")).unwrap()),
+            (
+                fs::read(&md).unwrap(),
+                fs::read(&root.join("《旧书》/拆书.yaml")).unwrap()
+            ),
             before,
             "书库扫描绝不写盘"
         );

@@ -1,261 +1,225 @@
-//! 构思首页只读派生模型（工单 #57）。
-//! 所有字段都从现有权威文件现读，不写摘要副本。
+//! 构思首页只读模型（工单 #57）：从项目现有文件即时派生，不保存摘要副本，
+//! 也不计算完成度。
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::project::NoteKind;
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IdeationOverviewItem {
-    pub name: String,
-    pub detail: Option<String>,
-    pub tab: String,
-    pub focus: Option<String>,
+pub struct IdeationOverview {
+    pub premise: Option<String>,
+    pub mainline: Option<String>,
+    pub reader_imaginations: Vec<String>,
+    pub characters: Vec<OverviewItem>,
+    pub maps: Vec<OverviewItem>,
+    pub pending: Vec<OverviewItem>,
+    pub unresolved: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IdeationOverview {
-    pub logline: Option<String>,
-    pub reader_imagination: Option<String>,
-    pub mainlines: Vec<IdeationOverviewItem>,
-    pub characters: Vec<IdeationOverviewItem>,
-    pub maps: Vec<IdeationOverviewItem>,
-    pub pending: Vec<IdeationOverviewItem>,
-    pub unresolved: Vec<String>,
+pub struct OverviewItem {
+    pub tab: String,
+    pub name: String,
+    pub summary: Option<String>,
 }
 
 pub fn read_ideation_overview(project: &Path) -> Result<IdeationOverview, String> {
     let outline = crate::planning::read_outline(project)?;
-    let mainlines = crate::planning::read_mainlines(project)?;
     let circle = crate::project::read_circle(project)?;
-    let meta = crate::project::read_project_meta(project)?;
+    let mainlines = crate::planning::read_mainlines(project)?;
+    let mainline = mainlines
+        .lines
+        .iter()
+        .find(|line| line.is_main)
+        .or_else(|| mainlines.lines.first())
+        .map(|line| match line.milestones.first() {
+            Some(milestone) => format!("{} · {}", line.name, milestone.title),
+            None => line.name.clone(),
+        });
 
-    let characters = crate::project::scan_notes(project, NoteKind::Character)?
-        .into_iter()
-        .map(|note| IdeationOverviewItem {
+    let characters = crate::project::scan_notes(project, crate::project::NoteKind::Character)?;
+    let character_items = characters
+        .iter()
+        .map(|note| OverviewItem {
+            tab: "人物".into(),
             name: note.name.clone(),
-            detail: first_meaningful_line(&note.body),
-            tab: "人物".to_string(),
-            focus: Some(note.name),
+            summary: first_content_line(&note.body),
         })
-        .collect();
+        .collect::<Vec<_>>();
 
-    let maps = meta
+    let map_workspace = crate::map::map_workspace(project)?;
+    let map_items = map_workspace
         .maps
-        .into_iter()
-        .map(|name| IdeationOverviewItem {
-            name,
-            detail: None,
-            tab: "项目资料".to_string(),
-            focus: None,
+        .iter()
+        .map(|map| OverviewItem {
+            tab: "地图".into(),
+            name: map.name.clone(),
+            summary: map.role.clone().or_else(|| first_content_line(&map.body)),
         })
-        .collect();
+        .collect::<Vec<_>>();
 
     let mut pending = Vec::new();
-    for kind in NoteKind::ALL {
+    for kind in crate::project::NoteKind::ALL {
         for note in crate::project::scan_notes(project, kind)? {
-            let status_pending = note
-                .status
-                .as_deref()
-                .is_some_and(|status| matches!(status.trim(), "待打磨" | "待处理"));
-            if note.pending || status_pending {
-                pending.push(IdeationOverviewItem {
-                    name: note.name.clone(),
-                    detail: if note.pending {
-                        Some("待打磨".to_string())
-                    } else {
-                        note.status.clone()
-                    },
-                    tab: kind.name().to_string(),
-                    focus: Some(note.name),
+            if note.pending {
+                pending.push(OverviewItem {
+                    tab: kind.name().into(),
+                    name: note.name,
+                    summary: first_content_line(&note.body),
                 });
             }
         }
     }
-
-    let reader_imagination = if !circle.types.is_empty() {
-        Some(circle.types.join("、"))
-    } else {
-        first_meaningful_line(&circle.body)
-    };
+    pending.extend(
+        map_workspace
+            .maps
+            .iter()
+            .filter(|map| map.pending)
+            .map(|map| OverviewItem {
+                tab: "地图".into(),
+                name: map.name.clone(),
+                summary: map.role.clone().or_else(|| first_content_line(&map.body)),
+            }),
+    );
+    pending.extend(
+        map_workspace
+            .regions
+            .iter()
+            .filter(|region| region.pending)
+            .map(|region| OverviewItem {
+                tab: "地图".into(),
+                name: region.name.clone(),
+                summary: region
+                    .plot_role
+                    .clone()
+                    .or_else(|| first_content_line(&region.body)),
+            }),
+    );
 
     Ok(IdeationOverview {
-        logline: section_first_line(&outline.body, &["立意", "作品一句话", "一句话"]),
-        reader_imagination,
-        mainlines: mainlines
-            .lines
-            .into_iter()
-            .map(|line| IdeationOverviewItem {
-                detail: if line.milestones.is_empty() {
-                    None
-                } else {
-                    Some(
-                        line.milestones
-                            .iter()
-                            .take(3)
-                            .map(|milestone| milestone.title.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" → "),
-                    )
-                },
-                name: line.name,
-                tab: "大纲".to_string(),
-                focus: None,
-            })
-            .collect(),
-        characters,
-        maps,
+        premise: section_items(&outline.body, "立意").into_iter().next(),
+        mainline,
+        reader_imaginations: circle.types,
+        characters: character_items,
+        maps: map_items,
         pending,
-        unresolved: section_lines(&outline.body, "尚未解决"),
+        unresolved: section_items(&outline.body, "尚未解决"),
     })
 }
 
-fn first_meaningful_line(body: &str) -> Option<String> {
-    body.lines()
+fn first_content_line(markdown: &str) -> Option<String> {
+    markdown
+        .lines()
         .map(str::trim)
         .find(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(clean_list_prefix)
+        .map(|line| line.trim_start_matches(['-', '*']).trim().to_string())
         .filter(|line| !line.is_empty())
 }
 
-fn clean_list_prefix(line: &str) -> String {
-    line.trim()
-        .trim_start_matches("- ")
-        .trim_start_matches("* ")
-        .trim_start_matches("+ ")
-        .trim()
-        .to_string()
-}
-
-fn heading_title(line: &str) -> Option<&str> {
-    let trimmed = line.trim();
-    let rest = trimmed.strip_prefix('#')?;
-    let title = rest.trim_start_matches('#').trim();
-    (!title.is_empty()).then_some(title)
-}
-
-fn section_first_line(body: &str, names: &[&str]) -> Option<String> {
-    names.iter().find_map(|name| section_lines(body, name).into_iter().next())
-}
-
-fn section_lines(body: &str, section: &str) -> Vec<String> {
+fn section_items(markdown: &str, heading: &str) -> Vec<String> {
     let mut inside = false;
-    let mut out = Vec::new();
-    for line in body.lines() {
-        if let Some(title) = heading_title(line) {
-            if inside {
-                break;
-            }
-            inside = title == section;
+    let mut items = Vec::new();
+    for raw in markdown.lines() {
+        let line = raw.trim();
+        if let Some(title) = line.strip_prefix("## ") {
+            inside = title.trim() == heading;
             continue;
         }
-        if !inside {
+        if inside && line.starts_with('#') {
+            break;
+        }
+        if !inside || line.is_empty() {
             continue;
         }
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let line = clean_list_prefix(line);
-        if !line.is_empty() {
-            out.push(line);
+        let item = line
+            .strip_prefix("- ")
+            .or_else(|| line.strip_prefix("* "))
+            .unwrap_or(line)
+            .trim();
+        if !item.is_empty() {
+            items.push(item.to_string());
         }
     }
-    out
+    items
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn temp_project() -> std::path::PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("gongbi-ideation-{nonce}"));
-        fs::create_dir_all(root.join("构思")).expect("create temp project");
-        root
+    use tempfile::tempdir;
+
+    use super::*;
+
+    fn write(path: &Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
     }
 
     #[test]
     fn 构思首页从大纲现读作品一句话和尚未解决且不写副本() {
-        let project = temp_project();
-        fs::write(
-            project.join("构思").join("大纲.md"),
-            "# 立意\n\n谨慎的人也必须走出门。\n\n# 尚未解决\n\n- 为什么现在出发？\n- 第一站去哪里？\n",
-        )
-        .expect("write outline");
-        let before = fs::read_dir(project.join("构思")).expect("before").count();
+        let temp = tempdir().unwrap();
+        let project = temp.path().join("项目/《雾港》");
+        let outline = project.join("构思/大纲.md");
+        write(
+            &outline,
+            "## 立意\n\n失忆侦探追查一座会从记录中消失的港城。\n\n## 阶段构想\n\n先找到第七码头。\n\n## 尚未解决\n\n- 谁删掉了城市记录？\n- 主角为何记得第七码头？\n",
+        );
 
-        let overview = read_ideation_overview(&project).expect("overview");
+        let before = fs::read_dir(project.join("构思")).unwrap().count();
+        let overview = read_ideation_overview(&project).unwrap();
 
-        assert_eq!(overview.logline.as_deref(), Some("谨慎的人也必须走出门。"));
+        assert_eq!(
+            overview.premise.as_deref(),
+            Some("失忆侦探追查一座会从记录中消失的港城。")
+        );
         assert_eq!(
             overview.unresolved,
-            vec!["为什么现在出发？".to_string(), "第一站去哪里？".to_string()]
+            ["谁删掉了城市记录？", "主角为何记得第七码头？"]
         );
-        assert_eq!(fs::read_dir(project.join("构思")).expect("after").count(), before);
-        let _ = fs::remove_dir_all(project);
+        assert_eq!(fs::read_dir(project.join("构思")).unwrap().count(), before);
     }
 
     #[test]
     fn 构思首页汇总读者遐想主线人物地图与待打磨内容() {
-        let project = temp_project();
-        fs::write(
-            project.join("构思").join("类型圈.md"),
-            "---\n类型:\n  - 冒险\n  - 搜刮\n---\n\n读者想看准备转化成真正的行动。\n",
-        )
-        .expect("circle");
-        fs::write(
-            project.join("构思").join("主线.yaml"),
-            "- 名称: 出发\n  主线: true\n  里程碑:\n    - 标题: 离开村庄\n",
-        )
-        .expect("mainline");
-        fs::write(project.join("项目.yaml"), "地图:\n  - 边境村\n").expect("meta");
-        fs::create_dir_all(project.join("构思").join("人物")).expect("characters");
-        fs::write(
-            project.join("构思").join("人物").join("里昂.md"),
-            "谨慎，但想去看看世界。\n",
-        )
-        .expect("character");
-        fs::create_dir_all(project.join("构思").join("开头")).expect("openings");
-        fs::write(
-            project.join("构思").join("开头").join("版本A.md"),
-            "---\n状态: 待打磨\n---\n\n从出发前一晚切入。\n",
-        )
-        .expect("opening");
-        fs::write(
-            project.join("构思").join("开头").join("下一版.md"),
-            "---\n待打磨: true\n---\n\n从主角出门前切入。\n",
-        )
-        .expect("pending opening");
+        let temp = tempdir().unwrap();
+        let project = temp.path().join("项目/《雾港》");
+        write(
+            &project.join("构思/类型圈.md"),
+            "---\n类型: [抽丝剥茧, 身份揭晓]\n---\n读者想看真相一层层翻开。\n",
+        );
+        write(
+            &project.join("构思/主线.yaml"),
+            "- 名称: 找回第七码头\n  主线: true\n  里程碑:\n    - 标题: 找到消失的航海日志\n",
+        );
+        write(
+            &project.join("构思/人物/祁雁.md"),
+            "---\n待打磨: true\n---\n失忆侦探，记得不存在的码头。\n",
+        );
+        write(
+            &project.join("构思/地图/雾港.md"),
+            "---\n故事作用: 全书谜面\n待打磨: true\n---\n三面临海的港城。\n",
+        );
 
-        let overview = read_ideation_overview(&project).expect("overview");
-        assert_eq!(overview.reader_imagination.as_deref(), Some("冒险、搜刮"));
-        assert_eq!(overview.mainlines[0].name, "出发");
-        assert_eq!(overview.characters[0].name, "里昂");
-        assert_eq!(overview.maps[0].name, "边境村");
-        let marked = overview
-            .pending
-            .iter()
-            .find(|item| item.name == "版本A")
-            .expect("status-based pending note");
-        assert_eq!(marked.detail.as_deref(), Some("待打磨"));
-        assert_eq!(marked.focus.as_deref(), Some("版本A"));
-        let frontmatter_pending = overview
-            .pending
-            .iter()
-            .find(|item| item.name == "下一版")
-            .expect("frontmatter pending note");
-        assert_eq!(frontmatter_pending.detail.as_deref(), Some("待打磨"));
-        assert_eq!(frontmatter_pending.focus.as_deref(), Some("下一版"));
-        let _ = fs::remove_dir_all(project);
+        let overview = read_ideation_overview(&project).unwrap();
+
+        assert_eq!(overview.reader_imaginations, ["抽丝剥茧", "身份揭晓"]);
+        assert_eq!(
+            overview.mainline.as_deref(),
+            Some("找回第七码头 · 找到消失的航海日志")
+        );
+        assert_eq!(overview.characters[0].name, "祁雁");
+        assert_eq!(overview.characters[0].tab, "人物");
+        assert_eq!(overview.maps[0].name, "雾港");
+        assert_eq!(
+            overview
+                .pending
+                .iter()
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>(),
+            ["祁雁", "雾港"]
+        );
     }
 }

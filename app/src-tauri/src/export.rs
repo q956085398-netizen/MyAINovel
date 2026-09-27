@@ -586,7 +586,11 @@ pub fn export_book(
     let built = build_export(project, range, template)?;
     let dir = project.join(EXPORT_DIR);
     fs::create_dir_all(&dir).map_err(|e| format!("无法创建文件夹 {}：{e}", dir.display()))?;
-    let ext = if template.format == FORMAT_MD { "md" } else { "txt" };
+    let ext = if template.format == FORMAT_MD {
+        "md"
+    } else {
+        "txt"
+    };
     let stamp = chrono::Local::now().format("%Y%m%d").to_string();
     let base = format!("{}-{}-{stamp}", built.title, range.label());
     let mut path = dir.join(format!("{base}.{ext}"));
@@ -706,7 +710,6 @@ mod tests {
         assert_eq!(cleaned.body, "斜体 与 a_b_c");
     }
 
-
     #[test]
     fn 清洗_空行压缩与段首缩进() {
         let mut template = ExportTemplate::default();
@@ -755,7 +758,12 @@ mod tests {
         assert_eq!(report.chapters[1].ordinal, 2);
         assert_eq!(report.warnings.len(), 1);
         assert!(report.warnings[0].contains("随手记"));
-        let file_name = report.path.file_name().unwrap().to_string_lossy().into_owned();
+        let file_name = report
+            .path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         assert!(file_name.starts_with("大魏读书人-全书-"), "{file_name}");
         assert!(file_name.ends_with(".txt"), "{file_name}");
 
@@ -769,7 +777,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
         for n in 1..=3 {
-            write(&p.join(format!("正文/{n:04} 第{n}章.md")), &format!("正文{n}"));
+            write(
+                &p.join(format!("正文/{n:04} 第{n}章.md")),
+                &format!("正文{n}"),
+            );
         }
         let range = ChapterRange {
             from: Some(2),
@@ -865,7 +876,10 @@ mod tests {
     fn 预览_截断加提示_不落盘() {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
-        write(&p.join("正文/0001 甲.md"), &"字".repeat(PREVIEW_CHARS + 100));
+        write(
+            &p.join("正文/0001 甲.md"),
+            &"字".repeat(PREVIEW_CHARS + 100),
+        );
         let text = preview_export(&p, ChapterRange::default(), &ExportTemplate::default()).unwrap();
         assert!(text.ends_with("……（预览截断，完整内容见导出文件）"));
         assert!(!p.join(EXPORT_DIR).exists(), "预览不写盘");
@@ -934,11 +948,28 @@ mod tests {
             warnings: Vec::new(),
         };
         let value = serde_json::to_value(&report).unwrap();
-        for key in ["path", "format", "chapterCount", "wordCount", "chapters", "warnings"] {
+        for key in [
+            "path",
+            "format",
+            "chapterCount",
+            "wordCount",
+            "chapters",
+            "warnings",
+        ] {
             assert!(value.get(key).is_some(), "缺字段 {key}");
         }
-        for key in ["ordinal", "title", "fileName", "wordCount", "imagesDropped", "notes"] {
-            assert!(value["chapters"][0].get(key).is_some(), "章报告缺字段 {key}");
+        for key in [
+            "ordinal",
+            "title",
+            "fileName",
+            "wordCount",
+            "imagesDropped",
+            "notes",
+        ] {
+            assert!(
+                value["chapters"][0].get(key).is_some(),
+                "章报告缺字段 {key}"
+            );
         }
     }
 }

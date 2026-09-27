@@ -5,10 +5,8 @@ import { errMsg, splitList } from "./util";
 import MarkdownEditor from "./MarkdownEditor";
 import VocabInput from "./VocabInput";
 import {
-  DEFAULT_IMAGINATION_PROMPTS,
-  editPrompt,
-  removePrompt,
-  type IdeationPrompt,
+  normalizeReaderPrompts,
+  type ReaderPrompt,
 } from "./ideationGuidance";
 
 interface CircleViewProps {
@@ -20,21 +18,29 @@ interface CircleViewProps {
 /** 类型圈：这本书的读者遐想清单（约 4~6 类），整本书的内容只在圈内。
  *  frontmatter 的类型列表是机器可读的那份，正文按类型逐条写遐想笔记。 */
 export default function CircleView({ project, vocab }: CircleViewProps) {
-  const promptStorageKey = `gongbi:reader-imagination-prompts:${project}`;
-  const [prompts, setPrompts] = useState<IdeationPrompt[]>(() => {
-    try {
-      const saved = localStorage.getItem(promptStorageKey);
-      return saved ? JSON.parse(saved) : DEFAULT_IMAGINATION_PROMPTS.map((item) => ({ ...item }));
-    } catch {
-      return DEFAULT_IMAGINATION_PROMPTS.map((item) => ({ ...item }));
-    }
-  });
   const [typesText, setTypesText] = useState("");
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const promptKey = `gongbi.reader-prompts.${project}`;
+  const promptHiddenKey = `${promptKey}.hidden`;
+  const [prompts, setPrompts] = useState<ReaderPrompt[]>(() => {
+    try {
+      return normalizeReaderPrompts(JSON.parse(localStorage.getItem(promptKey) ?? "null"));
+    } catch {
+      return normalizeReaderPrompts(null);
+    }
+  });
+  const [promptsHidden, setPromptsHidden] = useState(
+    () => localStorage.getItem(promptHiddenKey) === "1",
+  );
+
+  function savePrompts(next: ReaderPrompt[]) {
+    localStorage.setItem(promptKey, JSON.stringify(next));
+    setPrompts(next);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -45,7 +51,7 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
         setTypesText(circle.types.join("、"));
         setBody(circle.body);
       } catch (e) {
-        if (!cancelled) setError(`读取读者遐想（类型圈）失败：${errMsg(e)}`);
+        if (!cancelled) setError(`读取读者遐想失败：${errMsg(e)}`);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -55,9 +61,6 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
     };
   }, [project]);
 
-  useEffect(() => {
-    localStorage.setItem(promptStorageKey, JSON.stringify(prompts));
-  }, [promptStorageKey, prompts]);
 
   async function save() {
     if (saving) return;
@@ -69,7 +72,7 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
       });
       setDirty(false);
     } catch (e) {
-      window.alert(`读者遐想（类型圈）保存失败：${errMsg(e)}`);
+      window.alert(`读者遐想保存失败：${errMsg(e)}`);
     } finally {
       setSaving(false);
     }
@@ -98,36 +101,46 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
         <p className="hint">正在读取……</p>
       ) : (
         <>
-          <section className="imagination-guidance">
-            <div className="imagination-guidance-head">
-              <div>
-                <h3>想不到时，可以从这三个方向问自己</h3>
-                <p className="hint">这些只是本机引导，不写进创作目录；可以改写、删掉或全部跳过。</p>
-              </div>
-              {prompts.length > 0 ? (
-                <button className="btn" onClick={() => setPrompts([])}>跳过全部</button>
-              ) : (
+          {!promptsHidden && prompts.length > 0 && (
+            <div className="reader-prompt-guide">
+              <div className="reader-prompt-head">
+                <div>
+                  <strong>可删的思考提示</strong>
+                  <p className="hint">改写成适合这本书的问题，也可以移除或暂时跳过。</p>
+                </div>
                 <button
-                  className="btn"
-                  onClick={() => setPrompts(DEFAULT_IMAGINATION_PROMPTS.map((item) => ({ ...item })))}
+                  className="link-like"
+                  onClick={() => {
+                    localStorage.setItem(promptHiddenKey, "1");
+                    setPromptsHidden(true);
+                  }}
                 >
-                  恢复引导
-                </button>
-              )}
-            </div>
-            {prompts.map((prompt) => (
-              <div className="imagination-prompt" key={prompt.id}>
-                <strong>{prompt.title}</strong>
-                <textarea
-                  value={prompt.text}
-                  onChange={(event) => setPrompts((items) => editPrompt(items, prompt.id, event.target.value))}
-                />
-                <button className="btn" onClick={() => setPrompts((items) => removePrompt(items, prompt.id))}>
-                  删除
+                  暂时跳过
                 </button>
               </div>
-            ))}
-          </section>
+              {prompts.map((prompt, index) => (
+                <div className="reader-prompt-row" key={prompt.id}>
+                  <span>{prompt.label}</span>
+                  <textarea
+                    value={prompt.text}
+                    rows={2}
+                    onChange={(event) => {
+                      const next = prompts.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, text: event.target.value } : item,
+                      );
+                      savePrompts(next);
+                    }}
+                  />
+                  <button
+                    className="link-like danger"
+                    onClick={() => savePrompts(prompts.filter((item) => item.id !== prompt.id))}
+                  >
+                    移除
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <label className="field">
             类型（多个用、隔开）
             <VocabInput

@@ -10,6 +10,8 @@ import { errMsg, splitList } from "./util";
 import { dirName } from "./editorRender";
 import MarkdownEditor from "./MarkdownEditor";
 import VocabInput from "./VocabInput";
+import { CHARACTER_FIELDS, emptyCharacterProfile } from "./characterProfile";
+import CharacterImage from "./CharacterImage";
 
 const KIND_LABELS: Record<NoteKind, { name: string; placeholder: string }> = {
   矛盾: { name: "矛盾名", placeholder: "如：通缉身份（标题即文件名）" },
@@ -51,7 +53,8 @@ export default function NoteDialog({
   const [source, setSource] = useState(initial.source ?? "");
   const [linksText, setLinksText] = useState(initial.links.join("\n"));
   const [status, setStatus] = useState(initial.status ?? "");
-  const [group, setGroup] = useState(initial.group ?? "");
+  const [character, setCharacter] = useState(initial.character ?? emptyCharacterProfile());
+  const [traitsText, setTraitsText] = useState((initial.character?.traits ?? []).join("、"));
   const [aliasesText, setAliasesText] = useState(initial.aliases.join("、"));
   const [category, setCategory] = useState(initial.category ?? "");
   const [emotionGoal, setEmotionGoal] = useState(initial.emotionGoal ?? "");
@@ -73,6 +76,7 @@ export default function NoteDialog({
   async function save() {
     if (busy) return;
     const draft: NoteDraft = {
+      fingerprint: prevPath ? initial.fingerprint : undefined,
       kind,
       name: name.trim(),
       core: core.trim() || null,
@@ -83,7 +87,8 @@ export default function NoteDialog({
         .map((l) => l.trim())
         .filter(Boolean),
       status: status.trim() || null,
-      group: group.trim() || null,
+      group: initial.group,
+      character: kind === "人物" ? { ...character, traits: splitList(traitsText) } : undefined,
       aliases: splitList(aliasesText),
       category: category.trim() || null,
       emotionGoal: emotionGoal.trim() || null,
@@ -239,14 +244,19 @@ export default function NoteDialog({
 
         {kind === "人物" && (
           <>
-            <label>
-              分组（阵营/组织）
-              <input
-                value={group}
-                onChange={(e) => setGroup(e.target.value)}
-                placeholder="如：主角阵营"
-              />
+            {CHARACTER_FIELDS.map(([field, label]) => (
+              <label key={field}>{label}（可选）
+                <input value={character[field] ?? ""}
+                  onChange={(e) => setCharacter({ ...character, [field]: e.target.value || null })}
+                  placeholder={field === "image" ? "相对人物文件的附件路径，如 ../../附件/人物.png" : undefined} />
+              </label>
+            ))}
+            <CharacterImage image={character.image} path={prevPath ?? `${project}/构思/人物/新人物.md`} name={name} />
+            <label>性格关键词（可选，多个用、隔开）
+              <input value={traitsText} onChange={(e) => setTraitsText(e.target.value)} />
             </label>
+            {initial.group && <p className="hint">旧分组：{initial.group}。在「组织与归属」预览升级；这里保留原字段。</p>}
+            <p className="hint">组织归属来自社会关系，不再保存单一分组。小传、外貌、说话方式与人物弧可在正文自由写。</p>
             <label>
               别名（多个用、隔开）
               <input
@@ -292,6 +302,9 @@ export default function NoteDialog({
             resolveDir={prevPath ? dirName(prevPath) : undefined}
           />
         </label>
+        {kind === "世界观" && (
+          <p className="hint">正文里的思考提示和标题都可删除、留空或改写，类别也可留空；无需填写等级结构。</p>
+        )}
         <p className="hint">
           保存写入 构思/{kind}/{name.trim() || "标题"}.md；同名自动续号，
           在 Obsidian 里手补的字段不会丢。

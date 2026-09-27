@@ -6,15 +6,19 @@ mod cover;
 mod expectation;
 mod export;
 mod foreshadow;
-mod inspiration;
+mod global_search;
 mod ideation;
+mod inspiration;
 mod library;
+mod map;
 mod pending;
 mod planning;
+mod presets;
 mod project;
 mod proofread;
 mod relationship;
 mod search;
+mod social;
 mod thread;
 mod trope;
 mod vocabulary;
@@ -23,19 +27,26 @@ use std::path::{Path, PathBuf};
 
 use ai::{AiConfig, AiState, ChatSession, ChatSessionSummary, ChatStreamEvent, ChatStreamReq};
 use book_file::{BookMeta, ChapterAnchor, MdContent, SaveResult};
-use chapter::{ChapterEntry, SnapshotEntry, UnitBrief, WritingStats};
+use chapter::{ChapterCard, ChapterEntry, SnapshotEntry, UnitBrief, WritingStats};
 use expectation::{Expectation, ExpectationBoard};
 use export::{ChapterRange, ExportReport, ExportTemplate};
 use foreshadow::{Foreshadow, ForeshadowView};
-use inspiration::{CardDraft, ImportEntry, InspirationCard};
+use ideation::IdeationOverview;
+use inspiration::{CardDraft, ImportEntry, InspirationCard, LinkedChapter};
 use library::BookEntry;
-use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, Outline};
+use map::{
+    GeoUpgradePreview, GeoUpgradeTarget, MapCanvasLayout, MapCanvasPlacement, MapDraft, MapEntry,
+    MapRelation, MapStructure, MapTransition, MapWorkspace, RegionDraft, RegionEntry,
+    RegionRelation,
+};
 use pending::PendingLine;
+use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, MilestoneSource, Outline};
+use presets::{PresetSave, PresetState};
 use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
     ProjectMeta,
 };
-use proofread::ProofReport;
+use proofread::{ProofReport, ProofreadOptions};
 use relationship::{Confluence, RelationshipTable, RelationshipView};
 use trope::TropeSpan;
 use vocabulary::Vocabulary;
@@ -92,7 +103,9 @@ fn grant_asset_scope(app: tauri::AppHandle, path: String) -> Result<(), String> 
             .allow_directory(&target, true)
             .map_err(|e| format!("无法授权目录访问：{e}"))
     } else {
-        scope.allow_file(&target).map_err(|e| format!("无法授权文件访问：{e}"))
+        scope
+            .allow_file(&target)
+            .map_err(|e| format!("无法授权文件访问：{e}"))
     }
 }
 
@@ -169,6 +182,25 @@ fn load_vocab(root: String) -> Result<Vocabulary, String> {
 }
 
 #[tauri::command]
+async fn global_search_preview(root: String, path: String, name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        global_search::preview(Path::new(&root), Path::new(&path), &name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn global_search(
+    root: String,
+    query: String,
+) -> Result<global_search::GlobalSearchReport, String> {
+    tauri::async_runtime::spawn_blocking(move || global_search::search(Path::new(&root), &query))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn search_library(root: String, query: String) -> Result<Vec<search::SearchHit>, String> {
     search::search_library(&PathBuf::from(&root), &query)
 }
@@ -196,6 +228,29 @@ fn save_inspiration_card(
 #[tauri::command]
 fn capture_inspiration(root: String, body: String) -> Result<InspirationCard, String> {
     inspiration::save_quick_capture(Path::new(&root), &body)
+}
+
+#[tauri::command]
+fn capture_chapter_inspiration(
+    root: String,
+    project: String,
+    chapter: String,
+    body: String,
+) -> Result<InspirationCard, String> {
+    inspiration::save_linked_quick_capture(
+        Path::new(&root),
+        Path::new(&project),
+        Path::new(&chapter),
+        &body,
+    )
+}
+
+#[tauri::command]
+fn resolve_chapter_inspiration_link(
+    root: String,
+    link: String,
+) -> Result<Option<LinkedChapter>, String> {
+    inspiration::resolve_chapter_link(Path::new(&root), &link)
 }
 
 #[tauri::command]
@@ -253,6 +308,11 @@ fn create_project(root: String, title: String) -> Result<ProjectEntry, String> {
 }
 
 #[tauri::command]
+fn read_ideation_overview(project: String) -> Result<IdeationOverview, String> {
+    ideation::read_ideation_overview(Path::new(&project))
+}
+
+#[tauri::command]
 fn read_project_meta(project: String) -> Result<ProjectMeta, String> {
     project::read_project_meta(Path::new(&project))
 }
@@ -262,9 +322,166 @@ fn save_project_meta(project: String, meta: ProjectMeta) -> Result<(), String> {
     project::write_project_meta(Path::new(&project), &meta)
 }
 
+// --- 地图、地域与转场（工单 #61）：空间实体与兼容升级底座 ---
+
 #[tauri::command]
-fn read_ideation_overview(project: String) -> Result<ideation::IdeationOverview, String> {
-    ideation::read_ideation_overview(Path::new(&project))
+fn read_map_workspace(project: String) -> Result<MapWorkspace, String> {
+    map::map_workspace(Path::new(&project))
+}
+
+#[tauri::command]
+fn save_map(
+    project: String,
+    draft: MapDraft,
+    prev_path: Option<String>,
+) -> Result<MapEntry, String> {
+    map::save_map(
+        Path::new(&project),
+        &draft,
+        prev_path.as_deref().map(Path::new),
+    )
+}
+
+#[tauri::command]
+fn save_region(
+    project: String,
+    draft: RegionDraft,
+    prev_path: Option<String>,
+) -> Result<RegionEntry, String> {
+    map::save_region(
+        Path::new(&project),
+        &draft,
+        prev_path.as_deref().map(Path::new),
+    )
+}
+
+#[tauri::command]
+fn delete_map_place(path: String) -> Result<(), String> {
+    map::delete_place(Path::new(&path))
+}
+
+/// 地域归属唯一（工单 #65）：设置/改换所属地图、改名时对账包含行，
+/// 整表读-合-写。
+#[tauri::command]
+fn set_region_containment(
+    project: String,
+    prev_region: Option<String>,
+    region: String,
+    map_name: Option<String>,
+) -> Result<(), String> {
+    map::set_region_containment(
+        Path::new(&project),
+        prev_region.as_deref(),
+        &region,
+        map_name.as_deref(),
+    )
+}
+
+/// 转场窄写（工单 #65）：只替换结构表的「转场」节，其余从盘上现读保留。
+#[tauri::command]
+fn save_map_transitions(project: String, transitions: Vec<MapTransition>) -> Result<(), String> {
+    map::save_map_transitions(Path::new(&project), &transitions)
+}
+
+#[tauri::command]
+fn read_map_structure(project: String) -> Result<MapStructure, String> {
+    map::read_map_structure(Path::new(&project))
+}
+
+#[tauri::command]
+fn save_map_structure(project: String, table: MapStructure) -> Result<(), String> {
+    map::save_map_structure(Path::new(&project), &table)
+}
+
+#[tauri::command]
+fn read_map_canvas_layout(
+    project: String,
+    map_name: Option<String>,
+) -> Result<MapCanvasLayout, String> {
+    map::read_map_canvas_layout(Path::new(&project), map_name.as_deref())
+}
+
+#[tauri::command]
+fn save_map_canvas_layout(
+    project: String,
+    map_name: Option<String>,
+    placements: Vec<MapCanvasPlacement>,
+    expected: Option<String>,
+) -> Result<MapCanvasLayout, String> {
+    map::save_map_canvas_layout(
+        Path::new(&project),
+        map_name.as_deref(),
+        &placements,
+        expected.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn arrange_map_canvas(
+    project: String,
+    map_name: Option<String>,
+    all: bool,
+    expected: Option<String>,
+) -> Result<MapCanvasLayout, String> {
+    map::arrange_map_canvas(
+        Path::new(&project),
+        map_name.as_deref(),
+        all,
+        expected.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn edit_map_relation(
+    project: String,
+    index: Option<usize>,
+    next: Option<MapRelation>,
+    expected: Option<String>,
+) -> Result<MapStructure, String> {
+    map::edit_map_relation(
+        Path::new(&project),
+        index,
+        next.as_ref(),
+        expected.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn edit_region_relation(
+    project: String,
+    index: Option<usize>,
+    next: Option<RegionRelation>,
+    expected: Option<String>,
+) -> Result<MapStructure, String> {
+    map::edit_region_relation(
+        Path::new(&project),
+        index,
+        next.as_ref(),
+        expected.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn map_background_reference(project: String, image_path: String) -> Result<String, String> {
+    map::map_background_reference(Path::new(&project), Path::new(&image_path))
+}
+
+/// 迁移预览是只读的：UI 必须先展示目标/备份位置，用户确认后再调执行接口。
+#[tauri::command]
+fn preview_geo_upgrade(
+    project: String,
+    source: String,
+    target: GeoUpgradeTarget,
+) -> Result<GeoUpgradePreview, String> {
+    map::geo_upgrade_preview(Path::new(&project), Path::new(&source), target)
+}
+
+#[tauri::command]
+fn confirm_geo_upgrade(
+    project: String,
+    preview: GeoUpgradePreview,
+) -> Result<MapWorkspace, String> {
+    map::confirm_geo_upgrade(Path::new(&project), &preview)
 }
 
 /// 大纲纸面（工单 #41）：自由 Markdown，缺失文件即空状态。
@@ -287,6 +504,17 @@ fn read_mainlines(project: String) -> Result<MainlinePlan, String> {
 #[tauri::command]
 fn save_mainlines(project: String, plan: MainlinePlan, force: bool) -> Result<SaveResult, String> {
     planning::save_mainlines(Path::new(&project), &plan, force)
+}
+
+/// 切换主线里程碑的独立待打磨状态；依赖载入时的主线表指纹与原始位置。
+#[tauri::command]
+fn set_milestone_pending(
+    project: String,
+    source: MilestoneSource,
+    fingerprint: String,
+    pending: bool,
+) -> Result<SaveResult, String> {
+    planning::set_milestone_pending(Path::new(&project), &source, &fingerprint, pending)
 }
 
 /// 项目内桥段库（工单 #43）：每张桥段卡只在 构思/桥段/ 保存一份。
@@ -369,7 +597,10 @@ fn save_arrangement(project: String, items: Vec<ArrangementItem>) -> Result<(), 
 
 /// 排布体检（只提示不拦截）：对当前列表（可含未保存改动）现算。
 #[tauri::command]
-fn check_arrangement(project: String, items: Vec<ArrangementItem>) -> Result<ArrangementCheck, String> {
+fn check_arrangement(
+    project: String,
+    items: Vec<ArrangementItem>,
+) -> Result<ArrangementCheck, String> {
     project::check_project_arrangement(Path::new(&project), &items)
 }
 
@@ -386,11 +617,7 @@ fn transmute_story_card(
     card_path: String,
     project: String,
 ) -> Result<NoteEntry, String> {
-    project::transmute_story_card(
-        Path::new(&root),
-        Path::new(&card_path),
-        Path::new(&project),
-    )
+    project::transmute_story_card(Path::new(&root), Path::new(&card_path), Path::new(&project))
 }
 
 /// 角色卡转生书内人物：建人物、卡片「关联」记去向（工单 #8）。
@@ -400,14 +627,91 @@ fn transmute_character_card(
     card_path: String,
     project: String,
 ) -> Result<NoteEntry, String> {
-    project::transmute_character_card(
-        Path::new(&root),
-        Path::new(&card_path),
-        Path::new(&project),
-    )
+    project::transmute_character_card(Path::new(&root), Path::new(&card_path), Path::new(&project))
 }
 
 // --- 人物关系画布（工单 #8，docs/spec/人物关系画布.md）：构思/人物关系.yaml ---
+
+#[tauri::command]
+fn read_social_workspace(project: String) -> Result<social::SocialWorkspace, String> {
+    social::workspace(Path::new(&project))
+}
+#[tauri::command]
+fn read_social_canvas(project: String) -> Result<social::SocialCanvas, String> {
+    social::canvas_view(Path::new(&project))
+}
+#[tauri::command]
+fn save_social_layout(
+    project: String,
+    placements: Vec<social::Placement>,
+    expected: String,
+) -> Result<social::SocialCanvas, String> {
+    social::save_canvas_layout(Path::new(&project), &placements, &expected)
+}
+#[tauri::command]
+fn arrange_social_canvas(
+    project: String,
+    all: bool,
+    expected: String,
+) -> Result<social::SocialCanvas, String> {
+    social::arrange_canvas(Path::new(&project), all, &expected)
+}
+#[tauri::command]
+fn edit_social_edge(
+    project: String,
+    index: Option<usize>,
+    next: Option<social::SocialEdge>,
+    expected: String,
+) -> Result<social::SocialCanvas, String> {
+    social::edit_canvas_edge(Path::new(&project), index, next.as_ref(), &expected)
+}
+#[tauri::command]
+fn save_social_legend(
+    project: String,
+    legend: Vec<relationship::LegendItem>,
+    sources: Vec<Option<usize>>,
+    expected: String,
+) -> Result<social::SocialCanvas, String> {
+    social::save_canvas_legend(Path::new(&project), &legend, &sources, &expected)
+}
+#[tauri::command]
+fn save_organization(
+    project: String,
+    draft: social::OrganizationDraft,
+    expected: Option<String>,
+) -> Result<social::Organization, String> {
+    social::save_organization(Path::new(&project), &draft, expected.as_deref())
+}
+#[tauri::command]
+fn delete_organization(project: String, name: String, expected: String) -> Result<(), String> {
+    social::delete_organization(Path::new(&project), &name, &expected)
+}
+#[tauri::command]
+fn edit_membership(
+    project: String,
+    next: Option<social::Membership>,
+    previous: Option<social::Membership>,
+    expected: String,
+) -> Result<(), String> {
+    social::edit_membership(
+        Path::new(&project),
+        next.as_ref(),
+        previous.as_ref(),
+        &expected,
+    )
+}
+#[tauri::command]
+fn preview_social_upgrade(project: String) -> Result<social::UpgradePreview, String> {
+    social::preview_upgrade(Path::new(&project))
+}
+#[tauri::command]
+fn confirm_social_upgrade(project: String, preview: social::UpgradePreview) -> Result<(), String> {
+    social::confirm_upgrade(Path::new(&project), &preview)
+}
+#[tauri::command]
+fn recover_social_upgrade(project: String) -> Result<(), String> {
+    social::recover_upgrade(Path::new(&project))
+}
 
 /// 画布数据：图例 ＋ 画得出来的边 ＋ 失效引用/图例外的类型（只提示）。
 /// 表坏了降级为缺省图例＋空表并带 warning，不拖垮画布。
@@ -440,11 +744,7 @@ fn promote_characters(
     names: Vec<String>,
     name: Option<String>,
 ) -> Result<NoteEntry, String> {
-    relationship::promote_characters_to_contradiction(
-        Path::new(&project),
-        &names,
-        name.as_deref(),
-    )
+    relationship::promote_characters_to_contradiction(Path::new(&project), &names, name.as_deref())
 }
 
 // --- 书写板块（工单 #5，docs/spec/书写编辑器.md）：正文一章一文件 ---
@@ -455,6 +755,11 @@ fn scan_chapters(project: String) -> Result<Vec<ChapterEntry>, String> {
 }
 
 #[tauri::command]
+fn scan_chapter_cards(project: String) -> Result<Vec<ChapterCard>, String> {
+    chapter::scan_chapter_cards(Path::new(&project))
+}
+
+#[tauri::command]
 fn create_chapter(project: String, title: String) -> Result<ChapterEntry, String> {
     chapter::create_chapter(Path::new(&project), &title)
 }
@@ -462,6 +767,29 @@ fn create_chapter(project: String, title: String) -> Result<ChapterEntry, String
 #[tauri::command]
 fn rename_chapter(path: String, title: String) -> Result<ChapterEntry, String> {
     chapter::rename_chapter(Path::new(&path), &title)
+}
+
+#[tauri::command]
+fn preview_chapter_split(
+    project: String,
+    source: String,
+    cursor_utf16: usize,
+    title: String,
+) -> Result<chapter::ChapterSplitPreview, String> {
+    chapter::preview_chapter_split(
+        Path::new(&project),
+        Path::new(&source),
+        cursor_utf16,
+        &title,
+    )
+}
+
+#[tauri::command]
+fn split_chapter(
+    project: String,
+    preview: chapter::ChapterSplitPreview,
+) -> Result<chapter::ChapterSplitResult, String> {
+    chapter::split_chapter(Path::new(&project), &preview)
 }
 
 #[tauri::command]
@@ -503,7 +831,11 @@ fn read_chapter_snapshot(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn save_chapter_paste_image(project: String, ext: String, bytes: Vec<u8>) -> Result<String, String> {
+fn save_chapter_paste_image(
+    project: String,
+    ext: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
     chapter::save_chapter_paste_image(Path::new(&project), &ext, &bytes)
 }
 
@@ -571,6 +903,15 @@ fn set_foreshadow_state(
     state: String,
 ) -> Result<Vec<Foreshadow>, String> {
     foreshadow::set_foreshadow_state(Path::new(&project), &name, &state)
+}
+
+#[tauri::command]
+fn set_foreshadow_pending(
+    project: String,
+    name: String,
+    pending: bool,
+) -> Result<Vec<Foreshadow>, String> {
+    foreshadow::set_foreshadow_pending(Path::new(&project), &name, pending)
 }
 
 #[tauri::command]
@@ -647,6 +988,17 @@ fn set_expectation_state(
     expectation::set_expectation_state(Path::new(&project), &name, &state)
 }
 
+/// 切换期待线的独立待打磨状态；以看板载入时的三线.yaml 指纹拒绝陈旧写入。
+#[tauri::command]
+fn set_expectation_pending(
+    project: String,
+    name: String,
+    fingerprint: String,
+    pending: bool,
+) -> Result<SaveResult, String> {
+    expectation::set_expectation_pending(Path::new(&project), &name, pending, &fingerprint)
+}
+
 #[tauri::command]
 fn set_expectation_meta(
     project: String,
@@ -696,14 +1048,26 @@ fn preview_export(
     export::preview_export(Path::new(&project), range, &template)
 }
 
-/// 发布前校对：只读正文，词库取库根「校对/」（root 为空＝只用内置规则）。
+/// 主动本地校对：只读正文，四类规则可独立开关；扫描在线程池运行。
 #[tauri::command]
-fn proofread_chapters(
+async fn proofread_chapters(
     root: String,
     project: String,
     range: ChapterRange,
+    options: Option<ProofreadOptions>,
+    chapter_path: Option<String>,
 ) -> Result<ProofReport, String> {
-    proofread::proofread_chapters(Path::new(&root), Path::new(&project), range)
+    tauri::async_runtime::spawn_blocking(move || {
+        proofread::proofread_chapters_with_options(
+            Path::new(&root),
+            Path::new(&project),
+            range,
+            options.unwrap_or_default(),
+            chapter_path.as_deref().map(Path::new),
+        )
+    })
+    .await
+    .map_err(|e| format!("校对任务意外结束：{e}"))?
 }
 
 #[tauri::command]
@@ -761,6 +1125,18 @@ fn save_chat_session(app: tauri::AppHandle, session: ChatSession) -> Result<(), 
 #[tauri::command]
 fn delete_chat_session(app: tauri::AppHandle, id: String) -> Result<(), String> {
     ai::delete_session(&ai::sessions_dir(&app)?, &id)
+}
+
+// --- AI 助手预设（工单 T06，docs/spec/AI助手预设.md）：存应用数据目录 ai/presets.json ---
+
+#[tauri::command]
+fn load_assistant_presets(app: tauri::AppHandle) -> Result<PresetState, String> {
+    presets::load(&presets::presets_path(&app)?)
+}
+
+#[tauri::command]
+fn save_assistant_presets(app: tauri::AppHandle, save: PresetSave) -> Result<PresetState, String> {
+    presets::save(&presets::presets_path(&app)?, &save)
 }
 
 /// 流式对话：增量经 onEvent Channel 回推，前端以 token 配对「停止」。
@@ -826,22 +1202,43 @@ pub fn run() {
             save_tropes,
             load_vocab,
             search_library,
+            global_search,
+            global_search_preview,
             scan_inspirations,
             save_inspiration_card,
             capture_inspiration,
+            capture_chapter_inspiration,
+            resolve_chapter_inspiration_link,
             delete_inspiration_card,
             set_content_pending,
             import_inspiration_preview,
             confirm_import_inspirations,
             scan_projects,
             create_project,
+            read_ideation_overview,
             read_project_meta,
             save_project_meta,
-            read_ideation_overview,
+            read_map_workspace,
+            save_map,
+            save_region,
+            delete_map_place,
+            set_region_containment,
+            save_map_transitions,
+            read_map_structure,
+            save_map_structure,
+            read_map_canvas_layout,
+            save_map_canvas_layout,
+            arrange_map_canvas,
+            edit_map_relation,
+            edit_region_relation,
+            map_background_reference,
+            preview_geo_upgrade,
+            confirm_geo_upgrade,
             read_outline,
             save_outline,
             read_mainlines,
             save_mainlines,
+            set_milestone_pending,
             scan_bridges,
             save_bridge,
             arrange_bridge,
@@ -859,12 +1256,27 @@ pub fn run() {
             transmute_story_card,
             transmute_character_card,
             read_relationships,
+            read_social_workspace,
+            read_social_canvas,
+            save_social_layout,
+            arrange_social_canvas,
+            edit_social_edge,
+            save_social_legend,
+            save_organization,
+            delete_organization,
+            edit_membership,
+            preview_social_upgrade,
+            confirm_social_upgrade,
+            recover_social_upgrade,
             save_relationships,
             character_confluence,
             promote_characters,
             scan_chapters,
+            scan_chapter_cards,
             create_chapter,
             rename_chapter,
+            preview_chapter_split,
+            split_chapter,
             delete_chapter,
             renumber_chapters,
             save_chapter_md,
@@ -879,6 +1291,7 @@ pub fn run() {
             annotate_foreshadow,
             recover_foreshadow,
             set_foreshadow_state,
+            set_foreshadow_pending,
             delete_foreshadow,
             read_expectations,
             expectation_board,
@@ -887,6 +1300,7 @@ pub fn run() {
             annotate_expectation,
             fulfill_expectation,
             set_expectation_state,
+            set_expectation_pending,
             set_expectation_meta,
             delete_expectation,
             load_writing_stats,
@@ -899,6 +1313,8 @@ pub fn run() {
             reveal_path,
             load_ai_config,
             save_ai_config,
+            load_assistant_presets,
+            save_assistant_presets,
             list_chat_sessions,
             load_chat_session,
             save_chat_session,

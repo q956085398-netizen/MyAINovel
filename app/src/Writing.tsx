@@ -8,6 +8,7 @@ import CoverArt, { pickAndSetCover } from "./CoverArt";
 import WritingPage from "./WritingPage";
 import { ExportDialog } from "./ExportDialog";
 import { setCurrentProjectDir } from "./currentProject";
+import { useLibrarySession } from "./librarySession";
 
 /** 记住上次打开的项目：码字工具应「打开即回到那本书」。 */
 const LAST_PROJECT_KEY = "gongbi.writing.project";
@@ -68,6 +69,7 @@ export default function Writing({
   const autoOpenRef = useRef(true);
   // 展示模式（工单 #22）：与构思板块共用项目列表档位偏好。
   const [display, setDisplay] = useDisplayMode("projects");
+  const librarySession = useLibrarySession();
 
   /** 记住打开的项目：板块内恢复键＋外壳「当前项目」面板共用。 */
   const remember = useCallback((project: ProjectEntry) => {
@@ -76,10 +78,12 @@ export default function Writing({
   }, []);
 
   const scan = useCallback(async (root: string) => {
+    const session = librarySession.id;
     setScanning(true);
     setError(null);
     try {
       const list = await invoke<ProjectEntry[]>("scan_projects", { root });
+      if (!librarySession.isCurrent(session)) return;
       setProjects(list);
       if (autoOpenRef.current) {
         autoOpenRef.current = false;
@@ -91,12 +95,13 @@ export default function Writing({
         }
       }
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       setProjects([]);
       setError(`扫描失败：${errMsg(e)}`);
     } finally {
-      setScanning(false);
+      if (librarySession.isCurrent(session)) setScanning(false);
     }
-  }, [remember]);
+  }, [librarySession, remember]);
 
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);
@@ -112,10 +117,11 @@ export default function Writing({
   useEffect(() => {
     if (!jump || !libraryPath) return;
     let cancelled = false;
+    const session = librarySession.id;
     void (async () => {
       try {
         const list = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
-        if (cancelled) return;
+        if (cancelled || !librarySession.isCurrent(session)) return;
         setProjects(list);
         const project = list.find((p) => p.dir === jump.projectDir);
         if (project) {
@@ -129,16 +135,16 @@ export default function Writing({
           window.alert("没找到这个项目（可能已被移动或删除）。");
         }
       } catch (e) {
-        if (!cancelled) window.alert(`打开项目失败：${errMsg(e)}`);
+        if (!cancelled && librarySession.isCurrent(session)) window.alert(`打开项目失败：${errMsg(e)}`);
       } finally {
-        if (!cancelled) onJumpConsumed();
+        if (!cancelled && librarySession.isCurrent(session)) onJumpConsumed();
       }
     })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jump]);
+  }, [jump, librarySession]);
 
   /** 打开项目（locate 非空时顺带定位到某章某处）。 */
   function openAt(project: ProjectEntry, locate: WritingLocate | null) {
@@ -155,6 +161,7 @@ export default function Writing({
       quote: issue.word,
       line: issue.line,
       occurrence: issue.occurrence,
+      fingerprint: issue.fingerprint,
     });
   }
 
@@ -163,6 +170,7 @@ export default function Writing({
       <WritingPage
         key={`${open.project.dir}#${open.seq}`}
         project={open.project}
+        libraryPath={libraryPath}
         active={active}
         locate={open.locate}
         onAiCommand={onAiCommand}

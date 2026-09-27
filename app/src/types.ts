@@ -95,6 +95,23 @@ export interface ProjectEntry {
   coverDir: string;
 }
 
+/** 构思首页：全部字段从权威项目文件现读派生，不保存摘要副本。 */
+export interface IdeationOverviewItem {
+  tab: string;
+  name: string;
+  summary: string | null;
+}
+
+export interface IdeationOverview {
+  premise: string | null;
+  mainline: string | null;
+  readerImaginations: string[];
+  characters: IdeationOverviewItem[];
+  maps: IdeationOverviewItem[];
+  pending: IdeationOverviewItem[];
+  unresolved: string[];
+}
+
 /** 与 Rust 侧 pending::PendingLine 对应（工单 #56 / T01）：
  *  窄轨「当前项目」面板的真实待办——超期的伏笔与期待/目标线，现扫派生。 */
 export interface PendingLine {
@@ -123,23 +140,177 @@ export function emptyProjectMeta(): ProjectMeta {
   return { title: null, chapterPrefix: null, plotLines: [], maps: [] };
 }
 
-/** 构思首页只读派生条目（工单 #57）；tab/focus 只负责导航，不复制业务数据。 */
-export interface IdeationOverviewItem {
+// --- 地图、地域与转场（工单 #61 数据底座、#65 完整档案）；实体档案与结构网分开保存 ---
+
+export type GeoUpgradeTarget = "地图" | "地域";
+
+/** 尺度种子（spec 地图与地域 §2.2）：只提示和筛选，不校验。 */
+export const PLACE_SCALES = ["地点", "村落", "城镇", "城市", "区域", "国家", "世界", "异界"];
+
+export interface MapDraft {
   name: string;
-  detail: string | null;
-  tab: string;
-  focus: string | null;
+  scale: string | null;
+  boundary: string | null;
+  eras: string[];
+  role: string | null;
+  stageGoal: string | null;
+  centralConflict: string | null;
+  coreSecret: string | null;
+  localMainline: string | null;
+  entryCondition: string | null;
+  exitCondition: string | null;
+  people: string[];
+  organizations: string[];
+  units: string[];
+  milestones: string[];
+  /** 项目「附件」内的地图背景引用；图片本体不复制。 */
+  backgroundImage: string | null;
+  body: string;
 }
 
-/** 从大纲/主线/人物/项目资料/读者遐想现读得到的首页模型。 */
-export interface IdeationOverview {
-  logline: string | null;
-  readerImagination: string | null;
-  mainlines: IdeationOverviewItem[];
-  characters: IdeationOverviewItem[];
-  maps: IdeationOverviewItem[];
-  pending: IdeationOverviewItem[];
+export function emptyMapDraft(): MapDraft {
+  return {
+    name: "",
+    scale: null,
+    boundary: null,
+    eras: [],
+    role: null,
+    stageGoal: null,
+    centralConflict: null,
+    coreSecret: null,
+    localMainline: null,
+    entryCondition: null,
+    exitCondition: null,
+    people: [],
+    organizations: [],
+    units: [],
+    milestones: [],
+    backgroundImage: null,
+    body: "",
+  };
+}
+
+export interface MapEntry extends MapDraft {
+  path: string;
+  /** 可用的本地附件背景路径；失效引用仍保存在 backgroundImage。 */
+  backgroundImagePath: string | null;
+  /** 待打磨中：frontmatter 布尔键派生，随档案文件保存。 */
+  pending: boolean;
+}
+
+export interface RegionDraft {
+  name: string;
+  scale: string | null;
+  plotRole: string | null;
+  people: string[];
+  organizations: string[];
+  contradictions: string[];
+  units: string[];
+  foreshadows: string[];
+  eras: string[];
+  localMainline: string | null;
+  secret: string | null;
+  /** 展开为另一张地图：名字引用，两张档案互不复制。 */
+  expandsTo: string | null;
+  body: string;
+}
+
+export function emptyRegionDraft(): RegionDraft {
+  return {
+    name: "",
+    scale: null,
+    plotRole: null,
+    people: [],
+    organizations: [],
+    contradictions: [],
+    units: [],
+    foreshadows: [],
+    eras: [],
+    localMainline: null,
+    secret: null,
+    expandsTo: null,
+    body: "",
+  };
+}
+
+export interface RegionEntry extends RegionDraft {
+  path: string;
+  pending: boolean;
+}
+
+export interface MapWorkspace {
+  maps: MapEntry[];
+  regions: RegionEntry[];
+}
+
+export interface SpatialLegendItem {
+  name: string;
+  directed: boolean;
+  extra: Record<string, unknown>;
+}
+
+export interface MapRelation {
+  from: string;
+  to: string;
+  kind: string;
+  extra: Record<string, unknown>;
+}
+
+export interface RegionRelation {
+  from: string;
+  to: string;
+  /** 图例只提示不校验；手写类型照常保留。 */
+  kind: string;
+  extra: Record<string, unknown>;
+}
+
+export interface MapContainment {
+  map: string;
+  region: string;
+  extra: Record<string, unknown>;
+}
+
+export interface MapTransition {
+  from: string;
+  to: string;
+  reason: string | null;
+  advancePeople: string[];
+  clues: string[];
   unresolved: string[];
+  returnCondition: string | null;
+  units: string[];
+  extra: Record<string, unknown>;
+}
+
+export interface MapStructure {
+  mapLegend: SpatialLegendItem[];
+  regionLegend: SpatialLegendItem[];
+  mapRelations: MapRelation[];
+  regionRelations: RegionRelation[];
+  contains: MapContainment[];
+  transitions: MapTransition[];
+  layout: Record<string, unknown>;
+  fingerprint: string | null;
+}
+
+export interface MapCanvasPlacement {
+  name: string;
+  x: number;
+  y: number;
+  pinned: boolean;
+}
+
+export interface MapCanvasLayout {
+  placements: MapCanvasPlacement[];
+  fingerprint: string | null;
+}
+
+export interface GeoUpgradePreview {
+  sourcePath: string;
+  targetPath: string;
+  backupPath: string;
+  target: GeoUpgradeTarget;
+  sourceFingerprint: string;
 }
 
 /** 构思/大纲.md：自由纸面，首次保存可采用轻模板。 */
@@ -159,6 +330,8 @@ export interface StoryLine {
   name: string;
   isMain: boolean;
   milestones: Milestone[];
+  /** 未知 YAML 字段随 IPC 往返保存，不由表单编辑。 */
+  extra?: Record<string, unknown>;
 }
 
 export interface Milestone {
@@ -167,10 +340,28 @@ export interface Milestone {
   readerFeeling: string | null;
   units: string[];
   note: string | null;
+  pending: boolean;
+  /** 原主线表中的位置，随条目移动；只用于受表指纹保护的状态操作。 */
+  source: MilestoneSource | null;
+  /** 未知 YAML 字段随 IPC 往返保存，不由表单编辑。 */
+  extra?: Record<string, unknown>;
+}
+
+export interface MilestoneSource {
+  lineIndex: number;
+  milestoneIndex: number;
 }
 
 export function emptyMilestone(): Milestone {
-  return { title: "", change: null, readerFeeling: null, units: [], note: null };
+  return {
+    title: "",
+    change: null,
+    readerFeeling: null,
+    units: [],
+    note: null,
+    pending: false,
+    source: null,
+  };
 }
 
 export function emptyStoryLine(): StoryLine {
@@ -188,11 +379,14 @@ export interface BridgeDraft {
   keyTurn: string | null;
   expectationHook: string | null;
   beatPlan: string | null;
+  typeSolutions: { kind: string; solution: string; source?: { index: number; fingerprint: string } | null }[];
+  typeSolutionsFingerprint?: string | null;
   body: string;
 }
 
 export interface Bridge extends BridgeDraft {
   path: string;
+  pending: boolean;
 }
 
 export function emptyBridgeDraft(name = ""): BridgeDraft {
@@ -206,6 +400,7 @@ export function emptyBridgeDraft(name = ""): BridgeDraft {
     keyTurn: null,
     expectationHook: null,
     beatPlan: null,
+    typeSolutions: [],
     body: "",
   };
 }
@@ -218,6 +413,10 @@ export const NOTE_KINDS: NoteKind[] = ["矛盾", "单元", "人物", "世界观"
 /** 与 Rust 侧 project::NoteDraft 对应（IPC 走 camelCase）；
  *  五类共用一张宽表，落盘时只写本类别的键。 */
 export interface NoteDraft {
+  /** 编辑框的内容版本；旧命令入参可不传。 */
+  fingerprint?: string;
+  /** 人物专用；旧入参缺省为空，避免影响其他笔记与转生。 */
+  character?: import("./characterProfile").CharacterProfile;
   kind: NoteKind;
   /** 标题＝文件名（矛盾/单元名、人名、词条名、版本名）。 */
   name: string;
@@ -305,7 +504,7 @@ export interface ArrangementCheck {
 /** 排布属性的约定值（只提示不校验，词表同款纪律）。 */
 export const UPGRADE_BATTLE_VALUES = ["升级", "战斗"];
 export const PACE_VALUES = ["紧绷", "舒缓"];
-export const WORLDVIEW_CATEGORIES = ["力量体系", "地理", "势力", "其他"];
+export const WORLDVIEW_CATEGORIES = ["力量体系", "地理", "势力", "时代", "其他"];
 export const OPENING_STATUS_VALUES = ["备选", "选定"];
 export const CONTRADICTION_STATUS_VALUES = ["池中", "已成单元", "弃用"];
 
@@ -326,12 +525,37 @@ export interface ChapterEntry {
   hanCount: number;
 }
 
+/** 章节总览只读资料；不含正文。 */
+export interface ChapterCard {
+  chapter: ChapterEntry;
+  summary: string | null;
+  intent: string | null;
+}
+
 /** 保存前的历史版本（`.gongbi/历史/<章>/<时间戳>.md`）。 */
 export interface SnapshotEntry {
   path: string;
   /** Unix 毫秒。 */
   time: number;
   wordCount: number;
+}
+
+/** 光标拆章确认前的只读预览；指纹用于阻止预览后的外部覆盖。 */
+export interface ChapterSplitPreview {
+  sourcePath: string;
+  targetPath: string;
+  ordinal: number;
+  title: string;
+  targetExists: boolean;
+  before: string;
+  after: string;
+  fingerprint: string;
+}
+
+export interface ChapterSplitResult {
+  updated: ChapterEntry;
+  created: ChapterEntry;
+  fingerprint: string;
 }
 
 /** 联动侧栏的单元摘要（本章所在单元＋它在排布里的位置）。 */
@@ -443,6 +667,7 @@ export interface WritingLocate {
   /** 1 起行号（原始文件行）。 */
   line?: number;
   occurrence?: number;
+  fingerprint?: string;
 }
 
 /** 校对命中：line 为原始文件行号（与编辑器缓冲同口径），
@@ -455,23 +680,31 @@ export interface ProofIssue {
   occurrence: number;
   word: string;
   suggestion: string | null;
-  /** 敏感词｜的地得｜错词。 */
+  /** 成对标点｜重复字词｜错词｜专有名词。 */
   kind: string;
   snippet: string;
+  fingerprint: string;
+  reason: string;
+}
+
+export interface ProofreadOptions {
+  punctuation: boolean;
+  repetition: boolean;
+  wrongWords: boolean;
+  properNouns: boolean;
 }
 
 export interface ProofReport {
   issues: ProofIssue[];
   scannedChapters: number;
-  sensitiveWords: number;
   wrongWords: number;
-  /** 库根「校对/敏感词.txt」是否存在（不存在时提示怎么建）。 */
-  sensitiveFileExists: boolean;
+  properNouns: number;
 }
 
-export const PROOFREAD_KIND_SENSITIVE = "敏感词";
-export const PROOFREAD_KIND_DE = "的地得";
+export const PROOFREAD_KIND_PUNCTUATION = "成对标点";
+export const PROOFREAD_KIND_REPETITION = "重复字词";
 export const PROOFREAD_KIND_WRONG = "错词";
+export const PROOFREAD_KIND_PROPER_NOUN = "专有名词";
 
 // --- 伏笔系统（工单 #6，docs/spec/伏笔系统.md）；与 Rust 侧 foreshadow.rs 对应 ---
 
@@ -489,11 +722,13 @@ export interface ForeshadowRecovery {
   note: string | null;
 }
 
-/** 伏笔条目（项目根 伏笔.yaml，应用受管、整表重写）。 */
+/** 伏笔条目（项目根 伏笔.yaml；原子读-合-写保留手写未知字段）。 */
 export interface Foreshadow {
   name: string;
   /** 待埋｜已埋｜部分收｜已收｜弃用（约定值只提示不校验）。 */
   state: string;
+  /** 独立的待打磨展示状态；旧版伏笔.yaml 缺键时为 false。 */
+  pending: boolean;
   planted: ForeshadowAnchor[];
   recovered: ForeshadowRecovery[];
 }
@@ -502,6 +737,7 @@ export interface Foreshadow {
 export interface ForeshadowView {
   name: string;
   state: string;
+  pending: boolean;
   planted: (ForeshadowAnchor & { stale: boolean })[];
   recovered: (ForeshadowRecovery & { stale: boolean })[];
   /** 距当前最大章序已过多少章未收（仅已埋/部分收有值）。 */
@@ -536,7 +772,7 @@ export interface ExpectationPayoff {
   note: string | null;
 }
 
-/** 期待线条目（项目根 三线.yaml，应用受管、整表重写）。 */
+/** 期待线条目（项目根 三线.yaml 的权威数据）。 */
 export interface Expectation {
   name: string;
   /** 期待｜目标（约定值只提示不校验）。 */
@@ -545,6 +781,8 @@ export interface Expectation {
   horizon: string;
   /** 待埋｜已埋｜部分兑现｜已兑现｜弃用（约定值只提示不校验）。 */
   state: string;
+  /** 独立于兑现状态机的待打磨展示状态。 */
+  pending: boolean;
   planted: ExpectationAnchor[];
   fulfilled: ExpectationPayoff[];
 }
@@ -555,6 +793,7 @@ export interface ExpectationView {
   kind: string;
   horizon: string;
   state: string;
+  pending: boolean;
   planted: (ExpectationAnchor & { stale: boolean })[];
   fulfilled: (ExpectationPayoff & { stale: boolean })[];
   /** 距当前最大章序已过多少章未推进（仅已埋/部分兑现有值）。 */
@@ -566,6 +805,8 @@ export interface ExpectationView {
 export interface ExpectationBoard {
   /** 轴长＝max(全书最大章序, 锚点最大章)。 */
   maxChapter: number;
+  /** 三线.yaml 内容指纹；待打磨状态操作用于拒绝陈旧写入。 */
+  tableFingerprint: string | null;
   items: ExpectationView[];
 }
 
@@ -670,6 +911,8 @@ export interface LegendItem {
 
 /** 一条关系（边）：起→止 只表示有向边的方向，不表示归属——关系网是一张网。 */
 export interface Relationship {
+  /** 新社会网的版本与来源条目；编辑时原样带回以保留手补字段。 */
+  sourceRow?: string | null;
   from: string;
   to: string;
   /** 类型，按名引用图例项（图例外照画兜底样式，只提示）。 */
@@ -681,12 +924,14 @@ export interface Relationship {
 
 /** 关系表（构思/人物关系.yaml，应用受管、整表重写）。 */
 export interface RelationshipTable {
+  fingerprint?: string | null;
   legend: LegendItem[];
   edges: Relationship[];
 }
 
 /** 画布数据（派生，只读）。 */
 export interface RelationshipView {
+  fingerprint?: string | null;
   legend: LegendItem[];
   /** 文件里的**全部**边，保文件次序——**保存时的唯一底稿**：失效引用的边
    *  也在里面，整表写回才不会把它们悄悄丢掉（画布只画两端都在的那些）。 */
@@ -788,6 +1033,22 @@ export interface ChatPersona {
   person: string;
 }
 
+/** 与 Rust 侧 ai.rs::ChatPreset 对应（工单 T07，docs/spec/AI助手预设.md §四）：
+ *  普通会话创建时定格的助手预设快照——预设事后改名、改提示、改覆盖乃至
+ *  删除都不影响已绑定的会话。人物对话与旧会话没有这个字段。 */
+export interface ChatPreset {
+  id: string;
+  name: string;
+  /** 图标（emoji 等）；空串＝无。 */
+  icon: string;
+  /** 识别色（#rrggbb）；空串＝无。 */
+  color: string;
+  systemPrompt: string;
+  /** null＝跟随全局当前供应商/模型。 */
+  providerOverride?: string | null;
+  modelOverride?: string | null;
+}
+
 /** 与 Rust 侧 ai.rs::ChatSession 对应；id 由前端 crypto.randomUUID() 生成。 */
 export interface ChatSession {
   id: string;
@@ -798,6 +1059,8 @@ export interface ChatSession {
   messages: ChatMessage[];
   /** 人物对话标签；普通会话没有。 */
   persona?: ChatPersona | null;
+  /** 普通会话的助手预设快照（工单 T07）；人物对话与旧会话没有。 */
+  preset?: ChatPreset | null;
 }
 
 /** 与 Rust 侧 ai.rs::ChatSessionSummary 对应。 */
@@ -807,6 +1070,36 @@ export interface ChatSessionSummary {
   updatedAt: number;
   messageCount: number;
   persona?: ChatPersona | null;
+}
+
+/** 与 Rust 侧 presets.rs::AssistantPreset 对应（工单 T06，docs/spec/AI助手预设.md）。
+ *  内置预设 id 一律 builtin: 前缀；空 icon/color 表示未设置。 */
+export interface AssistantPreset {
+  id: string;
+  name: string;
+  description: string;
+  /** 图标（emoji 等）；空串＝无。 */
+  icon: string;
+  /** 识别色（#rrggbb）；空串＝无。 */
+  color: string;
+  systemPrompt: string;
+  /** null＝跟随全局当前供应商/模型。 */
+  providerOverride?: string | null;
+  modelOverride?: string | null;
+}
+
+/** load_assistant_presets 的返回；内置预设来自代码、永远最新。 */
+export interface AssistantPresetState {
+  builtins: AssistantPreset[];
+  userPresets: AssistantPreset[];
+  defaultPresetId: string;
+  builtinVersion: number;
+}
+
+/** save_assistant_presets 的载荷：整份用户预设表＋默认标记。 */
+export interface AssistantPresetSave {
+  defaultPresetId: string;
+  userPresets: AssistantPreset[];
 }
 
 /** chat_stream 的 onEvent Channel 事件；与 Rust 侧 ai.rs::ChatStreamEvent 对应。 */
