@@ -7,24 +7,16 @@ import { settleForLeave, SETTLE_MAX_ROUNDS, type SettleableBuffer } from "../src
 function manualBuffer(init: {
   dirty?: boolean;
   conflict?: boolean;
-  inFlight?: Promise<unknown> | null;
   /** 每轮保存后是否又变脏（模拟保存往返期间继续输入）。 */
   dirtyAfterRound?: boolean;
   roundFails?: boolean;
 }) {
   let dirty = init.dirty ?? false;
   let rounds = 0;
-  let awaitedInFlight = 0;
   const buffer: SettleableBuffer = {
     isDirty: () => dirty,
     inConflict: () => init.conflict ?? false,
-    inFlightSave: () => {
-      const flight = init.inFlight ?? null;
-      if (flight) {
-        awaitedInFlight += 1;
-      }
-      return flight;
-    },
+    inFlightSave: () => null,
     saveRound: async () => {
       rounds += 1;
       if (init.roundFails) return false;
@@ -32,18 +24,18 @@ function manualBuffer(init: {
       return true;
     },
   };
-  return { buffer, roundsDone: () => rounds, awaitedCount: () => awaitedInFlight };
+  return { buffer, roundsDone: () => rounds };
 }
 
 test("干净缓冲直接放行，不发起保存轮", async () => {
   const b = manualBuffer({ dirty: false });
-  assert.equal(await settleForLeave(b.buffer), true);
+  assert.equal(await settleForLeave(b.buffer), "done");
   assert.equal(b.roundsDone(), 0);
 });
 
 test("脏缓冲一轮保存后放行", async () => {
   const b = manualBuffer({ dirty: true });
-  assert.equal(await settleForLeave(b.buffer), true);
+  assert.equal(await settleForLeave(b.buffer), "done");
   assert.equal(b.roundsDone(), 1);
 });
 
@@ -63,25 +55,25 @@ test("保存往返期间继续输入：逐轮收敛到稳定版本", async () =>
       return true;
     },
   };
-  assert.equal(await settleForLeave(buffer), true);
+  assert.equal(await settleForLeave(buffer), "done");
   assert.equal(rounds, 3);
 });
 
-test("持续输入不收敛：到轮次上限就放弃并阻止导航（不无限重试）", async () => {
+test("持续输入不收敛：到轮次上限就报 busy 阻止导航（不无限重试）", async () => {
   const b = manualBuffer({ dirty: true, dirtyAfterRound: true });
-  assert.equal(await settleForLeave(b.buffer), false);
+  assert.equal(await settleForLeave(b.buffer), "busy");
   assert.equal(b.roundsDone(), SETTLE_MAX_ROUNDS);
 });
 
-test("冲突未裁决：不发起保存，直接阻止", async () => {
+test("冲突未裁决：不发起保存，直接以 conflict 阻止", async () => {
   const b = manualBuffer({ dirty: true, conflict: true });
-  assert.equal(await settleForLeave(b.buffer), false);
+  assert.equal(await settleForLeave(b.buffer), "conflict");
   assert.equal(b.roundsDone(), 0);
 });
 
-test("保存轮失败：立即阻止，不无限重试", async () => {
+test("保存轮失败：立即以 failed 阻止，不无限重试", async () => {
   const b = manualBuffer({ dirty: true, roundFails: true });
-  assert.equal(await settleForLeave(b.buffer), false);
+  assert.equal(await settleForLeave(b.buffer), "failed");
   assert.equal(b.roundsDone(), 1);
 });
 
@@ -112,6 +104,6 @@ test("已有在途保存：等它完成，不另起一轮挤门闩", async () =>
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(done, false, "在途保存完成前结算不放行");
   release();
-  assert.equal(await settled, true);
+  assert.equal(await settled, "done");
   assert.equal(saveRoundCalls, 0, "在途保存存在时不另起保存轮");
 });

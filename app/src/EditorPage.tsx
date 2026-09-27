@@ -204,23 +204,33 @@ export default function EditorPage({
 
   /** 离开结算（工单 #77，safeLeave.ts）：返回书库/搜索跳转等会卸载编辑器
    *  的导航先经此结算到「无未保存内容」再放行；失败/冲突/持续输入未收敛
-   *  → false，原稿与文字保持原样。 */
+   *  → false，原稿与文字保持原样。busy（持续输入未收敛）且非 quiet 时
+   *  明确提示导航未完成。 */
   async function settleNow(quiet = false): Promise<boolean> {
     const view = viewRef.current;
     if (!view) return true;
-    return settleForLeave({
+    const outcome = await settleForLeave({
       isDirty: () => dirtyRef.current,
       inConflict: () => conflictRef.current,
       inFlightSave: () => saveInFlightRef.current,
       saveRound: async () => {
+        // 结算与自动保存赛跑的窄窗口里可能冒出在途保存：等它并如实
+        // 传播结果（失败＝本轮失败，停止结算，不静默吞掉）。
         const inFlight = saveInFlightRef.current;
         if (inFlight) {
-          await inFlight.catch(() => {});
-          return true;
+          try {
+            return await inFlight;
+          } catch {
+            return false;
+          }
         }
         return save(false, quiet);
       },
     });
+    if (outcome === "busy" && !quiet) {
+      window.alert("还有内容没保存完（可能仍在继续输入），先停笔让保存完成，再操作。");
+    }
+    return outcome === "done";
   }
 
   async function save(force = false, quiet = false): Promise<boolean> {

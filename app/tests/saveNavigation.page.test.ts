@@ -229,6 +229,44 @@ test("书写·保存失败：留在原章原文字可重试，重试后可正常
   }
 });
 
+test("书写·持续输入不收敛：结算到轮次上限放弃，明确留在原章且文字全保留", async () => {
+  const fx = await mountWriting(CH);
+  try {
+    // 每轮保存都挂起，释放后立刻又打字——模拟作者持续输入不停笔。
+    let pending: ReturnType<typeof deferred> | null = null;
+    fx.ipc.on("save_chapter_md", async (args) => {
+      const path = args.path as string;
+      fx.ipc.saved.set(path, args.content as string);
+      const gate = deferred();
+      pending = gate;
+      await gate.promise;
+      return { status: "saved", fingerprint: `saved:${path}` };
+    });
+    fx.type("起始输入");
+    fx.clickChapter("第2章");
+    const saves = () => fx.ipc.calls.filter((c) => c.cmd === "save_chapter_md").length;
+    for (let round = 0; round < 8; round += 1) {
+      await waitFor(() => saves() > round, `第 ${round + 1} 轮保存已发出`);
+      fx.type(`续写${round}`);
+      pending?.release();
+      pending = null;
+    }
+    await waitFor(() => fx.alerts.some((a) => a.includes("没保存完")), "明确提示导航未完成");
+    assert.ok(fx.headerTitle().includes("第1章"), "留在原章");
+    assert.ok(fx.editorText().startsWith("第一章原有正文"), "原文字保持");
+    assert.ok(fx.editorText().includes("续写7"), "持续输入的文字都还在编辑器里");
+
+    // 停笔后重试：结算收敛，正常切章。
+    fx.clickChapter("第2章");
+    await waitFor(() => pending !== null, "重试的保存已发出");
+    pending?.release();
+    await waitFor(() => fx.editorText() === "第二章正文", "停笔后可正常切章");
+    assert.ok(fx.ipc.saved.get(CH[0].path)!.includes("续写7"), "全部文字落盘");
+  } finally {
+    fx.unmount();
+  }
+});
+
 test("书写·外部指纹冲突：横幅裁决前导航被阻止，重新加载后可继续", async () => {
   const fx = await mountWriting(CH);
   try {

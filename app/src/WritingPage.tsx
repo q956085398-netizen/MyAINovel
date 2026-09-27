@@ -727,13 +727,14 @@ export default function WritingPage({
   async function openChapter(entry: ChapterEntry): Promise<boolean> {
     const generation = navSeqRef.current + 1;
     navSeqRef.current = generation;
-    if (!(await settleNow())) return false;
-    if (navSeqRef.current !== generation) return false;
+    // 迟到判定：本请求已被更新的导航取代时丢弃，不回填编辑器。
+    const stale = () => navSeqRef.current !== generation;
+    if (!(await settleNow()) || stale()) return false;
     try {
       const doc = await invoke<MdContent>("read_book_md", { path: entry.path });
-      if (navSeqRef.current !== generation) return false;
+      if (stale()) return false;
       if (dirtyRef.current && !(await settleNow())) return false;
-      if (navSeqRef.current !== generation) return false;
+      if (stale()) return false;
       currentRef.current = entry;
       setCurrent(entry);
       fingerprintRef.current = doc.fingerprint;
@@ -769,24 +770,34 @@ export default function WritingPage({
 
   /** 离开结算（工单 #77，safeLeave.ts）：切章/返回/搜索跳转等会替换或
    *  卸载编辑器的导航先经此结算到「无未保存内容」再放行；保存轮失败、
-   *  冲突未裁决或持续输入未收敛 → false，原编辑器与文字保持原样。 */
+   *  冲突未裁决或持续输入未收敛 → false，原编辑器与文字保持原样。
+   *  busy（持续输入未收敛）且非 quiet 时明确提示导航未完成。 */
   async function settleNow(quiet = false): Promise<boolean> {
     const view = viewRef.current;
     const entry = currentRef.current;
     if (!view || !entry) return true;
-    return settleForLeave({
+    const outcome = await settleForLeave({
       isDirty: () => dirtyRef.current,
       inConflict: () => conflictRef.current,
       inFlightSave: () => saveInFlightRef.current,
       saveRound: async () => {
+        // 结算与自动保存赛跑的窄窗口里可能冒出在途保存：等它并如实
+        // 传播结果（失败＝本轮失败，停止结算，不静默吞掉）。
         const inFlight = saveInFlightRef.current;
         if (inFlight) {
-          await inFlight.catch(() => {});
-          return true;
+          try {
+            return await inFlight;
+          } catch {
+            return false;
+          }
         }
         return saveNow(false, quiet);
       },
     });
+    if (outcome === "busy" && !quiet) {
+      window.alert("还有文字没保存完（可能仍在继续输入），先停笔让保存完成，再操作。");
+    }
+    return outcome === "done";
   }
 
   async function saveNow(force: boolean, quiet = false): Promise<boolean> {
@@ -841,7 +852,10 @@ export default function WritingPage({
         );
         return true;
       } catch (e) {
-        if (quiet) {
+        // 往返期间已换章/删章：失败属于旧对象，不再惊扰新章（记日志即可）。
+        if (currentRef.current?.path !== entry.path) {
+          console.error("旧章保存响应迟到失败（已忽略）：", e);
+        } else if (quiet) {
           console.error("关窗兜底保存失败：", e);
         } else {
           setSaveStatus("error");
@@ -1483,9 +1497,9 @@ export default function WritingPage({
                     label: "校对本章",
                     hint: "先落盘再校对",
                     disabled: !current,
-                  run: () => {
-                    void settleNow().then((saved) => saved && setProofOpen(true));
-                  },
+                    run: () => {
+                      void settleNow().then((saved) => saved && setProofOpen(true));
+                    },
                   },
                 ]}
               />

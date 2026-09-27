@@ -30,12 +30,6 @@ export function deferred<T = unknown>() {
         innerResolve(value as T);
       }
     },
-    abort(reason?: unknown) {
-      if (!settled) {
-        settled = true;
-        innerReject(reason ?? new Error("aborted"));
-      }
-    },
   };
 }
 
@@ -55,10 +49,6 @@ export class MockIpc {
   on(cmd: string, handler: InvokeHandler): this {
     this.routes.set(cmd, handler);
     return this;
-  }
-
-  callsOf(cmd: string): { cmd: string; args: Record<string, unknown> }[] {
-    return this.calls.filter((c) => c.cmd === cmd);
   }
 
   private readonly dispatch = async (
@@ -200,7 +190,7 @@ function render(fixture: MutableFixture, element: React.ReactElement) {
 export async function mountWriting(
   chapters: ChapterFix[],
   opts: { projectDir?: string; projectTitle?: string } = {},
-): Promise<PageFixture & { clickChapter(labelPart: string): void; chapterLabels(): string[] }> {
+): Promise<PageFixture & { clickChapter(labelPart: string): void }> {
   updateSettings({ autosaveSec: 3 });
   const projectDir = opts.projectDir ?? "项目/《测试书》";
   const projectTitle = opts.projectTitle ?? "测试书";
@@ -244,7 +234,6 @@ export async function mountWriting(
   });
   const fixture = makeFixture(ipc) as MutableFixture & {
     clickChapter(labelPart: string): void;
-    chapterLabels(): string[];
   };
   const { default: WritingPage } = await import("../../src/WritingPage.tsx");
   const project = {
@@ -282,10 +271,7 @@ export async function mountWriting(
     );
     if (!item) throw new Error(`页面上找不到章节「${labelPart}」`);
     (item as HTMLButtonElement).click();
-  };
-  fixture.chapterLabels = () =>
-    Array.from(fixture.container.querySelectorAll(".chapter-label")).map((el) => el.textContent ?? "");
-  await flushDom(40);
+  };  await flushDom(40);
   // 首次挂载冷启动较慢：等章节列表与编辑器真正渲染出来。
   await waitFor(
     () =>
