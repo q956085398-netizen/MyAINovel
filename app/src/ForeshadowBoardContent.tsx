@@ -30,6 +30,8 @@ function groupSort(state: string) {
 
 interface ForeshadowBoardContentProps {
   project: string;
+  /** 侧栏跳转时滚动到这条伏笔。 */
+  focusName?: string | null;
   chapterPrefix: string | null;
   views: ForeshadowView[];
   busy: boolean;
@@ -43,6 +45,7 @@ interface ForeshadowBoardContentProps {
 /** 顶部待打磨便笺和普通状态分组共用一张完整伏笔卡。 */
 export default function ForeshadowBoardContent({
   project,
+  focusName,
   chapterPrefix,
   views,
   busy,
@@ -77,7 +80,7 @@ export default function ForeshadowBoardContent({
         key={view.name}
         id={contentCardDomId(`${project}/伏笔/${view.name}`)}
         tabIndex={-1}
-        className={`card-item ${view.pending ? "is-pending " : ""}${searchHit ? "is-search-hit" : ""}`}
+        className={`card-item ${view.pending ? "is-pending " : ""}${searchHit ? "is-search-hit" : ""}${view.name === focusName ? " rail-task-target" : ""}`}
       >
         <div className="card-title-row">
           <span className="card-title static">{view.name}</span>

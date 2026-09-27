@@ -1,7 +1,3 @@
-import { registerSearchNavigationGuard } from "./globalSearchNavigation";
-import { useDialogKeyboard } from "./useDialogKeyboard";
-import type { InspirationCard } from "./types";
-import { chapterInspirationLink } from "./chapterInspirationLink";
 import { useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, Prec, type Extension, type Range } from "@codemirror/state";
 import {
@@ -20,13 +16,9 @@ import type {
   AiSeed,
   ChapterIntent,
   ChapterEntry,
-  ChapterCard,
-  ChapterSplitPreview,
-  ChapterSplitResult,
   ExpectationBoard,
   Foreshadow,
   MdContent,
-  ProofIssue,
   ProjectEntry,
   ProjectMeta,
   SaveResult,
@@ -49,11 +41,8 @@ import {
 import { errMsg, formatCount } from "./util";
 import { autosaveIntervalMs, useSettings } from "./settings";
 import { registerFlushSaver } from "./saveFlush";
-import { settleForLeave } from "./safeLeave";
-import { useLibrarySession } from "./librarySession";
 import {
   chapterLabel,
-  chapterHead,
   chapterStats,
   countBilled,
   readChapterStatus,
@@ -70,7 +59,6 @@ import { TypoPopout } from "./TypographyToolbar";
 import HeaderMenu from "./HeaderMenu";
 import SaveStateChip from "./SaveStateChip";
 import { saveStatusAfterEdit, type SaveStatus } from "./editorHeaderState";
-import { ExportDialog } from "./ExportDialog";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 /** 自动保存防抖：停笔满设置间隔（默认 3 秒，工单 #28 起两编辑器共用）落盘。 */
@@ -177,15 +165,8 @@ function dimmingExtension(): Extension {
 /** 新建/重命名/每日目标三个单输入框弹窗共用一个壳。 */
 type ChapterDialog = { kind: "new" | "rename" | "goal"; value: string };
 
-type SplitDialog = {
-  preview: ChapterSplitPreview;
-  title: string;
-  busy: boolean;
-};
-
 interface WritingPageProps {
   project: ProjectEntry;
-  libraryPath: string | null;
   /** 书写板块当前是否在前台：切走时立即保存（板块常驻挂载，不卸载）。 */
   active: boolean;
   /** 跳转请求：打开该章并选中引文（仅挂载时生效）。 */
@@ -205,7 +186,6 @@ interface WritingPageProps {
  *  状态栏＋联动侧栏。自动保存穿指纹闸（ADR 0004），写盘前留历史版本。 */
 export default function WritingPage({
   project,
-  libraryPath,
   active,
   locate,
   onBack,
@@ -214,9 +194,8 @@ export default function WritingPage({
   registerBridge,
   onChapterActive,
 }: WritingPageProps) {
-  const librarySession = useLibrarySession();
-  const librarySessionId = librarySession.id;
-  const isCurrentLibrarySession = () => librarySession.isCurrent(librarySessionId);
+  const [appSettings, updateSettings] = useSettings();
+  const prefs = { typewriter: appSettings.typewriter, dimming: appSettings.dimming };
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const extensionsRef = useRef<Extension[] | null>(null);
@@ -225,11 +204,6 @@ export default function WritingPage({
   const baselineRef = useRef(0);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
-  /** 在途保存的 Promise（工单 #77）：离开结算是等它完成，不是被门闩弹回。 */
-  const saveInFlightRef = useRef<Promise<boolean> | null>(null);
-  /** 导航代次（工单 #77）：每次 openChapter 递增；迟到的读取/保存响应
-   *  对不上最新代次就不许回填编辑器（连续点击不同目标时只认最后一次）。 */
-  const navSeqRef = useRef(0);
   const conflictRef = useRef(false);
   const autosaveRef = useRef<number | null>(null);
   const countsTimerRef = useRef<number | null>(null);
@@ -240,12 +214,6 @@ export default function WritingPage({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [chapters, setChapters] = useState<ChapterEntry[]>([]);
   const [current, setCurrent] = useState<ChapterEntry | null>(null);
-  const [overview, setOverview] = useState<{ cards: ChapterCard[]; loading: boolean; error: string | null } | null>(null);
-  const [quickNoteOpen, setQuickNoteOpen] = useState(false);
-  const [quickNoteText, setQuickNoteText] = useState("");
-  const [quickNoteBusy, setQuickNoteBusy] = useState(false);
-  const [quickNoteError, setQuickNoteError] = useState<string | null>(null);
-  const [splitDialog, setSplitDialog] = useState<SplitDialog | null>(null);
 
   // 正文在不在场（工单 #56 / T01）：外壳据此退场/召回窄轨；
   // 空项目（还没开章）不算进入正文。
@@ -264,17 +232,7 @@ export default function WritingPage({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [immersive, setImmersive] = useState(false);
   const [typoOpen, setTypoOpen] = useState(false);
-  const [appSettings, updateSettings] = useSettings();
-  const prefs = { typewriter: appSettings.typewriter, dimming: appSettings.dimming };
   const [dialog, setDialog] = useState<ChapterDialog | null>(null);
-  const [proofOpen, setProofOpen] = useState(false);
-  const [chapterNotes, setChapterNotes] = useState<InspirationCard[]>([]);
-  const [chapterNotesError, setChapterNotesError] = useState<string | null>(null);
-  const [notesRevision, setNotesRevision] = useState(0);
-  const returnToWriting = () => viewRef.current?.focus();
-  const splitKeyboard = useDialogKeyboard(!!splitDialog, () => { setSplitDialog(null); returnToWriting(); }, !!splitDialog?.busy);
-  const overviewKeyboard = useDialogKeyboard(!!overview, () => { setOverview(null); returnToWriting(); });
-  const quickNoteKeyboard = useDialogKeyboard(quickNoteOpen, () => { setQuickNoteOpen(false); returnToWriting(); }, quickNoteBusy);
   const [history, setHistory] = useState<null | {
     list: SnapshotEntry[];
     selected: string | null;
@@ -291,7 +249,6 @@ export default function WritingPage({
   // 三线（工单 #7）：看板视图（未推进章数/超期由 Rust 现算）供侧栏与弹窗用。
   const [expectations, setExpectations] = useState<ExpectationBoard>({
     maxChapter: 0,
-    tableFingerprint: null,
     items: [],
   });
   // 记为期待线：右键菜单一步定类别（期待感/目标，工单 #36），弹窗只填名字＋档位。
@@ -328,7 +285,6 @@ export default function WritingPage({
   }
 
   function handlePaste(event: ClipboardEvent, view: EditorView): boolean {
-    if (!isCurrentLibrarySession()) return false;
     const files = Array.from(event.clipboardData?.files ?? []).filter((f) =>
       f.type.startsWith("image/"),
     );
@@ -338,14 +294,12 @@ export default function WritingPage({
       for (const file of files) {
         const ext = file.type.split("/")[1] || "png";
         const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-        if (!isCurrentLibrarySession()) return;
         try {
           const rel = await invoke<string>("save_chapter_paste_image", {
             project: project.dir,
             ext,
             bytes,
           });
-          if (!isCurrentLibrarySession()) return;
           const pos = view.state.selection.main.head;
           const insert = `\n\n![](${rel})\n`;
           view.dispatch({
@@ -450,52 +404,9 @@ export default function WritingPage({
   // ---------- 读写 ----------
 
   async function rescan(): Promise<ChapterEntry[]> {
-    const session = librarySession.id;
     const list = await invoke<ChapterEntry[]>("scan_chapters", { project: project.dir });
-    if (!librarySession.isCurrent(session)) return [];
     setChapters(list);
     return list;
-  }
-
-  async function openOverview() {
-    const session = librarySession.id;
-    setOverview({ cards: [], loading: true, error: null });
-    try {
-      const cards = await invoke<ChapterCard[]>("scan_chapter_cards", { project: project.dir });
-      if (!librarySession.isCurrent(session)) return;
-      setOverview((open) => open && { cards, loading: false, error: null });
-    } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
-      setOverview((open) => open && { cards: [], loading: false, error: `读取章节总览失败：${errMsg(e)}` });
-    }
-  }
-
-  async function saveQuickNote() {
-    const chapter = currentRef.current;
-    if (!libraryPath || !chapter || !quickNoteText.trim() || quickNoteBusy) return;
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
-    setQuickNoteBusy(true);
-    setQuickNoteError(null);
-    try {
-      await invoke("capture_chapter_inspiration", {
-        root: libraryPath,
-        project: project.dir,
-        chapter: chapter.path,
-        body: quickNoteText,
-      });
-      if (!librarySession.isCurrent(session)) return;
-      setQuickNoteText("");
-      setNotesRevision((revision) => revision + 1);
-      window.dispatchEvent(new CustomEvent("gongbi:inspirations-changed", { detail: { root: libraryPath } }));
-      setQuickNoteOpen(false);
-      viewRef.current?.focus();
-    } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
-      setQuickNoteError(`便笺保存失败：${errMsg(e)}。正文和便笺草稿都还在。`);
-    } finally {
-      if (librarySession.isCurrent(session)) setQuickNoteBusy(false);
-    }
   }
 
   async function loadIntent(entry: ChapterEntry) {
@@ -503,16 +414,14 @@ export default function WritingPage({
       setIntent(null);
       return;
     }
-    const session = librarySession.id;
     try {
-      const result = await invoke<ChapterIntent>("find_chapter_intent", {
-        project: project.dir,
-        ordinal: entry.ordinal,
-      });
-      if (!librarySession.isCurrent(session)) return;
-      setIntent(result);
+      setIntent(
+        await invoke<ChapterIntent>("find_chapter_intent", {
+          project: project.dir,
+          ordinal: entry.ordinal,
+        }),
+      );
     } catch {
-      if (!librarySession.isCurrent(session)) return;
       // 规划读取是写作旁路；失败时照常可写，只显示自由写作提示。
       setIntent({ unit: null, bridge: null, warnings: [] });
     }
@@ -521,16 +430,12 @@ export default function WritingPage({
   // ---------- 伏笔（工单 #6，docs/spec/伏笔系统.md） ----------
 
   async function loadForeshadows(): Promise<Foreshadow[]> {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return [];
     try {
       const list = await invoke<Foreshadow[]>("read_foreshadows", { project: project.dir });
-      if (!librarySession.isCurrent(session)) return [];
       foreshadowsRef.current = list;
       setForeshadows(list);
       return list;
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return [];
       // 伏笔.yaml 损坏：显式提示，但不挡写作（伏笔只是旁路数据）。
       foreshadowsRef.current = [];
       setForeshadows([]);
@@ -617,7 +522,6 @@ export default function WritingPage({
   }
 
   async function annotateForeshadow(name: string) {
-    if (!isCurrentLibrarySession()) return;
     const ordinal = requireOrdinal();
     const view = viewRef.current;
     if (ordinal === null || !view || !annotate) return;
@@ -629,21 +533,18 @@ export default function WritingPage({
         chapter: ordinal,
         quote: annotate.quote,
       });
-      if (!isCurrentLibrarySession()) return;
       foreshadowsRef.current = list;
       setForeshadows(list);
       setAnnotate(null);
       applyForeshadowMarks();
     } catch (e) {
-      if (!isCurrentLibrarySession()) return;
       window.alert(`设为伏笔失败：${errMsg(e)}`);
     } finally {
-      if (isCurrentLibrarySession()) setForeshadowBusy(false);
+      setForeshadowBusy(false);
     }
   }
 
   async function recoverForeshadow(name: string, kind: string, note: string) {
-    if (!isCurrentLibrarySession()) return;
     const ordinal = requireOrdinal();
     if (ordinal === null || !collect) return;
     setForeshadowBusy(true);
@@ -656,38 +557,30 @@ export default function WritingPage({
         kind,
         note: note.trim() || null,
       });
-      if (!isCurrentLibrarySession()) return;
       foreshadowsRef.current = list;
       setForeshadows(list);
       setCollect(null);
       applyForeshadowMarks();
     } catch (e) {
-      if (!isCurrentLibrarySession()) return;
       window.alert(`回收伏笔失败：${errMsg(e)}`);
     } finally {
-      if (isCurrentLibrarySession()) setForeshadowBusy(false);
+      setForeshadowBusy(false);
     }
   }
 
   // ---------- 三线（工单 #7，docs/spec/期待感三线.md） ----------
 
   async function loadExpectations(): Promise<void> {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
     try {
-      const board = await invoke<ExpectationBoard>("expectation_board", { project: project.dir });
-      if (!librarySession.isCurrent(session)) return;
-      setExpectations(board);
+      setExpectations(await invoke<ExpectationBoard>("expectation_board", { project: project.dir }));
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       // 三线.yaml 损坏：显式提示，但不挡写作（三线只是旁路数据）。
-      setExpectations({ maxChapter: 0, tableFingerprint: null, items: [] });
+      setExpectations({ maxChapter: 0, items: [] });
       window.alert(`读取期待线失败：${errMsg(e)}`);
     }
   }
 
   async function annotateExpectation(name: string, kind: string, horizon: string) {
-    if (!isCurrentLibrarySession()) return;
     const ordinal = requireOrdinal();
     if (ordinal === null || !expAnnotate) return;
     setExpectationBusy(true);
@@ -700,19 +593,16 @@ export default function WritingPage({
         kind,
         horizon,
       });
-      if (!isCurrentLibrarySession()) return;
       setExpAnnotate(null);
       await loadExpectations();
     } catch (e) {
-      if (!isCurrentLibrarySession()) return;
       window.alert(`记为期待线失败：${errMsg(e)}`);
     } finally {
-      if (isCurrentLibrarySession()) setExpectationBusy(false);
+      setExpectationBusy(false);
     }
   }
 
   async function fulfillExpectation(name: string, kind: string, note: string) {
-    if (!isCurrentLibrarySession()) return;
     const ordinal = requireOrdinal();
     if (ordinal === null || !expFulfill) return;
     setExpectationBusy(true);
@@ -725,14 +615,12 @@ export default function WritingPage({
         kind,
         note: note.trim() || null,
       });
-      if (!isCurrentLibrarySession()) return;
       setExpFulfill(null);
       await loadExpectations();
     } catch (e) {
-      if (!isCurrentLibrarySession()) return;
       window.alert(`兑现期待线失败：${errMsg(e)}`);
     } finally {
-      if (isCurrentLibrarySession()) setExpectationBusy(false);
+      setExpectationBusy(false);
     }
   }
 
@@ -748,22 +636,13 @@ export default function WritingPage({
     return true;
   }
 
-  /** 切章（工单 #77）：先结算保存（保存往返期间的新输入继续保存到稳定
-   *  版本），读取按请求代次约束——更新的导航已发起时丢弃迟到的读取；
-   *  读取期间又输入的，再结算一次才替换编辑器。结算失败/被取代 → 留在
-   *  原章，文字不动。 */
   async function openChapter(entry: ChapterEntry): Promise<boolean> {
-    const generation = navSeqRef.current + 1;
-    navSeqRef.current = generation;
-    const session = librarySession.id;
-    // 迟到判定：本请求已被更新的导航取代时丢弃，不回填编辑器。
-    const stale = () => navSeqRef.current !== generation || !librarySession.isCurrent(session);
-    if (!(await settleNow()) || stale()) return false;
+    if (currentRef.current && dirtyRef.current) {
+      const ok = await saveNow(false);
+      if (!ok) return false;
+    }
     try {
       const doc = await invoke<MdContent>("read_book_md", { path: entry.path });
-      if (stale()) return false;
-      if (dirtyRef.current && !(await settleNow())) return false;
-      if (stale()) return false;
       currentRef.current = entry;
       setCurrent(entry);
       fingerprintRef.current = doc.fingerprint;
@@ -792,46 +671,8 @@ export default function WritingPage({
   }
 
   /** 保存当前章（指纹闸）：成功 true；冲突 false（横幅交人裁决）。
-   *  quiet＝关窗兜底用：失败只记日志，不拿弹框拦关窗。
-   *  返回 true 只证明本次请求的快照落盘；往返期间又输入的内容仍带脏标
-   *  （由自动保存或离开结算接走）——导航放行与否看 settleNow。 */
-  useEffect(() => registerSearchNavigationGuard(() => settleNow(true)));
-
-  /** 离开结算（工单 #77，safeLeave.ts）：切章/返回/搜索跳转等会替换或
-   *  卸载编辑器的导航先经此结算到「无未保存内容」再放行；保存轮失败、
-   *  冲突未裁决或持续输入未收敛 → false，原编辑器与文字保持原样。
-   *  busy（持续输入未收敛）且非 quiet 时明确提示导航未完成。 */
-  async function settleNow(quiet = false): Promise<boolean> {
-    const view = viewRef.current;
-    const entry = currentRef.current;
-    if (!view || !entry) return true;
-    const outcome = await settleForLeave({
-      isDirty: () => dirtyRef.current,
-      inConflict: () => conflictRef.current,
-      inFlightSave: () => saveInFlightRef.current,
-      saveRound: async () => {
-        // 结算与自动保存赛跑的窄窗口里可能冒出在途保存：等它并如实
-        // 传播结果（失败＝本轮失败，停止结算，不静默吞掉）。
-        const inFlight = saveInFlightRef.current;
-        if (inFlight) {
-          try {
-            return await inFlight;
-          } catch {
-            return false;
-          }
-        }
-        return saveNow(false, quiet);
-      },
-    });
-    if (outcome === "busy" && !quiet) {
-      window.alert("还有文字没保存完（可能仍在继续输入），先停笔让保存完成，再操作。");
-    }
-    return outcome === "done";
-  }
-
+   *  quiet＝关窗兜底用：失败只记日志，不拿弹框拦关窗。 */
   async function saveNow(force: boolean, quiet = false): Promise<boolean> {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return false;
     const view = viewRef.current;
     const entry = currentRef.current;
     if (!view || !entry) return true;
@@ -841,85 +682,66 @@ export default function WritingPage({
     if (conflictRef.current && !force) return false;
     savingRef.current = true;
     if (!quiet) setSaveStatus("saving");
-    const round = (async () => {
-      try {
-        const content = view.state.doc.toString();
-        const result = await invoke<SaveResult>("save_chapter_md", {
-          project: project.dir,
-          path: entry.path,
-          content,
-          base: fingerprintRef.current,
-          force,
-        });
-        if (!librarySession.isCurrent(session)) return result.status === "saved";
-        // 保存响应绑定发起时的对象（工单 #77）：往返期间已换章的话，写盘
-        // 本身按旧路径完成/被拒，指纹/脏标/统计不得套到新章上。
-        if (currentRef.current?.path !== entry.path) return result.status === "saved";
-        if (result.status === "conflict") {
-          conflictRef.current = true;
-          setConflict(true);
-          setSaveStatus("conflict");
-          return false;
-        }
-        fingerprintRef.current = result.fingerprint;
-        conflictRef.current = false;
-        setConflict(false);
-        // 保存往返窗口里又打过字的不算干净：留着脏标让下一轮接走
-        // （自动保存或离开结算）。
-        if (viewRef.current?.state.doc.toString() === content) {
-          dirtyRef.current = false;
-          setSaveStatus("saved");
-        }
-        const s = chapterStats(content);
-        const delta = s.wordCount - baselineRef.current;
-        baselineRef.current = s.wordCount;
-        if (delta !== 0) addTodayWords(delta);
-        const statusNow = readChapterStatus(content);
-        setChapters((list) =>
-          list.map((c) =>
-            c.path === entry.path
-              ? { ...c, wordCount: s.wordCount, hanCount: s.hanCount, status: statusNow }
-              : c,
-          ),
-        );
-        return true;
-      } catch (e) {
-        if (!librarySession.isCurrent(session)) return false;
-        // 往返期间已换章/删章：失败属于旧对象，不再惊扰新章（记日志即可）。
-        if (currentRef.current?.path !== entry.path) {
-          console.error("旧章保存响应迟到失败（已忽略）：", e);
-        } else if (quiet) {
-          console.error("关窗兜底保存失败：", e);
-        } else {
-          setSaveStatus("error");
-          window.alert(`保存失败：${errMsg(e)}`);
-        }
+    try {
+      const content = view.state.doc.toString();
+      const result = await invoke<SaveResult>("save_chapter_md", {
+        project: project.dir,
+        path: entry.path,
+        content,
+        base: fingerprintRef.current,
+        force,
+      });
+      if (result.status === "conflict") {
+        conflictRef.current = true;
+        setConflict(true);
+        setSaveStatus("conflict");
         return false;
-      } finally {
-        savingRef.current = false;
-        saveInFlightRef.current = null;
       }
-    })();
-    saveInFlightRef.current = round;
-    return round;
+      fingerprintRef.current = result.fingerprint;
+      conflictRef.current = false;
+      setConflict(false);
+      // 保存往返窗口里又打过字的不算干净：留着脏标让下一轮自动保存接走。
+      if (view.state.doc.toString() === content) {
+        dirtyRef.current = false;
+        setSaveStatus("saved");
+      }
+      const s = chapterStats(content);
+      const delta = s.wordCount - baselineRef.current;
+      baselineRef.current = s.wordCount;
+      if (delta !== 0) addTodayWords(delta);
+      const statusNow = readChapterStatus(content);
+      setChapters((list) =>
+        list.map((c) =>
+          c.path === entry.path
+            ? { ...c, wordCount: s.wordCount, hanCount: s.hanCount, status: statusNow }
+            : c,
+        ),
+      );
+      return true;
+    } catch (e) {
+      if (quiet) {
+        console.error("关窗兜底保存失败：", e);
+      } else {
+        setSaveStatus("error");
+        window.alert(`保存失败：${errMsg(e)}`);
+      }
+      return false;
+    } finally {
+      savingRef.current = false;
+    }
   }
 
   async function reloadFromDisk() {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     if (!entry) return;
     if (!window.confirm("重新加载会放弃编辑器里未保存的修改，确定吗？")) return;
-    if (!librarySession.isCurrent(session)) return;
     try {
       const doc = await invoke<MdContent>("read_book_md", { path: entry.path });
-      if (!librarySession.isCurrent(session)) return;
       fingerprintRef.current = doc.fingerprint;
       conflictRef.current = false;
       setConflict(false);
       loadContent(doc.content);
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       window.alert(`重新加载失败：${errMsg(e)}`);
     }
   }
@@ -938,118 +760,56 @@ export default function WritingPage({
   // ---------- 章节动作 ----------
 
   async function openNextChapter() {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
-    if (!(await settleNow()) || !librarySession.isCurrent(session)) return;
+    if (currentRef.current && dirtyRef.current) {
+      const ok = await saveNow(false);
+      if (!ok) return;
+    }
     try {
       const created = await invoke<ChapterEntry>("create_chapter", {
         project: project.dir,
         title: "",
       });
-      if (!librarySession.isCurrent(session)) return;
       await rescan();
-      if (!librarySession.isCurrent(session)) return;
       await openChapter(created);
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       window.alert(`新建下一章失败：${errMsg(e)}`);
     }
   }
 
   async function createChapter(title: string) {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
     try {
       const created = await invoke<ChapterEntry>("create_chapter", {
         project: project.dir,
         title,
       });
-      if (!librarySession.isCurrent(session)) return;
       setDialog(null);
       await rescan();
-      if (!librarySession.isCurrent(session)) return;
       await openChapter(created);
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       window.alert(`新建章节失败：${errMsg(e)}`);
     }
   }
 
   async function renameCurrent(title: string) {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     if (!entry) return;
-    if (!(await settleNow()) || !librarySession.isCurrent(session)) return;
+    if (dirtyRef.current && !(await saveNow(false))) return;
     try {
       const renamed = await invoke<ChapterEntry>("rename_chapter", {
         path: entry.path,
         title,
       });
-      if (!librarySession.isCurrent(session)) return;
       currentRef.current = renamed;
       setCurrent(renamed);
       localStorage.setItem(chapterKey(project.dir), renamed.path);
       setDialog(null);
       await rescan();
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       window.alert(`重命名失败：${errMsg(e)}`);
     }
   }
 
-  async function buildSplitPreview(title: string, cursorUtf16?: number) {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
-    const entry = currentRef.current;
-    const view = viewRef.current;
-    if (!entry || entry.ordinal === null || !view) return;
-    if (!(await settleNow()) || !librarySession.isCurrent(session)) return;
-    try {
-      const preview = await invoke<ChapterSplitPreview>("preview_chapter_split", {
-        project: project.dir,
-        source: entry.path,
-        cursorUtf16: cursorUtf16 ?? view.state.selection.main.head,
-        title,
-      });
-      if (!librarySession.isCurrent(session)) return;
-      setSplitDialog({ preview, title: preview.title, busy: false });
-    } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
-      window.alert(`无法预览拆章：${errMsg(e)}`);
-      view.focus();
-    }
-  }
-
-  async function confirmSplit() {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
-    if (!splitDialog || splitDialog.title !== splitDialog.preview.title) return;
-    setSplitDialog({ ...splitDialog, busy: true });
-    try {
-      const result = await invoke<ChapterSplitResult>("split_chapter", {
-        project: project.dir,
-        preview: splitDialog.preview,
-      });
-      if (!librarySession.isCurrent(session)) return;
-      setSplitDialog(null);
-      const list = await rescan();
-      if (!librarySession.isCurrent(session)) return;
-      const created = list.find((chapter) => chapter.path === result.created.path) ?? result.created;
-      await openChapter(created);
-      viewRef.current?.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
-      viewRef.current?.focus();
-      onChanged();
-    } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
-      setSplitDialog((dialog) => (dialog ? { ...dialog, busy: false } : dialog));
-      window.alert(`拆章失败：${errMsg(e)}`);
-    }
-  }
-
   async function deleteCurrent() {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     if (!entry) return;
     if (
@@ -1059,7 +819,6 @@ export default function WritingPage({
     ) {
       return;
     }
-    if (!librarySession.isCurrent(session)) return;
     if (autosaveRef.current !== null) {
       window.clearTimeout(autosaveRef.current);
       autosaveRef.current = null;
@@ -1067,24 +826,19 @@ export default function WritingPage({
     const index = chapters.findIndex((c) => c.path === entry.path);
     try {
       await invoke("delete_chapter", { path: entry.path });
-      if (!librarySession.isCurrent(session)) return;
       currentRef.current = null;
       setCurrent(null);
       setIntent(null);
       const list = await rescan();
-      if (!librarySession.isCurrent(session)) return;
       const next = list.length > 0 ? list[Math.min(Math.max(index, 0), list.length - 1)] : null;
       if (next) await openChapter(next);
       else loadContent("");
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       window.alert(`删除失败：${errMsg(e)}`);
     }
   }
 
   async function renumber() {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
     if (
       !window.confirm(
         "把合规章节按当前顺序重排为 1..N（文件名会变，未编号文件不动）？",
@@ -1092,15 +846,12 @@ export default function WritingPage({
     ) {
       return;
     }
-    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
-    if (entry && !(await settleNow())) return;
-    if (!librarySession.isCurrent(session)) return;
+    if (entry && dirtyRef.current && !(await saveNow(false))) return;
     const numbered = chapters.filter((c) => c.ordinal !== null);
     const position = entry ? numbered.findIndex((c) => c.path === entry.path) : -1;
     try {
       const list = await invoke<ChapterEntry[]>("renumber_chapters", { project: project.dir });
-      if (!librarySession.isCurrent(session)) return;
       setChapters(list);
       if (position >= 0) {
         const target = list.find((c) => c.ordinal === position + 1);
@@ -1111,13 +862,11 @@ export default function WritingPage({
         }
       }
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       window.alert(`重编号失败：${errMsg(e)}`);
     }
   }
 
   function changeStatus(next: string) {
-    if (!isCurrentLibrarySession()) return;
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({ changes: upsertFrontmatterStatus(view.state.doc.toString(), next) });
@@ -1137,8 +886,6 @@ export default function WritingPage({
   }
 
   async function openHistory() {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     if (!entry) return;
     try {
@@ -1146,37 +893,28 @@ export default function WritingPage({
         project: project.dir,
         path: entry.path,
       });
-      if (!librarySession.isCurrent(session)) return;
       setHistory({ list, selected: null, preview: "" });
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       window.alert(`读取历史版本失败：${errMsg(e)}`);
     }
   }
 
   async function selectSnapshot(path: string) {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
     try {
       const preview = await invoke<string>("read_chapter_snapshot", { path });
-      if (!librarySession.isCurrent(session)) return;
       setHistory((h) => (h ? { ...h, selected: path, preview } : h));
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       window.alert(`读取历史版本失败：${errMsg(e)}`);
     }
   }
 
   async function restoreSnapshot() {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
     if (!history?.selected) return;
     if (dirtyRef.current && !window.confirm("当前有未保存的修改，恢复历史版本会覆盖它们，确定吗？")) {
       return;
     }
     try {
       const content = await invoke<string>("read_chapter_snapshot", { path: history.selected });
-      if (!librarySession.isCurrent(session)) return;
       loadContent(content);
       dirtyRef.current = true;
       setSaveStatus("dirty");
@@ -1184,7 +922,6 @@ export default function WritingPage({
       setHistory(null);
       viewRef.current?.focus();
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       window.alert(`恢复失败：${errMsg(e)}`);
     }
   }
@@ -1205,8 +942,7 @@ export default function WritingPage({
   }
 
   async function handleBack() {
-    const session = librarySession.id;
-    if (!(await settleNow()) || !librarySession.isCurrent(session)) return;
+    if (dirtyRef.current && !(await saveNow(false))) return;
     onChanged();
     onBack();
   }
@@ -1216,21 +952,18 @@ export default function WritingPage({
   /** AI 陪看本章：材料只含正文与可用的本章意图，由作者显式发起，只出建议。
    *  读的是盘上正文——先把未保存的改动落盘，冲突没裁决就不跑。 */
   async function runChapterCompanion() {
-    const session = librarySession.id;
-    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     const view = viewRef.current;
     if (!entry || entry.ordinal === null || !view) {
       window.alert("先打开一章再请 AI 陪看（章序按文件名前缀认，未编号章不参与）。");
       return;
     }
-    // 先结算到稳定版本：陪看材料对照的盘面必须包含全部新输入。
-    if (!(await settleNow())) {
+    // 固定作者点击这一刻的正文；保存往返期间即使继续输入，本次陪看也不会悄悄读旧盘面。
+    const chapterContent = view.state.doc.toString();
+    if (dirtyRef.current && !(await saveNow(false))) {
       window.alert("本章还有未落盘的修改（或保存冲突未裁决），先处理再请 AI 陪看。");
       return;
     }
-    if (!librarySession.isCurrent(session)) return;
-    const chapterContent = view.state.doc.toString();
     try {
       const text = await invoke<string>("build_ai_context", {
         kind: AI_CHAPTER_COMPANION,
@@ -1239,17 +972,14 @@ export default function WritingPage({
         subjects: null,
         chapterContent,
       });
-      if (!librarySession.isCurrent(session)) return;
       onAiCommand({ kind: AI_CHAPTER_COMPANION, bookName: project.title, text });
     } catch (e) {
-      if (!librarySession.isCurrent(session)) return;
       window.alert(`AI 陪看材料读取失败：${errMsg(e)}`);
     }
   }
 
   /** 润色：只把选中的那段正文交给 AI；采纳（替换选中）在面板里点。 */
   function runPolish() {
-    if (!isCurrentLibrarySession()) return;
     const view = viewRef.current;
     const entry = currentRef.current;
     if (!view || !entry) return;
@@ -1276,38 +1006,32 @@ export default function WritingPage({
 
   useEffect(() => {
     let cancelled = false;
-    const session = librarySession.id;
-    const stale = () => cancelled || !librarySession.isCurrent(session);
     void (async () => {
       try {
         const meta = await invoke<ProjectMeta>("read_project_meta", { project: project.dir });
-        if (stale()) return;
-        setPrefix(meta.chapterPrefix);
+        if (!cancelled) setPrefix(meta.chapterPrefix);
       } catch {
         // 项目.yaml 读不了：章前缀回退默认，不挡写作。
       }
-      if (stale()) return;
       try {
         const loaded = await invoke<WritingStats>("load_writing_stats");
-        if (stale()) return;
-        statsRef.current = loaded;
-        setStats(loaded);
+        if (!cancelled) {
+          statsRef.current = loaded;
+          setStats(loaded);
+        }
       } catch {
         // 统计读不了：从零起算。
       }
-      if (stale()) return;
       await loadForeshadows();
-      if (stale()) return;
       await loadExpectations();
-      if (stale()) return;
       let list: ChapterEntry[] = [];
       try {
         list = await rescan();
       } catch (e) {
-        if (!stale()) setLoadError(`扫描正文失败：${errMsg(e)}`);
+        if (!cancelled) setLoadError(`扫描正文失败：${errMsg(e)}`);
         return;
       }
-      if (stale()) return;
+      if (cancelled) return;
       const remembered = localStorage.getItem(chapterKey(project.dir));
       const numbered = list.filter((c) => c.ordinal !== null);
       const pick =
@@ -1320,20 +1044,15 @@ export default function WritingPage({
         numbered[numbered.length - 1] ??
         list[0];
       if (pick) await openChapter(pick);
-      if (stale()) return;
       // 跳转落点：给行号按行定位（校对命中），否则全文找引文（伏笔/三线）。
       if (locate?.quote) {
         if (locate.line !== undefined) {
-          if (locate.fingerprint && locate.fingerprint !== fingerprintRef.current) {
-            window.alert("正文在校对后已经变化，请重新校对本章后再定位。");
-          } else {
-            locateAtLine(locate.line, locate.quote, locate.occurrence ?? 0);
-          }
+          locateAtLine(locate.line, locate.quote, locate.occurrence ?? 0);
         } else {
           locateQuote(locate.quote);
         }
       }
-      if (!stale()) setReady(true);
+      if (!cancelled) setReady(true);
     })();
     return () => {
       cancelled = true;
@@ -1362,49 +1081,11 @@ export default function WritingPage({
   useEffect(() => {
     if (!immersive) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented && !quickNoteOpen && !overview && !splitDialog && !proofOpen) setImmersive(false);
+      if (e.key === "Escape") setImmersive(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [immersive, quickNoteOpen, overview, splitDialog, proofOpen]);
-
-  useEffect(() => {
-    if (!active) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing || quickNoteOpen || overview || splitDialog || proofOpen) return;
-      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "o") {
-        e.preventDefault();
-        if (!quickNoteOpen) void openOverview();
-      } else if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "n" && currentRef.current && libraryPath) {
-        e.preventDefault();
-        if (!overview) {
-          setQuickNoteError(null);
-          setQuickNoteOpen(true);
-        }
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [active, libraryPath, overview, quickNoteOpen, quickNoteBusy, splitDialog, proofOpen]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setChapterNotes([]);
-    setChapterNotesError(null);
-    if (!active || !libraryPath || !current) return;
-    const projectName = project.dir.split(/[\\/]/).pop();
-    const fileName = current.fileName;
-    void invoke<InspirationCard[]>("scan_inspirations", { root: libraryPath }).then((cards) => {
-      if (cancelled) return;
-      setChapterNotes(cards.filter((card) => card.links.some((link) => {
-        const chapter = chapterInspirationLink(link);
-        return chapter !== null && chapter.project === projectName && chapter.fileName === fileName;
-      })));
-    }).catch((error) => {
-      if (!cancelled) setChapterNotesError(`关联便笺读取失败：${errMsg(error)}`);
-    });
-    return () => { cancelled = true; };
-  }, [active, libraryPath, current?.path, project.dir, notesRevision]);
+  }, [immersive]);
 
   // 切出书写板块：立即落盘；切回来：焦点还给编辑器（板块常驻挂载，不卸载），
   // 并重读伏笔与三线（构思侧看板可能刚改过状态/删过条目）。
@@ -1542,12 +1223,9 @@ export default function WritingPage({
         />
         <div className="page-actions">
           {immersive ? (
-            <>
-              <button className="btn" onClick={() => void openOverview()}>章节总览</button>
-              <button className="btn" onClick={() => setImmersive(false)}>
-                退出沉浸（Esc）
-              </button>
-            </>
+            <button className="btn" onClick={() => setImmersive(false)}>
+              退出沉浸（Esc）
+            </button>
           ) : (
             <>
               {/* 选区上下文：AI 润色只在有效选区时出现（spec §五）。 */}
@@ -1561,22 +1239,10 @@ export default function WritingPage({
                   AI 润色
                 </button>
               )}
-              <button className="btn" onClick={() => setListOpen((v) => !v)}>
-                {listOpen ? "收起列表" : "章节列表"}
-              </button>
-              <button className="btn" onClick={() => setSidebarOpen((v) => !v)}>
-                {sidebarOpen ? "收起侧栏" : "侧栏"}
-              </button>
               <HeaderMenu
-                label="页面"
+                label="更多"
                 onReturnFocus={() => viewRef.current?.focus()}
                 items={[
-                  {
-                    id: "page-chapter-overview",
-                    label: "章节总览",
-                    hint: "Ctrl+Alt+O，只读浏览",
-                    run: () => void openOverview(),
-                  },
                   {
                     id: "page-history",
                     label: "历史版本",
@@ -1584,41 +1250,22 @@ export default function WritingPage({
                     run: () => void openHistory(),
                   },
                   {
-                    id: "page-quick-note",
-                    label: "灵感速记",
-                    hint: "Ctrl+Alt+N，关联本章",
-                    disabled: !current || !libraryPath,
-                    run: () => {
-                      setQuickNoteError(null);
-                      setQuickNoteOpen(true);
-                    },
+                    id: "page-chapter-list",
+                    label: listOpen ? "收起章节列表" : "显示章节列表",
+                    run: () => setListOpen((value) => !value),
                   },
                   {
-                    id: "page-split-chapter",
-                    label: "在光标处拆章",
-                    hint: "先预览，再确认",
-                    disabled: !current || current.ordinal === null || conflict,
-                    run: () => void buildSplitPreview("新章"),
+                    id: "page-sidebar",
+                    label: sidebarOpen ? "收起联动侧栏" : "显示联动侧栏",
+                    run: () => setSidebarOpen((value) => !value),
                   },
                   {
-                    id: "page-proof",
-                    label: "校对本章",
-                    hint: "先落盘再校对",
-                    disabled: !current,
-                    run: () => {
-                      void settleNow().then((saved) => saved && setProofOpen(true));
-                    },
+                    id: "page-typography",
+                    label: typoOpen ? "收起排版工具" : "打开排版工具",
+                    run: () => setTypoOpen((value) => !value),
                   },
                 ]}
               />
-              <button
-                className="btn"
-                aria-expanded={typoOpen}
-                title="排版（字体/字号/行距/对齐/缩进，与设置同源）"
-                onClick={() => setTypoOpen((v) => !v)}
-              >
-                排版
-              </button>
               <button className="btn primary" disabled={!ready} onClick={() => setImmersive(true)}>
                 沉浸
               </button>
@@ -1653,9 +1300,6 @@ export default function WritingPage({
           <aside className="chapter-list">
           <div className="chapter-list-head">
             <span className="toolbar-label">章节</span>
-            <button className="btn small" title="只读章节卡，可按章跳转" onClick={() => void openOverview()}>
-              总览
-            </button>
             <button
               className="btn small"
               disabled={!ready}
@@ -1710,18 +1354,6 @@ export default function WritingPage({
 
         {sidebarOpen && (
           <aside className="writing-sidebar">
-            {(chapterNotes.length > 0 || chapterNotesError) && (
-              <section aria-label="本章关联便笺">
-                <h2 className="sidebar-title">本章关联便笺</h2>
-                {chapterNotesError && <p role="alert">{chapterNotesError}</p>}
-                {chapterNotes.map((card) => (
-                  <details key={card.path} className="chapter-intent-card" open>
-                    <summary>{card.title}{card.pending ? " · 待打磨" : ""}</summary>
-                    <div className="chapter-intent-content" style={{ whiteSpace: "pre-wrap" }}>{card.body}</div>
-                  </details>
-                ))}
-              </section>
-            )}
             <div className="sidebar-section-head">
               <h2 className="sidebar-title">本章意图</h2>
               <button
@@ -1999,150 +1631,6 @@ export default function WritingPage({
         </div>
       )}
 
-      {splitDialog && (
-        <div
-          className="dialog-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !splitDialog.busy) { setSplitDialog(null); returnToWriting(); }
-          }}
-        >
-          <div className="dialog split-chapter-dialog" {...splitKeyboard} role="dialog" aria-modal="true" aria-label="在光标处拆章">
-            <h2>在光标处拆章</h2>
-            <label>
-              新章标题（可留空）
-              <input
-                autoFocus
-                value={splitDialog.title}
-                disabled={splitDialog.busy}
-                onChange={(e) =>
-                  setSplitDialog({ ...splitDialog, title: e.target.value, busy: false })
-                }
-              />
-            </label>
-            {splitDialog.title !== splitDialog.preview.title ? (
-              <div className="split-preview-stale">
-                <p className="hint">标题已改变，请先更新预览，确认目标文件不重名。</p>
-                <button
-                  className="btn"
-                  disabled={splitDialog.busy}
-                  onClick={() =>
-                    void buildSplitPreview(
-                      splitDialog.title,
-                      splitDialog.preview.before.length,
-                    )
-                  }
-                >
-                  更新预览
-                </button>
-              </div>
-            ) : (
-              <>
-                <p className="split-target">
-                  新章文件：<strong>{splitDialog.preview.targetPath.split(/[\\/]/).pop()}</strong>
-                </p>
-                {splitDialog.preview.targetExists && (
-                  <p className="error-box split-target-error">
-                    这个文件已存在，不会覆盖。请修改新章标题后更新预览。
-                  </p>
-                )}
-                <div className="split-boundaries">
-                  <section>
-                    <h3>原章保留到这里</h3>
-                    <pre>{splitDialog.preview.before.slice(-240) || "（空）"}</pre>
-                  </section>
-                  <section>
-                    <h3>新章从这里开始</h3>
-                    <pre>{splitDialog.preview.after.slice(0, 240) || "（空后半段）"}</pre>
-                  </section>
-                </div>
-                <p className="hint">
-                  确认时会再核对原章版本；外部修改或目标重名都会中止，不会覆盖。
-                  拆分不会自动调整单元或桥段区间，完成后请检查相关规划。
-                </p>
-              </>
-            )}
-            <div className="dialog-actions">
-              <button className="btn" disabled={splitDialog.busy} onClick={() => { setSplitDialog(null); returnToWriting(); }}>
-                取消
-              </button>
-              <button
-                className="btn primary"
-                disabled={
-                  splitDialog.busy ||
-                  splitDialog.title !== splitDialog.preview.title ||
-                  splitDialog.preview.targetExists
-                }
-                onClick={() => void confirmSplit()}
-              >
-                {splitDialog.busy ? "正在拆章…" : "确认拆分"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {overview && (
-        <div className="dialog-overlay" onClick={(e) => {
-          if (e.target === e.currentTarget) { setOverview(null); viewRef.current?.focus(); }
-        }}>
-          <div className="dialog chapter-overview-dialog" {...overviewKeyboard} role="dialog" aria-modal="true" aria-labelledby="chapter-overview-title">
-            <div className="chapter-overview-head">
-              <div>
-                <h2 id="chapter-overview-title">章节总览</h2>
-                <p className="hint">浏览本章意图，点卡片回到正文。这里不编辑章节。</p>
-              </div>
-              <button className="btn" onClick={() => { setOverview(null); viewRef.current?.focus(); }}>关闭</button>
-            </div>
-            {overview.loading && <p className="hint">正在读取章节…</p>}
-            {overview.error && <div className="error-box">{overview.error}</div>}
-            {!overview.loading && !overview.error && overview.cards.length === 0 && <p className="hint">还没有章节。</p>}
-            <div className="chapter-card-grid">
-              {overview.cards.map((card) => (
-                <button
-                  key={card.chapter.path}
-                  className={`chapter-overview-card ${current?.path === card.chapter.path ? "is-current" : ""}`}
-                  onClick={() => void openChapter(card.chapter).then((opened) => {
-                    if (opened) { setOverview(null); viewRef.current?.focus(); }
-                  })}
-                >
-                  <span className="chapter-card-kicker">{card.chapter.ordinal === null ? "未编号" : chapterHead(card.chapter.ordinal, prefix)}</span>
-                  <strong>{card.chapter.title || "未命名章节"}</strong>
-                  <span className="chapter-card-meta">{card.chapter.status} · {formatCount(card.chapter.wordCount)} 字</span>
-                  <span className="chapter-card-intent">
-                    {card.summary && <span>摘要 · {card.summary}</span>}
-                    {card.summary && card.intent && <br />}
-                    {card.intent && <span>本章意图 · {card.intent}</span>}
-                    {!card.summary && !card.intent && "尚无摘要或本章意图"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {quickNoteOpen && current && (
-        <div className="dialog-overlay" onClick={(e) => {
-          if (e.target === e.currentTarget && !quickNoteBusy) { setQuickNoteOpen(false); viewRef.current?.focus(); }
-        }}>
-          <div className="dialog quick-note-dialog" {...quickNoteKeyboard} role="dialog" aria-modal="true" aria-labelledby="quick-note-title">
-            <h2 id="quick-note-title">灵感速记</h2>
-            <p className="hint">保存到灵感库待打磨区 · 关联 {project.title} / {chapterLabel(current, prefix)}</p>
-            <label>
-              先记下来，标题和归类以后再补
-              <textarea autoFocus value={quickNoteText} disabled={quickNoteBusy} onChange={(e) => setQuickNoteText(e.target.value)} placeholder="写下刚想到的内容…" />
-            </label>
-            {quickNoteError && <div className="error-box" role="alert">{quickNoteError}</div>}
-            <div className="dialog-actions">
-              <button className="btn" disabled={quickNoteBusy} onClick={() => { setQuickNoteOpen(false); viewRef.current?.focus(); }}>稍后再写</button>
-              <button className="btn primary" disabled={quickNoteBusy || !quickNoteText.trim()} onClick={() => void saveQuickNote()}>
-                {quickNoteBusy ? "正在保存…" : "保存便笺"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {history && (
         <div
           className="dialog-overlay"
@@ -2283,34 +1771,6 @@ export default function WritingPage({
           busy={expectationBusy}
           onCancel={() => setExpFulfill(null)}
           onSubmit={(name, kind, note) => void fulfillExpectation(name, kind, note)}
-        />
-      )}
-
-      {proofOpen && current && (
-        <ExportDialog
-          projectDir={project.dir}
-          projectTitle={project.title}
-          chapterCount={chapters.filter((chapter) => chapter.ordinal !== null).length}
-          libraryPath={libraryPath}
-          initialTab="proof"
-          initialChapter={current.ordinal}
-          initialPath={current.path}
-          nonModal
-          onClose={() => { setProofOpen(false); returnToWriting(); }}
-          onJump={(issue: ProofIssue) => {
-            void (async () => {
-              if (issue.path !== currentRef.current?.path) {
-                const entry = chapters.find((chapter) => chapter.path === issue.path);
-                if (!entry || !(await openChapter(entry))) return;
-              }
-              if (dirtyRef.current || issue.fingerprint !== fingerprintRef.current) {
-                window.alert("正文在校对后已经变化，请重新校对后再定位。");
-                return;
-              }
-              setProofOpen(false);
-              locateAtLine(issue.line, issue.word, issue.occurrence);
-            })();
-          }}
         />
       )}
 

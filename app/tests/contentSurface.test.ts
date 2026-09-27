@@ -8,6 +8,7 @@ import {
   serializeCollapsedCardPaths,
   shouldExpandContentCard,
   splitTextMatches,
+  toggleCollapsedCardPath,
 } from "../src/contentSurfaceState.ts";
 
 test("旧偏好或损坏偏好按全部展开处理", () => {
@@ -29,6 +30,22 @@ test("收起状态按内容表面分区保存并保留其他分区", () => {
 
   assert.deepEqual([...readCollapsedCardPaths(raw, "inspiration")], ["灵感库/故事卡/雨夜.md"]);
   assert.deepEqual([...readCollapsedCardPaths(raw, "people")], ["人物/阿青.md"]);
+});
+
+test("卡片收起切换持久化当前表面并保留其他表面", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  };
+  const path = "构思/人物/阿青.md";
+  const collapsed = toggleCollapsedCardPath(new Set(), path, "notes", storage);
+  assert.equal(collapsed.has(path), true);
+  assert.equal(readCollapsedCardPaths(values.get("gongbi.content-surfaces") ?? null, "notes").has(path), true);
+
+  const expanded = toggleCollapsedCardPath(collapsed, path, "notes", storage);
+  assert.equal(expanded.has(path), false);
+  assert.deepEqual([...readCollapsedCardPaths(values.get("gongbi.content-surfaces") ?? null, "notes")], []);
 });
 
 test("搜索命中强制展开但不改写原收起偏好", () => {

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import AssistantPresetSettings from "./AssistantPresetSettings";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 import OptionToggle from "./OptionToggle";
 import { ProviderSettingsForm } from "./ProviderSettingsDialog";
+import AssistantPresetSettings from "./AssistantPresetSettings";
 import {
   AUTOSAVE_OPTIONS,
   BUILTIN_BACKGROUNDS,
@@ -121,6 +121,15 @@ export default function SettingsPage({
       update({ background: { kind: "image", path: picked } });
     } catch (error) {
       window.alert(`选背景图失败：${errMsg(error)}`);
+    }
+  }
+
+  async function openLibraryFolder() {
+    if (!libraryPath) return;
+    try {
+      await invoke("reveal_path", { path: libraryPath });
+    } catch (error) {
+      window.alert(`打开库文件夹失败：${errMsg(error)}`);
     }
   }
 
@@ -285,7 +294,28 @@ export default function SettingsPage({
               </section>
 
               <section className="settings-section">
-                <h2>保存与章节</h2>
+                <h2>写作行为与保存</h2>
+                <div className="settings-field settings-field-stacked">
+                  <span className="settings-label">行为</span>
+                  <div className="settings-check-list">
+                    <label className="settings-check-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.typewriter}
+                        onChange={(event) => update({ typewriter: event.target.checked })}
+                      />
+                      打字机（当前行保持在编辑区中部）
+                    </label>
+                    <label className="settings-check-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.dimming}
+                        onChange={(event) => update({ dimming: event.target.checked })}
+                      />
+                      行淡化（弱化非当前行）
+                    </label>
+                  </div>
+                </div>
                 <div className="settings-field settings-field-stacked">
                   <span className="settings-label">自动保存</span>
                   <div className="display-toggle" role="radiogroup" aria-label="自动保存间隔">
@@ -335,6 +365,13 @@ export default function SettingsPage({
               <div className="settings-note">
                 <h3>数据边界</h3>
                 <p>创作内容仍以 Markdown、YAML 与附件为唯一来源；界面配色、编辑器背景和页签位置只保存在本机应用状态。</p>
+              </div>
+              <div className="settings-note">
+                <h3>检索与备份</h3>
+                <p>全文搜索按需扫描 Markdown 与 YAML，没有需要维护的本地搜索索引。备份时复制整个库文件夹，可一并保留正文、设定和附件。</p>
+                <button className="btn small" disabled={!libraryPath} onClick={() => void openLibraryFolder()}>
+                  在文件管理器中打开库
+                </button>
               </div>
             </section>
           )}

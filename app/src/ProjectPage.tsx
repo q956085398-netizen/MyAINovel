@@ -356,6 +356,8 @@ export default function ProjectPage({
               worldviewCategory={tab === "世界观" ? worldviewCategory : undefined}
               onWorldviewCategoryChange={setWorldviewCategory}
               vocab={vocab}
+              orderedNames={tab === "单元" ? arrangement.map((item) => item.unit) : undefined}
+              focusName={initialTab === tab ? initialFocus : undefined}
               onChanged={refreshAll}
               onPromoted={() => setTab("单元")}
               onAiCommand={tab === "矛盾" ? () => void runAiCommand("矛盾梳理") : undefined}
@@ -406,6 +408,7 @@ export default function ProjectPage({
             <ForeshadowBoard
               project={project.dir}
               chapterPrefix={meta.chapterPrefix}
+              focusName={initialTab === tab ? initialFocus : undefined}
               onChanged={refreshAll}
               onOpenChapter={(ordinal, quote) => onOpenChapter(project.dir, ordinal, quote)}
             />
@@ -415,6 +418,7 @@ export default function ProjectPage({
               project={project.dir}
               kind={tab === "期待感" ? EXPECTATION_KIND_EXPECT : EXPECTATION_KIND_GOAL}
               chapterPrefix={meta.chapterPrefix}
+              focusName={initialTab === tab ? initialFocus : undefined}
               onChanged={refreshAll}
               onOpenChapter={(ordinal, quote) => onOpenChapter(project.dir, ordinal, quote)}
             />

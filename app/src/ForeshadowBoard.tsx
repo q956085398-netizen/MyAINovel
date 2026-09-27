@@ -1,17 +1,19 @@
 import { useSearchDestination } from "./globalSearchNavigation";
-import { contentCardDomId } from "./contentSurfaceState";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ForeshadowView } from "./types";
 import { FORESHADOW_OVERDUE_CHAPTERS } from "./types";
 import { errMsg } from "./util";
 import { ForeshadowNameDialog } from "./ForeshadowDialog";
 import ForeshadowBoardContent from "./ForeshadowBoardContent";
+import { contentCardDomId } from "./contentSurfaceState";
 
 interface ForeshadowBoardProps {
   project: string;
   /** 项目章前缀，用于渲染「第N章」。 */
   chapterPrefix: string | null;
+  /** 侧栏跳转时滚动到这条伏笔。 */
+  focusName?: string;
   /** 伏笔变了：让项目页刷新计数。 */
   onChanged: () => void;
   /** 点章名：跳到书写板块打开该章并选中引文。 */
@@ -23,6 +25,7 @@ interface ForeshadowBoardProps {
 export default function ForeshadowBoard({
   project,
   chapterPrefix,
+  focusName,
   onChanged,
   onOpenChapter,
 }: ForeshadowBoardProps) {
@@ -40,6 +43,7 @@ export default function ForeshadowBoard({
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const focusedName = useRef<string | null>(null);
 
   const scan = useCallback(async () => {
     setLoading(true);
@@ -57,6 +61,15 @@ export default function ForeshadowBoard({
   useEffect(() => {
     void scan();
   }, [scan]);
+
+  useEffect(() => {
+    if (!focusName || loading || focusedName.current === focusName) return;
+    const target = document.getElementById(`foreshadow-${encodeURIComponent(focusName)}`);
+    if (!target) return;
+    focusedName.current = focusName;
+    const frame = requestAnimationFrame(() => target.scrollIntoView({ block: "center" }));
+    return () => cancelAnimationFrame(frame);
+  }, [focusName, loading, views]);
 
   async function changeState(name: string, state: string) {
     if (busy) return;
@@ -153,6 +166,7 @@ export default function ForeshadowBoard({
 
       <ForeshadowBoardContent
         project={project}
+        focusName={focusName}
         chapterPrefix={chapterPrefix}
         views={views}
         busy={busy}

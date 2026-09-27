@@ -1,5 +1,5 @@
 import { useSearchDestination } from "./globalSearchNavigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ExpectationBoard, ExpectationView, SaveResult } from "./types";
 import {
@@ -32,6 +32,8 @@ interface ExpectationBoardProps {
   kind: string;
   /** 项目章前缀，用于渲染「第N章」。 */
   chapterPrefix: string | null;
+  /** 侧栏跳转时选中这条期待线/目标。 */
+  focusName?: string;
   /** 三线变了：让项目页刷新计数。 */
   onChanged: () => void;
   /** 点章名：跳到书写板块打开该章并选中引文。 */
@@ -123,6 +125,7 @@ export default function ExpectationBoard({
   project,
   kind,
   chapterPrefix,
+  focusName,
   onChanged,
   onOpenChapter,
 }: ExpectationBoardProps) {
@@ -133,6 +136,7 @@ export default function ExpectationBoard({
   const [busy, setBusy] = useState(false);
   const destination = useSearchDestination();
   const [selected, setSelected] = useState<string | null>(null);
+  const focusedName = useRef<string | null>(null);
 
   const scan = useCallback(async () => {
     setLoading(true);
@@ -177,6 +181,26 @@ export default function ExpectationBoard({
       .getElementById(`expectation-pending-${encodeURIComponent(selectedPending.name)}`)
       ?.scrollIntoView({ block: "nearest" });
   }, [searchDestinationHere, selectedPending?.name, selectedPending?.pending]);
+
+  useEffect(() => {
+    if (!focusName || !board || focusedName.current === focusName) return;
+    const exists = board.items.some((item) =>
+      item.name === focusName && (goalTab ? item.kind === EXPECTATION_KIND_GOAL : item.kind !== EXPECTATION_KIND_GOAL),
+    );
+    if (exists) {
+      focusedName.current = focusName;
+      setSelected(focusName);
+    }
+  }, [focusName, board, goalTab]);
+
+  useEffect(() => {
+    if (!focusName || selected !== focusName || !selectedView) return;
+    const frame = requestAnimationFrame(() =>
+      document.getElementById("expectation-detail")?.scrollIntoView({ block: "center" }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [focusName, selected, selectedView]);
+
 
   // 行＝短/中/长；手写的未知档位单列一行（只提示不校验）。
   const rowDefs: { key: string; label: string; sub: string | null; bars: Bar[] }[] = [

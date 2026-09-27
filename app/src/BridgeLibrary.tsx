@@ -197,40 +197,57 @@ function BridgeCard({
   const warnings = rangeWarnings(bridge, allBridges, units, siblings, index);
 
   return (
-    <ContentSurface identity={bridge.path} title={bridge.name} pending={bridge.pending}
-      expanded={expanded} canCollapse={!bridge.pending} onEdit={onEdit} onToggleExpanded={onToggleExpanded}
-      badges={bridge.unit ? <span className="tag">{bridge.unit} · 第 {bridge.order ?? "？"} 段</span> : <span className="pending-mark">待安排</span>}>
-      {bridge.body && <p className="bridge-summary">{bridge.body}</p>}
-      <div className="bridge-meta">
-        {bridge.emotionCurve && <span>情绪：{bridge.emotionCurve}</span>}
-        {bridge.keyTurn && <span>转折：{bridge.keyTurn}</span>}
-        {bridge.expectationHook && <span>钩子：{bridge.expectationHook}</span>}
-      </div>
-      {bridge.beatPlan && <p className="bridge-summary">章节拍安排：{bridge.beatPlan}</p>}
-      {(bridge.typeSolutions ?? []).map((pair, index) => <p className="bridge-summary" key={index}>{pair.kind ? `类型：${pair.kind}` : ""}{pair.solution ? `${pair.kind ? " → " : ""}解法：${pair.solution}` : ""}</p>)}
-      {(bridge.startChapter || bridge.endChapter) && <p className="hint">章节区间：{bridge.startChapter ?? "？"} ~ {bridge.endChapter ?? "？"}</p>}
+    <ContentSurface
+      className="bridge-card"
+      identity={bridge.path}
+      title={bridge.name}
+      pending={bridge.pending}
+      canCollapse={!bridge.pending}
+      badges={<span className="memo-mark">桥段</span>}
+      trailing={bridge.unit ? (
+        <span className="tag">{bridge.unit} · 第 {bridge.order ?? "？"} 段</span>
+      ) : (
+        <span className="pending-mark">待安排</span>
+      )}
+      expanded={expanded}
+      onEdit={onEdit}
+      onToggleExpanded={onToggleExpanded}
+      actions={
+        <>
+          <button className="btn small" onClick={onEdit}>编辑</button>
+          <button className="btn small" disabled={switching} onClick={onTogglePending}>{bridge.pending ? "整理完成" : "待打磨"}</button>
+          {bridge.unit ? (
+            <>
+              <button className="btn small" disabled={index <= 0} onClick={() => onMove(-1)}>上移</button>
+              <button className="btn small" disabled={index < 0 || index >= siblings.length - 1} onClick={() => onMove(1)}>下移</button>
+              <button className="text-danger" onClick={onUnarrange}>取消安排</button>
+            </>
+          ) : units.length > 0 ? (
+            <span className="bridge-arrange">
+              <select value={targetUnit} onChange={(e) => setTargetUnit(e.target.value)} aria-label={`安排「${bridge.name}」到单元`}>
+                <option value="">选择既有单元…</option>
+                {units.map((unit) => <option key={unit.path} value={unit.name}>{unit.name}</option>)}
+              </select>
+              <button className="btn small" disabled={!targetUnit} onClick={() => onArrange(targetUnit)}>安排进单元</button>
+            </span>
+          ) : (
+            <span className="hint">还没有单元；先在「单元」里展开一个矛盾。</span>
+          )}
+        </>
+      }
+    >
+      {bridge.emotionCurve && <p className="card-core">情绪曲线：{bridge.emotionCurve}</p>}
+      {bridge.keyTurn && <p className="card-core">关键转折：{bridge.keyTurn}</p>}
+      {bridge.expectationHook && <p className="card-core">期待钩子：{bridge.expectationHook}</p>}
+      {bridge.beatPlan && <p className="card-meta">章节拍安排：{bridge.beatPlan}</p>}
+      {(bridge.typeSolutions ?? []).map((pair, index) => <p className="card-meta" key={index}>{pair.kind ? `类型：${pair.kind}` : ""}{pair.solution ? `${pair.kind ? " → " : ""}解法：${pair.solution}` : ""}</p>)}
+      {(bridge.startChapter !== null || bridge.endChapter !== null) && (
+        <p className="card-meta">
+          章节区间：{bridge.startChapter ?? "？"} ~ {bridge.endChapter ?? "？"} 章
+        </p>
+      )}
+      {bridge.body && <div className="card-body">{bridge.body}</div>}
       {warnings.map((warning) => <p className="soft-warning" key={warning}>{warning}</p>)}
-      <div className="bridge-actions">
-        <button className="btn small" onClick={onEdit}>编辑</button>
-        <button className="btn small" disabled={switching} onClick={onTogglePending}>{bridge.pending ? "整理完成" : "待打磨"}</button>
-        {bridge.unit ? (
-          <>
-            <button className="btn small" disabled={index <= 0} onClick={() => onMove(-1)}>上移</button>
-            <button className="btn small" disabled={index < 0 || index >= siblings.length - 1} onClick={() => onMove(1)}>下移</button>
-            <button className="text-danger" onClick={onUnarrange}>取消安排</button>
-          </>
-        ) : units.length > 0 ? (
-          <span className="bridge-arrange">
-            <select value={targetUnit} onChange={(e) => setTargetUnit(e.target.value)} aria-label={`安排「${bridge.name}」到单元`}>
-              <option value="">选择既有单元…</option>
-              {units.map((unit) => <option key={unit.path} value={unit.name}>{unit.name}</option>)}
-            </select>
-            <button className="btn small" disabled={!targetUnit} onClick={() => onArrange(targetUnit)}>安排进单元</button>
-          </span>
-        ) : (
-          <span className="hint">还没有单元；先在「单元」里展开一个矛盾。</span>
-        )}
-      </div>
     </ContentSurface>
   );
 }

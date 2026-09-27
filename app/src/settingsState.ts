@@ -29,6 +29,8 @@ export interface AppSettings {
   firstLineIndent: number;
   autosaveSec: number;
   chapterPrefix: string;
+  typewriter: boolean;
+  dimming: boolean;
 }
 
 export const BUILTIN_BACKGROUNDS: BuiltinBackground[] = [
@@ -51,6 +53,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   firstLineIndent: 2,
   autosaveSec: 3,
   chapterPrefix: "第{n}章",
+  typewriter: true,
+  dimming: false,
 };
 
 const PALETTES = new Set<ThemePalette>(["cinnabar", "bamboo", "indigo"]);
@@ -117,6 +121,10 @@ export function normalizeSettings(value: unknown): AppSettings {
       typeof source.chapterPrefix === "string"
         ? source.chapterPrefix
         : DEFAULT_SETTINGS.chapterPrefix,
+    typewriter:
+      typeof source.typewriter === "boolean" ? source.typewriter : DEFAULT_SETTINGS.typewriter,
+    dimming:
+      typeof source.dimming === "boolean" ? source.dimming : DEFAULT_SETTINGS.dimming,
   };
 }
 

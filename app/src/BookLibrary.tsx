@@ -57,6 +57,7 @@ export default function BookLibrary({
 
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [expandedHits, setExpandedHits] = useState<Set<string>>(() => new Set());
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
@@ -109,6 +110,7 @@ export default function BookLibrary({
       const result = await invoke<SearchHit[]>("search_library", { root: libraryPath, query: q });
       if (!librarySession.isCurrent(session)) return;
       setHits(result);
+      setExpandedHits(new Set());
     } catch (e) {
       if (!librarySession.isCurrent(session)) return;
       setHits(null);
@@ -279,6 +281,7 @@ export default function BookLibrary({
                 type="button"
                 onClick={() => {
                   setHits(null);
+                  setExpandedHits(new Set());
                   setSearchError(null);
                 }}
               >
@@ -296,20 +299,41 @@ export default function BookLibrary({
               </p>
               {hits.length === 0 && <p className="hint">没有找到匹配的内容。</p>}
               <ul>
-                {hits.map((h, i) => (
-                  <li
-                    key={`${h.primaryMd}-${h.line}-${i}`}
-                    className="hit-row"
-                    title="打开这本书"
-                    onClick={() => openByPath(h.primaryMd)}
-                  >
-                    <span className="hit-book">{h.bookName}</span>
-                    <span className="hit-line">第 {formatCount(h.line)} 行</span>
-                    <span className="hit-snippet">
-                      <Highlight text={h.snippet} query={query.trim()} />
-                    </span>
-                  </li>
-                ))}
+                {hits.map((h, i) => {
+                  const hitKey = `${h.primaryMd}-${h.line}-${i}`;
+                  const isExpanded = expandedHits.has(hitKey);
+                  return (
+                    <li
+                      key={hitKey}
+                      className={`hit-row ${isExpanded ? "is-expanded" : ""}`}
+                      title="打开这本书"
+                      onClick={() => openByPath(h.primaryMd)}
+                    >
+                      <span className="hit-book">{h.bookName}</span>
+                      <span className="hit-line">第 {formatCount(h.line)} 行</span>
+                      <button
+                        type="button"
+                        className="hit-expand"
+                        aria-expanded={isExpanded}
+                        title="展开或收起命中片段"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setExpandedHits((current) => {
+                            const next = new Set(current);
+                            if (next.has(hitKey)) next.delete(hitKey);
+                            else next.add(hitKey);
+                            return next;
+                          });
+                        }}
+                      >
+                        {isExpanded ? "收起" : "展开"}
+                      </button>
+                      <span className="hit-snippet">
+                        <Highlight text={h.snippet} query={query.trim()} />
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ) : (

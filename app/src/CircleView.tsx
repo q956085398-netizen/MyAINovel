@@ -61,6 +61,7 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
     };
   }, [project]);
 
+
   async function save() {
     if (saving) return;
     setSaving(true);
@@ -83,8 +84,7 @@ export default function CircleView({ project, vocab }: CircleViewProps) {
         <div>
           <h2>读者遐想（类型圈）</h2>
           <p className="hint">
-            这本书的读者遐想清单（约 4~6 类）：全书内容只在圈内、不在圈外。
-            类型挂词表提示（只提示不校验）；正文按类型逐条写「想看到什么」。
+            保留原「类型圈」文件与数据结构，用三个轻量方向帮助继续想：读者期待、题材刻板印象、独特吸引力。提示可跳过，不评价完成度。
           </p>
         </div>
         <button

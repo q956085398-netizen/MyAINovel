@@ -54,6 +54,22 @@ export function serializeCollapsedCardPaths(
   return JSON.stringify(preferences);
 }
 
+export function toggleCollapsedCardPath(
+  current: ReadonlySet<string>,
+  path: string,
+  surface: string,
+  storage: Pick<Storage, "getItem" | "setItem"> = localStorage,
+): Set<string> {
+  const next = new Set(current);
+  if (next.has(path)) next.delete(path);
+  else next.add(path);
+  storage.setItem(
+    CONTENT_SURFACE_STORAGE_KEY,
+    serializeCollapsedCardPaths(storage.getItem(CONTENT_SURFACE_STORAGE_KEY), surface, next),
+  );
+  return next;
+}
+
 export function shouldExpandContentCard(
   path: string,
   collapsedPaths: ReadonlySet<string>,
