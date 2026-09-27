@@ -50,6 +50,7 @@ import { errMsg, formatCount } from "./util";
 import { autosaveIntervalMs } from "./settings";
 import { registerFlushSaver } from "./saveFlush";
 import { settleForLeave } from "./safeLeave";
+import { useLibrarySession } from "./librarySession";
 import {
   chapterLabel,
   chapterHead,
@@ -225,6 +226,7 @@ export default function WritingPage({
   registerBridge,
   onChapterActive,
 }: WritingPageProps) {
+  const librarySession = useLibrarySession();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const extensionsRef = useRef<Extension[] | null>(null);
@@ -454,17 +456,22 @@ export default function WritingPage({
   // ---------- 读写 ----------
 
   async function rescan(): Promise<ChapterEntry[]> {
+    const session = librarySession.id;
     const list = await invoke<ChapterEntry[]>("scan_chapters", { project: project.dir });
+    if (!librarySession.isCurrent(session)) return [];
     setChapters(list);
     return list;
   }
 
   async function openOverview() {
+    const session = librarySession.id;
     setOverview({ cards: [], loading: true, error: null });
     try {
       const cards = await invoke<ChapterCard[]>("scan_chapter_cards", { project: project.dir });
+      if (!librarySession.isCurrent(session)) return;
       setOverview((open) => open && { cards, loading: false, error: null });
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       setOverview((open) => open && { cards: [], loading: false, error: `读取章节总览失败：${errMsg(e)}` });
     }
   }
@@ -472,6 +479,7 @@ export default function WritingPage({
   async function saveQuickNote() {
     const chapter = currentRef.current;
     if (!libraryPath || !chapter || !quickNoteText.trim() || quickNoteBusy) return;
+    const session = librarySession.id;
     setQuickNoteBusy(true);
     setQuickNoteError(null);
     try {
@@ -481,15 +489,17 @@ export default function WritingPage({
         chapter: chapter.path,
         body: quickNoteText,
       });
+      if (!librarySession.isCurrent(session)) return;
       setQuickNoteText("");
       setNotesRevision((revision) => revision + 1);
       window.dispatchEvent(new CustomEvent("gongbi:inspirations-changed", { detail: { root: libraryPath } }));
       setQuickNoteOpen(false);
       viewRef.current?.focus();
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       setQuickNoteError(`便笺保存失败：${errMsg(e)}。正文和便笺草稿都还在。`);
     } finally {
-      setQuickNoteBusy(false);
+      if (librarySession.isCurrent(session)) setQuickNoteBusy(false);
     }
   }
 
@@ -498,14 +508,16 @@ export default function WritingPage({
       setIntent(null);
       return;
     }
+    const session = librarySession.id;
     try {
-      setIntent(
-        await invoke<ChapterIntent>("find_chapter_intent", {
-          project: project.dir,
-          ordinal: entry.ordinal,
-        }),
-      );
+      const result = await invoke<ChapterIntent>("find_chapter_intent", {
+        project: project.dir,
+        ordinal: entry.ordinal,
+      });
+      if (!librarySession.isCurrent(session)) return;
+      setIntent(result);
     } catch {
+      if (!librarySession.isCurrent(session)) return;
       // 规划读取是写作旁路；失败时照常可写，只显示自由写作提示。
       setIntent({ unit: null, bridge: null, warnings: [] });
     }
@@ -727,8 +739,9 @@ export default function WritingPage({
   async function openChapter(entry: ChapterEntry): Promise<boolean> {
     const generation = navSeqRef.current + 1;
     navSeqRef.current = generation;
+    const session = librarySession.id;
     // 迟到判定：本请求已被更新的导航取代时丢弃，不回填编辑器。
-    const stale = () => navSeqRef.current !== generation;
+    const stale = () => navSeqRef.current !== generation || !librarySession.isCurrent(session);
     if (!(await settleNow()) || stale()) return false;
     try {
       const doc = await invoke<MdContent>("read_book_md", { path: entry.path });
@@ -1120,7 +1133,8 @@ export default function WritingPage({
   }
 
   async function handleBack() {
-    if (!(await settleNow())) return;
+    const session = librarySession.id;
+    if (!(await settleNow()) || !librarySession.isCurrent(session)) return;
     onChanged();
     onBack();
   }
@@ -1184,32 +1198,38 @@ export default function WritingPage({
 
   useEffect(() => {
     let cancelled = false;
+    const session = librarySession.id;
+    const stale = () => cancelled || !librarySession.isCurrent(session);
     void (async () => {
       try {
         const meta = await invoke<ProjectMeta>("read_project_meta", { project: project.dir });
-        if (!cancelled) setPrefix(meta.chapterPrefix);
+        if (stale()) return;
+        setPrefix(meta.chapterPrefix);
       } catch {
         // 项目.yaml 读不了：章前缀回退默认，不挡写作。
       }
+      if (stale()) return;
       try {
         const loaded = await invoke<WritingStats>("load_writing_stats");
-        if (!cancelled) {
-          statsRef.current = loaded;
-          setStats(loaded);
-        }
+        if (stale()) return;
+        statsRef.current = loaded;
+        setStats(loaded);
       } catch {
         // 统计读不了：从零起算。
       }
+      if (stale()) return;
       await loadForeshadows();
+      if (stale()) return;
       await loadExpectations();
+      if (stale()) return;
       let list: ChapterEntry[] = [];
       try {
         list = await rescan();
       } catch (e) {
-        if (!cancelled) setLoadError(`扫描正文失败：${errMsg(e)}`);
+        if (!stale()) setLoadError(`扫描正文失败：${errMsg(e)}`);
         return;
       }
-      if (cancelled) return;
+      if (stale()) return;
       const remembered = localStorage.getItem(chapterKey(project.dir));
       const numbered = list.filter((c) => c.ordinal !== null);
       const pick =
@@ -1222,6 +1242,7 @@ export default function WritingPage({
         numbered[numbered.length - 1] ??
         list[0];
       if (pick) await openChapter(pick);
+      if (stale()) return;
       // 跳转落点：给行号按行定位（校对命中），否则全文找引文（伏笔/三线）。
       if (locate?.quote) {
         if (locate.line !== undefined) {
@@ -1234,7 +1255,7 @@ export default function WritingPage({
           locateQuote(locate.quote);
         }
       }
-      if (!cancelled) setReady(true);
+      if (!stale()) setReady(true);
     })();
     return () => {
       cancelled = true;

@@ -40,6 +40,7 @@ import type {
 } from "./types";
 import { errMsg, oneLinePreview, stripBookMarks } from "./util";
 import ChatAdoptDialog, { type ChatExcerptEntry } from "./ChatAdoptDialog";
+import { useLibrarySession } from "./librarySession";
 
 interface AiSidebarProps {
   open: boolean;
@@ -61,6 +62,26 @@ interface AiSidebarProps {
 
 function nowSec(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+const CHAT_SESSION_ROOTS_KEY = "gongbi.ai.sessionRoots";
+
+function readChatSessionRoots(): Record<string, string> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(CHAT_SESSION_ROOTS_KEY) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function sameLibraryRoot(left: string | undefined, right: string | null): boolean {
+  if (left === undefined || right === null) return false;
+  const normalize = (path: string) => path.replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase();
+  return normalize(left) === normalize(right);
 }
 
 /** VSCode 式 AI 侧边栏（设计共识 §七）。面板常驻挂载、仅隐藏切换，
@@ -85,6 +106,11 @@ export default function AiSidebar({
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [docAttached, setDocAttached] = useState(false);
+  const librarySession = useLibrarySession();
+  const sessionRootsRef = useRef(readChatSessionRoots());
+  const previousLibrarySessionRef = useRef(librarySession.id);
+  const libraryPathRef = useRef(libraryPath);
+  libraryPathRef.current = libraryPath;
 
   const streamingRef = useRef(false);
   const tokenRef = useRef(0);
@@ -108,6 +134,44 @@ export default function AiSidebar({
   /** 「换预设＝复制为新会话」小对话框。 */
   const [switchOpen, setSwitchOpen] = useState(false);
 
+  function rememberSessionRoot(id: string, root: string) {
+    if (sessionRootsRef.current[id] === root) return;
+    const roots = { ...sessionRootsRef.current, [id]: root };
+    sessionRootsRef.current = roots;
+    try {
+      localStorage.setItem(CHAT_SESSION_ROOTS_KEY, JSON.stringify(roots));
+    } catch {
+      // 记录失败时，该会话仍会按当前运行时的库代次限制采纳。
+    }
+  }
+
+  // 切库保留历史记录，但当前会话、文档与采纳草稿不跨库继承。
+  useEffect(() => {
+    const switched = previousLibrarySessionRef.current !== librarySession.id;
+    previousLibrarySessionRef.current = librarySession.id;
+    if (streamingRef.current) {
+      void invoke("chat_cancel", { token: tokenRef.current }).catch(() => {});
+      streamingRef.current = false;
+      setStreaming(false);
+    }
+    currentRef.current = null;
+    setCurrent(null);
+    setDocAttached(false);
+    setAdoptedSet(new Set());
+    setPicked(new Set());
+    setAdoptOpen(null);
+    setStalePersona(null);
+    setInput("");
+    if (switched) void refreshSessions();
+  }, [librarySession.id]);
+
+  // 收起侧栏时不卸载组件；真正卸载（如关闭应用）时结束仍在运行的流。
+  useEffect(() => () => {
+    if (streamingRef.current) {
+      void invoke("chat_cancel", { token: tokenRef.current }).catch(() => {});
+    }
+  }, []);
+
   function updateSession(
     fn: (prev: ChatSession | null) => ChatSession | null,
   ): ChatSession | null {
@@ -123,10 +187,15 @@ export default function AiSidebar({
 
   const conversationTarget = resolveConversationTarget(current, draftPresetId, presetState, config);
   const doc = getDoc();
+  const canAdoptCurrent = !!current && sameLibraryRoot(sessionRootsRef.current[current.id], libraryPath);
+  const canContinueCurrent = !current || canAdoptCurrent;
 
   async function refreshSessions() {
+    const session = librarySession.id;
     try {
-      setSessions(await invoke<ChatSessionSummary[]>("list_chat_sessions"));
+      const list = await invoke<ChatSessionSummary[]>("list_chat_sessions");
+      if (!librarySession.isCurrent(session)) return;
+      setSessions(list);
     } catch {
       // 会话列表刷不出来不影响当前对话
     }
@@ -206,9 +275,14 @@ export default function AiSidebar({
   async function send(userText: string, meta?: MessageMeta | null, system?: string) {
     const text = userText.trim();
     if (!text || streamingRef.current) return;
+    const origin = currentRef.current;
+    if (origin && !sameLibraryRoot(sessionRootsRef.current[origin.id], libraryPath)) {
+      setError("这是其他库的历史对话，请新建会话后继续。");
+      return;
+    }
+    const requestSession = librarySession.id;
     // 请求通道按会话的预设快照解析（工单 T07）：覆盖命中时可以顶掉还没
     // 激活的全局；旧会话/人物会话没有快照，跟随全局当前选择。
-    const origin = currentRef.current;
     const newSnapshot = presetSnapshot(resolveDraftPreset(draftPresetId, presetState));
     const target = resolveConversationTarget(origin, draftPresetId, presetState, config);
     if (!target.provider) {
@@ -228,6 +302,7 @@ export default function AiSidebar({
         // 新会话创建那一刻定格预设快照：之后预设怎么改都不影响这个会话。
         preset: newSnapshot,
       };
+    if (!origin && libraryPath) rememberSessionRoot(base.id, libraryPath);
     const withUser: ChatSession = {
       ...base,
       messages: [...base.messages, { role: "user", content: text, meta: meta ?? undefined }],
@@ -245,6 +320,7 @@ export default function AiSidebar({
     } catch {
       // 落盘失败不阻塞对话
     }
+    if (!librarySession.isCurrent(requestSession)) return;
 
     const docForRequest = docAttached ? getDoc() : null;
     // 三条路径的系统提示在这里收口（工单 T07 隔离纪律）：固定命令 > 人物
@@ -268,6 +344,7 @@ export default function AiSidebar({
     tokenRef.current = token;
     const channel = new Channel<ChatStreamEvent>();
     channel.onmessage = (ev) => {
+      if (!librarySession.isCurrent(requestSession)) return;
       if (ev.type === "delta") {
         updateSession((prev) => {
           if (!prev) return prev;
@@ -295,8 +372,10 @@ export default function AiSidebar({
         token,
         onEvent: channel,
       });
+      if (!librarySession.isCurrent(requestSession)) return;
       finalizeStream();
     } catch (e) {
+      if (!librarySession.isCurrent(requestSession)) return;
       setError(errMsg(e));
       finalizeStream();
     }
@@ -307,6 +386,8 @@ export default function AiSidebar({
   // 人物对话种子（工单 #16）例外：不发送，只建带人格底座的新会话等人开口。
   useEffect(() => {
     if (!seed || !config || !presetsLoaded || seedRef.current === seed) return;
+    const seedLibraryPath = libraryPath;
+    const seedSession = librarySession.id;
     // 人物对话只走全局；固定命令从人物会话发起时会另开普通会话。
     const commandTarget = seed.persona
       ? resolveSessionTarget(null, config)
@@ -346,6 +427,7 @@ export default function AiSidebar({
         // 人物对话不绑助手预设（spec §一）：人格底座就是全部。
         preset: null,
       };
+      if (libraryPath) rememberSessionRoot(session.id, libraryPath);
       updateSession(() => session);
       resetAdopted();
       setPicked(new Set());
@@ -366,10 +448,12 @@ export default function AiSidebar({
     void (async () => {
       // 标注命令带词表（每次现取，词表在 Obsidian 里手改也即时生效）。
       let vocab: Vocabulary | null = null;
-      if (seed.kind === "标注" && libraryPath) {
+      if (seed.kind === "标注" && seedLibraryPath) {
         try {
-          vocab = await invoke<Vocabulary>("load_vocab", { root: libraryPath });
+          vocab = await invoke<Vocabulary>("load_vocab", { root: seedLibraryPath });
+          if (libraryPathRef.current !== seedLibraryPath || !librarySession.isCurrent(seedSession)) return;
         } catch (e) {
+          if (libraryPathRef.current !== seedLibraryPath || !librarySession.isCurrent(seedSession)) return;
           // 词表损坏要亮出来（spec：显式报错），但不挡命令本身。
           setError(`词表加载失败：${errMsg(e)}（标注命令继续，类型提示用通用示例）`);
         }
@@ -384,7 +468,7 @@ export default function AiSidebar({
     })();
     // seed 由用户动作驱动、send 闭包读取即时不依赖其稳定性。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seed, config, presetsLoaded, presetState, draftPresetId]);
+  }, [seed, config, presetsLoaded, presetState, draftPresetId, librarySession]);
 
   function stop() {
     if (!streamingRef.current) return;
@@ -395,14 +479,17 @@ export default function AiSidebar({
 
   async function selectSession(id: string) {
     if (streamingRef.current) return;
+    const session = librarySession.id;
     try {
-      const session = await invoke<ChatSession>("load_chat_session", { id });
-      updateSession(() => session);
+      const loaded = await invoke<ChatSession>("load_chat_session", { id });
+      if (!librarySession.isCurrent(session)) return;
+      updateSession(() => loaded);
       resetAdopted();
       setPicked(new Set());
-      if (session.persona) void checkPersona(session.persona);
+      if (loaded.persona) void checkPersona(loaded.persona);
       else setStalePersona(null);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       setError(errMsg(e));
     }
   }
@@ -412,8 +499,10 @@ export default function AiSidebar({
   async function checkPersona(p: ChatPersona) {
     setStalePersona(null);
     if (!libraryPath) return;
+    const session = librarySession.id;
     try {
       const projects = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
+      if (!librarySession.isCurrent(session)) return;
       const proj = projects.find((x) => x.title === stripBookMarks(p.project));
       if (!proj) {
         setStalePersona(`${p.project}这个项目找不到了（改名或挪走？）——按原人格底座继续聊。`);
@@ -423,6 +512,7 @@ export default function AiSidebar({
         project: proj.dir,
         kind: "人物",
       });
+      if (!librarySession.isCurrent(session)) return;
       if (!persons.some((n) => n.name === p.person)) {
         setStalePersona(
           `${p.project}里已没有「${p.person}」（改名或删除？）——按原人格底座继续聊。`,
@@ -435,7 +525,7 @@ export default function AiSidebar({
 
   async function deleteCurrentSession() {
     const session = currentRef.current;
-    if (!session || streamingRef.current) return;
+    if (!session || streamingRef.current || !canAdoptCurrent) return;
     if (!window.confirm(`确定删除会话「${session.title}」？删除后不可恢复。`)) return;
     try {
       await invoke("delete_chat_session", { id: session.id });
@@ -453,7 +543,7 @@ export default function AiSidebar({
    *  预设的快照，可见消息可选带上；原会话原封不动地留在列表里。 */
   function createSwitchedSession(target: AssistantPreset, includeVisible: boolean) {
     const origin = currentRef.current;
-    if (!origin || streamingRef.current) return;
+    if (!origin || streamingRef.current || !canAdoptCurrent) return;
     const session = copyAsNewSession(
       origin,
       target,
@@ -461,6 +551,7 @@ export default function AiSidebar({
       crypto.randomUUID(),
       nowSec(),
     );
+    if (libraryPath) rememberSessionRoot(session.id, libraryPath);
     updateSession(() => session);
     resetAdopted();
     setPicked(new Set());
@@ -500,6 +591,7 @@ export default function AiSidebar({
     : [];
 
   function handleAdopt(kind: AiCommandKind, idx: number, content: string, meta: MessageMeta) {
+    if (!canAdoptCurrent) return;
     if (isReportKind(kind)) {
       // 报告类命令只给建议（spec §二、§五：建议不是闸，报告不落盘）。
       return;
@@ -554,7 +646,7 @@ export default function AiSidebar({
         </button>
         <button
           className="btn small"
-          disabled={!current || streaming}
+          disabled={!current || streaming || !canAdoptCurrent}
           title="删除当前会话"
           onClick={() => void deleteCurrentSession()}
         >
@@ -602,7 +694,7 @@ export default function AiSidebar({
             </span>
             <button
               className="link-like"
-              disabled={streaming}
+              disabled={streaming || !canAdoptCurrent}
               title="不在原会话里换人格：另开新会话，可选带上现在的对话"
               onClick={() => setSwitchOpen(true)}
             >
@@ -659,7 +751,7 @@ export default function AiSidebar({
             return (
               <div key={i} className={`ai-msg ${m.role}`}>
                 <div className="ai-msg-row">
-                  {persona && !streaming && (
+                  {persona && canAdoptCurrent && !streaming && (
                     <label className="ai-pick" title="勾选后可存为矛盾/故事卡">
                       <input
                         type="checkbox"
@@ -675,7 +767,7 @@ export default function AiSidebar({
                     )}
                   </div>
                 </div>
-                {m.role === "assistant" && !streaming && m.meta && (
+                {m.role === "assistant" && canAdoptCurrent && !streaming && m.meta && (
                   <AdoptActions
                     kind={m.meta.kind}
                     content={m.content}
@@ -690,7 +782,11 @@ export default function AiSidebar({
         {error && <div className="error-box">{error}</div>}
       </div>
 
-      {persona && picked.size > 0 && (
+      {current && !canAdoptCurrent && (
+        <p className="hint" role="status">这条历史对话未记录当前库归属或来自其他库，仅供查看；请新建会话后继续。</p>
+      )}
+
+      {persona && canAdoptCurrent && picked.size > 0 && (
         <div className="ai-adopt-bar">
           <span>
             已选 {picked.size} 条对话
@@ -738,7 +834,7 @@ export default function AiSidebar({
                 : "输入后回车发送，Shift+Enter 换行"
               : "先在「设置」里配置供应商"
           }
-          disabled={!presetsLoaded || !conversationTarget.provider}
+          disabled={!presetsLoaded || !conversationTarget.provider || !canContinueCurrent}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -757,7 +853,7 @@ export default function AiSidebar({
           ) : (
             <button
               className="btn primary"
-              disabled={!presetsLoaded || !conversationTarget.provider || !input.trim()}
+              disabled={!presetsLoaded || !conversationTarget.provider || !input.trim() || !canContinueCurrent}
               onClick={() => {
                 const text = input;
                 setInput("");
@@ -770,7 +866,7 @@ export default function AiSidebar({
         </div>
       </div>
 
-      {adoptOpen && persona && pickedEntries.length > 0 && (
+      {adoptOpen && persona && canAdoptCurrent && pickedEntries.length > 0 && (
         <ChatAdoptDialog
           mode={adoptOpen}
           persona={persona}

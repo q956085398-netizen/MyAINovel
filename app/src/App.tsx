@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -29,6 +29,7 @@ import {
   Sparkles,
 } from "./icons";
 import { flushAllSavers } from "./saveFlush";
+import { LibrarySessionContext } from "./librarySession";
 import type { ProjectTab } from "./ProjectPage";
 import type {
   AiSeed,
@@ -63,6 +64,11 @@ function isSection(v: string | null): v is Section {
   return !!v && (SECTIONS as readonly string[]).includes(v);
 }
 
+function sameLibraryRoot(left: string | null, right: string): boolean {
+  const normalize = (path: string) => path.replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase();
+  return left !== null && normalize(left) === normalize(right);
+}
+
 // 主题初始化（工单 #24）：根元素挂 data-theme＋系统深浅监听，一次即可。
 initSettings();
 
@@ -87,6 +93,21 @@ function App() {
   // 库根路径为书库与灵感库共用，上提到这里统一选择与持久化。
   const [libraryPath, setLibraryPath] = useState<string | null>(() =>
     localStorage.getItem(PATH_KEY),
+  );
+  // 一次切库事务成功后递增：旧组件的异步回调即使迟到，也不能打开旧库对象。
+  const librarySessionRef = useRef(0);
+  const libraryRootRef = useRef(libraryPath);
+  const librarySession = librarySessionRef.current;
+  const librarySwitchingRef = useRef(false);
+  const folderPickerOpenRef = useRef(false);
+  const [libraryRevision, setLibraryRevision] = useState(0);
+  const [librarySwitching, setLibrarySwitching] = useState(false);
+  const librarySessionScope = useMemo(
+    () => ({
+      id: librarySession,
+      isCurrent: (id: number) => id === librarySessionRef.current,
+    }),
+    [librarySession],
   );
   // 设置面板（工单 #24）：侧栏底部齿轮打开；设置存应用状态（localStorage）。
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -117,12 +138,14 @@ function App() {
   const writingBridgeRef = useRef<WritingBridge | null>(null);
 
   const registerBridge = useCallback((bridge: EditorBridge | null) => {
+    if (librarySession !== librarySessionRef.current) return;
     bridgeRef.current = bridge;
-  }, []);
+  }, [librarySession]);
 
   const registerWritingBridge = useCallback((bridge: WritingBridge | null) => {
+    if (librarySession !== librarySessionRef.current) return;
     writingBridgeRef.current = bridge;
-  }, []);
+  }, [librarySession]);
 
   // 关窗兜底（工单 #28，spec 拆书保存与模板 §二）：拦下关窗→拆书/书写两
   // 编辑器静默落盘→再真正关闭。保存失败也放行——兜底是保险，不是闸。
@@ -166,56 +189,127 @@ function App() {
     [],
   );
 
-  const chooseLibraryFolder = useCallback(async () => {
-    const picked = await pickLibraryFolder("选择库文件夹");
-    if (typeof picked === "string") {
-      localStorage.setItem(PATH_KEY, picked);
+  /** 切库事务：先复用 #77 的全部编辑器导航守卫；任何一个未结算时不改
+   *  偏好与工作区。成功后同步递增会话代次，再卸下所有旧库工作入口。 */
+  const switchLibrary = useCallback(async (picked: string): Promise<boolean> => {
+    if (librarySwitchingRef.current) return false;
+    if (sameLibraryRoot(libraryRootRef.current, picked)) return true;
+
+    librarySwitchingRef.current = true;
+    setLibrarySwitching(true);
+    try {
+      try {
+        await prepareSearchNavigation();
+      } catch {
+        window.alert(
+          "未切换库：当前拆书稿或正文尚未安全保存。请先处理保存失败、冲突或持续输入，再重试。",
+        );
+        return false;
+      }
+
+      try {
+        localStorage.setItem(PATH_KEY, picked);
+      } catch {
+        window.alert("未切换库：无法保存新的库位置偏好，请检查应用存储后重试。");
+        return false;
+      }
+      // 这些恢复点都是绝对路径且未按库分区；跨库时必须失效，免得新库
+      // 恰好包含同路径对象时自动重开旧库的工作位置。
+      for (const key of [
+        LAST_BOOK_KEY,
+        "gongbi.ideation.project",
+        "gongbi.writing.project",
+        "gongbi.currentProject",
+      ]) {
+        try {
+          localStorage.removeItem(key);
+        } catch {
+          // 恢复点只是便利状态；存储受限时仍继续完成切库。
+        }
+      }
+
+      librarySessionRef.current += 1;
+      libraryRootRef.current = picked;
+      bridgeRef.current = null;
+      writingBridgeRef.current = null;
+      setOpenBook(null);
+      setSearchOpen(false);
+      setSearchDestination(null);
+      setIdeationJump(null);
+      setWritingJump(null);
+      setAiSeed(null);
+      setProjectPanelOpen(false);
+      setManuscript(false);
       setLibraryPath(picked);
+      setLibraryRevision((revision) => revision + 1);
+      return true;
+    } finally {
+      librarySwitchingRef.current = false;
+      setLibrarySwitching(false);
     }
-  }, [pickLibraryFolder]);
+  }, []);
+
+  const chooseLibraryFolder = useCallback(async () => {
+    if (folderPickerOpenRef.current || librarySwitchingRef.current) return;
+    folderPickerOpenRef.current = true;
+    try {
+      const picked = await pickLibraryFolder("选择库文件夹");
+      if (typeof picked === "string") await switchLibrary(picked);
+    } finally {
+      folderPickerOpenRef.current = false;
+    }
+  }, [pickLibraryFolder, switchLibrary]);
 
   /** 新建空库（工单 #21）：选一个空文件夹即设为当前库，零预建——
    *  词表/项目/灵感库全部首用时懒生成。与「打开库」动作同款，只有文案与
    *  意图不同（spec 书库新建与展示 §三）；选到非空文件夹时向人确认，
    *  不自动清洗、不改写任何既有文件。 */
   const createLibraryFolder = useCallback(async () => {
-    const picked = await pickLibraryFolder("选择一个空文件夹作为新库");
-    if (typeof picked !== "string") return;
+    if (folderPickerOpenRef.current || librarySwitchingRef.current) return;
+    folderPickerOpenRef.current = true;
     try {
-      const empty = await invoke<boolean>("is_empty_dir", { path: picked });
-      if (!empty) {
-        const ok = window.confirm(
-          `选中的文件夹不是空的，仍要把它作为库打开吗？\n\n${picked}\n\n不会改动、不会搬动里面的任何文件。`,
-        );
-        if (!ok) return;
+      const picked = await pickLibraryFolder("选择一个空文件夹作为新库");
+      if (typeof picked !== "string") return;
+      try {
+        const empty = await invoke<boolean>("is_empty_dir", { path: picked });
+        if (!empty) {
+          const ok = window.confirm(
+            `选中的文件夹不是空的，仍要把它作为库打开吗？\n\n${picked}\n\n不会改动、不会搬动里面的任何文件。`,
+          );
+          if (!ok) return;
+        }
+      } catch {
+        // 判定失败不拦路：当作打开库处理，交给后续扫描。
       }
-    } catch {
-      // 判定失败不拦路：当作打开库处理，交给后续扫描。
+      await switchLibrary(picked);
+    } finally {
+      folderPickerOpenRef.current = false;
     }
-    localStorage.setItem(PATH_KEY, picked);
-    setLibraryPath(picked);
-  }, [pickLibraryFolder]);
+  }, [pickLibraryFolder, switchLibrary]);
 
   /** 打开拆书稿（用户点击或重启恢复）：顺手记住，下次重启回到这里。 */
   const openBookAndRemember = useCallback((book: BookEntry) => {
+    if (librarySession !== librarySessionRef.current || librarySwitchingRef.current) return;
     localStorage.setItem(LAST_BOOK_KEY, book.primaryMd);
     setOpenBook(book);
-  }, []);
+  }, [librarySession]);
 
   const closeBook = useCallback(() => {
+    if (librarySession !== librarySessionRef.current || librarySwitchingRef.current) return;
     localStorage.removeItem(LAST_BOOK_KEY);
     setOpenBook(null);
-  }, []);
+  }, [librarySession]);
 
   /** 切板块（工单 #56 / T01）：记住上次板块，重启恢复；顺手收起飞出面板。 */
   const switchSection = useCallback((s: Section) => {
+    if (librarySession !== librarySessionRef.current || librarySwitchingRef.current) return;
     localStorage.setItem(SECTION_KEY, s);
     setSection(s);
     setSearchDestination(null);
     setSettingsOpen(false);
     setSettingsRequestedTab(null);
     setProjectPanelOpen(false);
-  }, []);
+  }, [librarySession]);
 
   /** 从灵感库跳书：切到拆书板块并打开拆书稿。 */
   const openBookFromInspiration = useCallback(
@@ -229,53 +323,62 @@ function App() {
   /** 从灵感库跳构思项目（卡片转生的去向）：切到构思板块并打开该项目。 */
   const openProjectFromInspiration = useCallback(
     (project: ProjectEntry, tab?: ProjectTab, focus?: string) => {
+      if (librarySession !== librarySessionRef.current || librarySwitchingRef.current) return;
       switchSection("构思");
       setIdeationJump({ project, tab, focus });
     },
-    [switchSection],
+    [librarySession, switchSection],
   );
 
   const openChapterFromInspiration = useCallback(
     (project: ProjectEntry, path: string) => {
+      if (librarySession !== librarySessionRef.current || librarySwitchingRef.current) return;
       setWritingJump({ projectDir: project.dir, locate: { ordinal: null, path, quote: "" } });
       switchSection("书写");
     },
-    [switchSection],
+    [librarySession, switchSection],
   );
 
-  const consumeIdeationJump = useCallback(() => setIdeationJump(null), []);
+  const consumeIdeationJump = useCallback(() => {
+    if (librarySession === librarySessionRef.current) setIdeationJump(null);
+  }, [librarySession]);
 
   /** 伏笔看板点章：切到书写板块，打开该章并选中引文。 */
   const openChapterFromIdeation = useCallback(
     (projectDir: string, ordinal: number, quote: string) => {
+      if (librarySession !== librarySessionRef.current || librarySwitchingRef.current) return;
       switchSection("书写");
       setWritingJump({ projectDir, locate: { ordinal, quote } });
     },
-    [switchSection],
+    [librarySession, switchSection],
   );
 
-  const consumeWritingJump = useCallback(() => setWritingJump(null), []);
+  const consumeWritingJump = useCallback(() => {
+    if (librarySession === librarySessionRef.current) setWritingJump(null);
+  }, [librarySession]);
 
   /** 窄轨「继续工作」（工单 #56 / T01）：交给书写板块的跳转机制处理——
    *  locate 空＝写作页回到上次的章节与进度；已在那本书时也只是重开一次，
    *  内容已落盘，重开无损失。 */
   const resumeWriting = useCallback(
     (project: ProjectEntry) => {
+      if (librarySession !== librarySessionRef.current || librarySwitchingRef.current) return;
       setProjectPanelOpen(false);
       setWritingJump({ projectDir: project.dir, locate: null });
       switchSection("书写");
     },
-    [switchSection],
+    [librarySession, switchSection],
   );
 
   /** 飞出面板待办点开：跳到构思对应看板。 */
   const openBoardFromPanel = useCallback(
     (project: ProjectEntry, tab: ProjectTab) => {
+      if (librarySession !== librarySessionRef.current || librarySwitchingRef.current) return;
       setProjectPanelOpen(false);
       switchSection("构思");
       setIdeationJump({ project, tab });
     },
-    [switchSection],
+    [librarySession, switchSection],
   );
 
   /** 飞出面板 Esc 关闭。 */
@@ -290,61 +393,96 @@ function App() {
 
   /** 编辑器板块命令（拆书三条、构思两条、书写两条）：种子进 AI 面板并展开。 */
   const handleAiCommand = useCallback((seed: AiSeed) => {
+    if (librarySession !== librarySessionRef.current || librarySwitchingRef.current) return;
     setAiSeed(seed);
     setAiOpen(true);
-  }, []);
+  }, [librarySession]);
 
   /** 「携带当前文档」按当前板块取：拆书＝拆书稿，书写＝当前章；构思板没有文档。 */
   const getDoc = useCallback((): DocSnapshot | null => {
+    if (librarySession !== librarySessionRef.current) return null;
     if (section === "书写") return writingBridgeRef.current?.getDoc() ?? null;
     if (section === "拆书") return bridgeRef.current?.getDoc() ?? null;
     return null;
-  }, [section]);
+  }, [librarySession, section]);
 
   /** 采纳润色＝替换写作页当前选区。不在书写板块时不认——
    *  三个板块常驻挂载，切走后写作页还在（隐藏），不许悄悄改到看不见的正文。 */
   const replaceSelection = useCallback(
     (text: string) => {
-      if (section !== "书写") return false;
+      if (librarySession !== librarySessionRef.current || librarySwitchingRef.current || section !== "书写") return false;
       return writingBridgeRef.current?.replaceSelection(text) ?? false;
     },
-    [section],
+    [librarySession, section],
   );
 
   const adoptCallout = useCallback((kind: "点评" | "小结", text: string, anchorLine: number) => {
+    if (librarySession !== librarySessionRef.current || librarySwitchingRef.current || section !== "拆书") return false;
     return bridgeRef.current?.adoptCallout(kind, text, anchorLine) ?? false;
-  }, []);
+  }, [librarySession, section]);
 
   const adoptTrope = useCallback(
     (startLine: number, endLine: number, s: TropeSuggestion) => {
+      if (librarySession !== librarySessionRef.current || librarySwitchingRef.current || section !== "拆书") return;
       bridgeRef.current?.adoptTrope(startLine, endLine, s);
     },
-    [],
+    [librarySession, section],
   );
 
   async function openSearchHit(hit: GlobalSearchHit, query: string) {
-    if (!libraryPath) throw new Error("请先打开库文件夹。");
+    const root = libraryPath;
+    const session = librarySession;
+    const ensureCurrent = () => {
+      if (
+        !root ||
+        session !== librarySessionRef.current ||
+        librarySwitchingRef.current ||
+        !sameLibraryRoot(libraryRootRef.current, root)
+      ) {
+        throw new Error("库已切换，这次搜索跳转已取消。");
+      }
+    };
+    if (!root) throw new Error("请先打开库文件夹。");
     await prepareSearchNavigation();
+    ensureCurrent();
+    // 搜索结果是快照；切到目标前再由后端按当前库与实际文件验证一次。
+    await invoke<string>("global_search_preview", { root, path: hit.path, name: hit.title });
+    ensureCurrent();
     if (hit.kind === "章节" && hit.projectDir) {
+      const projects = await invoke<ProjectEntry[]>("scan_projects", { root });
+      ensureCurrent();
+      const project = projects.find((item) => item.dir === hit.projectDir);
+      if (!project) throw new Error("项目已移动或删除，请重新搜索。");
+      const chapters = await invoke<{ path: string }[]>("scan_chapters", { project: project.dir });
+      ensureCurrent();
+      if (!chapters.some((chapter) => chapter.path === hit.path)) {
+        throw new Error("章节已移动或删除，请重新搜索。");
+      }
       switchSection("书写");
       const match = hit.matches.find((match) => match.field === "正文" && match.line > 0);
       setWritingJump({ projectDir: hit.projectDir, locate: { ordinal: null, path: hit.path, quote: match?.quote ?? "", line: match?.line } });
     } else if (hit.kind === "灵感") {
+      const cards = await invoke<{ path: string }[]>("scan_inspirations", { root });
+      ensureCurrent();
+      if (!cards.some((card) => card.path === hit.path)) throw new Error("灵感已移动或删除，请重新搜索。");
       switchSection("灵感库");
     } else if (hit.kind === "拆书") {
-      const books = await invoke<BookEntry[]>("scan_library", { root: libraryPath });
+      const books = await invoke<BookEntry[]>("scan_library", { root });
+      ensureCurrent();
       const book = books.find((book) => book.primaryMd === hit.path || (book.layout === "folder-book" && dirName(book.primaryMd) === dirName(hit.path)));
       if (!book) throw new Error("拆书稿已移动或删除，请重新搜索。");
       switchSection("拆书");
       openBookAndRemember({ ...book, primaryMd: hit.path });
       setBookSearchSeq((seq) => seq + 1);
     } else if (hit.projectDir) {
-      const projects = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
+      const projects = await invoke<ProjectEntry[]>("scan_projects", { root });
+      ensureCurrent();
       const project = projects.find((project) => project.dir === hit.projectDir);
       if (!project) throw new Error("项目已移动或删除，请重新搜索。");
       switchSection("构思");
       setIdeationJump({ project, tab: searchProjectTab(hit) });
     }
+    ensureCurrent();
     setSearchDestination({ hit, query });
   }
 
@@ -354,8 +492,9 @@ function App() {
   const railCollapsed = section === "书写" && manuscript;
 
   return (
+    <LibrarySessionContext.Provider value={librarySessionScope}>
     <SearchDestinationContext.Provider value={searchDestination}>
-    <div className={`app ${railCollapsed ? "rail-collapsed" : ""}`}>
+    <div className={`app ${railCollapsed ? "rail-collapsed" : ""}`} aria-busy={librarySwitching}>
       <aside className="sidebar" aria-label="主导航">
         <div className="rail-brand" title="工笔">
           工
@@ -420,7 +559,8 @@ function App() {
         )}
       </aside>
       <main className="main">
-        <div className={`section-wrap ${section === "拆书" && !settingsOpen ? "" : "hidden"}`}>
+        {librarySwitching && <div className="hint" role="status">正在保存当前编辑并切换库……</div>}
+        <div key={`books-${libraryRevision}`} className={`section-wrap ${section === "拆书" && !settingsOpen ? "" : "hidden"}`}>
           {openBook ? (
             <EditorPage
               key={`${openBook.primaryMd}#${bookSearchSeq}`}
@@ -441,7 +581,7 @@ function App() {
             />
           )}
         </div>
-        <div className={`section-wrap ${section === "灵感库" && !settingsOpen ? "" : "hidden"}`}>
+        <div key={`inspirations-${libraryRevision}`} className={`section-wrap ${section === "灵感库" && !settingsOpen ? "" : "hidden"}`}>
           <InspirationLibrary
             libraryPath={libraryPath}
             onChooseFolder={chooseLibraryFolder}
@@ -452,7 +592,7 @@ function App() {
             onGoIdeation={() => switchSection("构思")}
           />
         </div>
-        <div className={`section-wrap ${section === "构思" && !settingsOpen ? "" : "hidden"}`}>
+        <div key={`ideation-${libraryRevision}`} className={`section-wrap ${section === "构思" && !settingsOpen ? "" : "hidden"}`}>
           <Ideation
             libraryPath={libraryPath}
             onChooseFolder={chooseLibraryFolder}
@@ -463,7 +603,7 @@ function App() {
             onAiCommand={handleAiCommand}
           />
         </div>
-        <div className={`section-wrap ${section === "书写" && !settingsOpen ? "" : "hidden"}`}>
+        <div key={`writing-${libraryRevision}`} className={`section-wrap ${section === "书写" && !settingsOpen ? "" : "hidden"}`}>
           <Writing
             libraryPath={libraryPath}
             active={section === "书写" && !settingsOpen}
@@ -486,24 +626,28 @@ function App() {
           />
         )}
       </main>
-      {searchOpen && <GlobalSearch root={libraryPath} onClose={() => setSearchOpen(false)} onOpen={openSearchHit} />}
+      {searchOpen && <GlobalSearch key={`search-${libraryRevision}`} root={libraryPath} onClose={() => setSearchOpen(false)} onOpen={openSearchHit} />}
       <AiSidebar
         open={aiOpen}
         onClose={() => setAiOpen(false)}
         libraryPath={libraryPath}
         seed={aiSeed}
-        onSeedConsumed={() => setAiSeed(null)}
+        onSeedConsumed={() => {
+          if (librarySession === librarySessionRef.current) setAiSeed(null);
+        }}
         getDoc={getDoc}
         adoptCallout={adoptCallout}
         adoptTrope={adoptTrope}
         replaceSelection={replaceSelection}
         onOpenSettings={() => {
+          if (librarySession !== librarySessionRef.current || librarySwitchingRef.current) return;
           setSettingsRequestedTab("ai");
           setSettingsOpen(true);
         }}
       />
     </div>
     </SearchDestinationContext.Provider>
+    </LibrarySessionContext.Provider>
   );
 }
 

@@ -22,6 +22,7 @@ import ContentSurface from "./ContentSurface";
 import PendingZone from "./PendingZone";
 import SearchHighlight from "./SearchHighlight";
 import { usePendingToggle } from "./pendingToggle";
+import { useLibrarySession } from "./librarySession";
 import {
   cardMatchesQuery,
   CONTENT_SURFACE_STORAGE_KEY,
@@ -247,32 +248,38 @@ export default function InspirationLibrary({
   } | null>(null);
 
   const destination = useSearchDestination();
+  const librarySession = useLibrarySession();
   useEffect(() => {
     if (destination?.hit.kind !== "灵感" || !libraryPath) return;
     let cancelled = false;
+    const session = librarySession.id;
     void invoke<InspirationCard[]>("scan_inspirations", { root: libraryPath }).then((fresh) => {
-      if (cancelled) return;
+      if (cancelled || !librarySession.isCurrent(session)) return;
       setCards(fresh);
       const card = fresh.find((card) => card.path === destination.hit.path);
       if (!card) { setError("灵感已移动或删除，请重新搜索。"); return; }
       setActiveCategory(card.category); setQuery("");
       setEditing({ draft: card, prevPath: card.path });
-    }).catch((e) => { if (!cancelled) setError(errMsg(e)); });
+    }).catch((e) => { if (!cancelled && librarySession.isCurrent(session)) setError(errMsg(e)); });
     return () => { cancelled = true; };
-  }, [destination, libraryPath]);
+  }, [destination, libraryPath, librarySession]);
 
   const scan = useCallback(async (root: string) => {
+    const session = librarySession.id;
     setScanning(true);
     setError(null);
     try {
-      setCards(await invoke<InspirationCard[]>("scan_inspirations", { root }));
+      const result = await invoke<InspirationCard[]>("scan_inspirations", { root });
+      if (!librarySession.isCurrent(session)) return;
+      setCards(result);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       setCards([]);
       setError(`扫描失败：${errMsg(e)}`);
     } finally {
-      setScanning(false);
+      if (librarySession.isCurrent(session)) setScanning(false);
     }
-  }, []);
+  }, [librarySession]);
 
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);
@@ -299,18 +306,22 @@ export default function InspirationLibrary({
    *  拆书稿书名 → 打开拆书稿。 */
   async function openLink(text: string) {
     if (!libraryPath) return;
+    const session = librarySession.id;
+    const isCurrent = () => librarySession.isCurrent(session);
     const t = text.trim();
     if (t.startsWith("章:")) {
       try {
         const linked = await invoke<{ project: ProjectEntry; chapter: { path: string } } | null>(
           "resolve_chapter_inspiration_link", { root: libraryPath, link: t },
         );
+        if (!isCurrent()) return;
         if (linked) {
           onOpenChapter(linked.project, linked.chapter.path);
           return;
         }
         window.alert(`关联的章节「${linkLabel(t)}」已失效，便笺仍保留。`);
       } catch (e) {
+        if (!isCurrent()) return;
         window.alert(`查找章节关联失败：${errMsg(e)}`);
       }
       return;
@@ -326,6 +337,7 @@ export default function InspirationLibrary({
         const title = stripBookMarks(t.slice(0, slash));
         const name = t.slice(slash + 1).trim();
         const projects = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
+        if (!isCurrent()) return;
         const project = projects.find(
           (p) => p.title === title || p.name === title || p.name === `《${title}》`,
         );
@@ -335,6 +347,7 @@ export default function InspirationLibrary({
           // 同名歧义由这个固定次序裁决。
           for (const kind of ["单元", "人物", "矛盾", "世界观", "开头"] as const) {
             const notes = await invoke<NoteEntry[]>("scan_notes", { project: project.dir, kind });
+            if (!isCurrent()) return;
             if (notes.some((n) => n.name === name)) {
               onOpenProject(project, kind, kind === "人物" ? name : undefined);
               return;
@@ -348,6 +361,7 @@ export default function InspirationLibrary({
         }
       }
       const books = await invoke<BookEntry[]>("scan_library", { root: libraryPath });
+      if (!isCurrent()) return;
       const book = books.find((b) => b.name === t || b.meta.title === t);
       if (book) {
         onOpenBook(book);
@@ -355,6 +369,7 @@ export default function InspirationLibrary({
       }
       window.alert(`没有找到「${t}」对应的灵感卡片、构思项目或拆书稿。`);
     } catch (e) {
+      if (!isCurrent()) return;
       window.alert(`查找关联失败：${errMsg(e)}`);
     }
   }
@@ -382,18 +397,21 @@ export default function InspirationLibrary({
 
   async function saveQuickCapture() {
     if (!libraryPath || !quickCapture.trim() || capturing) return;
+    const session = librarySession.id;
     setCapturing(true);
     try {
       await invoke<InspirationCard>("capture_inspiration", {
         root: libraryPath,
         body: quickCapture,
       });
+      if (!librarySession.isCurrent(session)) return;
       setQuickCapture("");
       await scan(libraryPath);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`灵感速记保存失败：${errMsg(e)}`);
     } finally {
-      setCapturing(false);
+      if (librarySession.isCurrent(session)) setCapturing(false);
     }
   }
 

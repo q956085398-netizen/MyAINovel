@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { errMsg } from "./util";
 import SearchHighlight from "./SearchHighlight";
 import type { GlobalSearchHit, GlobalSearchReport } from "./globalSearchNavigation";
+import { useLibrarySession } from "./librarySession";
 import "./GlobalSearch.css";
 
 interface Props {
@@ -13,10 +14,13 @@ interface Props {
 function FullResult({ root, hit, query }: { root: string; hit: GlobalSearchHit; query: string }) {
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const librarySession = useLibrarySession();
   return <details onToggle={(event) => {
     if (!event.currentTarget.open || text !== null) return;
+    const session = librarySession.id;
     void invoke<string>("global_search_preview", { root, path: hit.path, name: hit.title })
-      .then(setText).catch((e) => setError(errMsg(e)));
+      .then((result) => { if (librarySession.isCurrent(session)) setText(result); })
+      .catch((e) => { if (librarySession.isCurrent(session)) setError(errMsg(e)); });
   }}>
     <summary>展开全文</summary>
     {error ? <p role="alert">{error}</p> : <pre><SearchHighlight text={text ?? "正在读取……"} query={query} /></pre>}
@@ -34,6 +38,7 @@ export default function GlobalSearch({ root, onClose, onOpen }: Props) {
   const dialog = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const origin = useRef<HTMLElement | null>(null);
+  const librarySession = useLibrarySession();
 
   useEffect(() => {
     origin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -45,13 +50,14 @@ export default function GlobalSearch({ root, onClose, onOpen }: Props) {
     setReport(null); setError(null); setSelected(0);
     if (!root || !query.trim()) { setLoading(false); return; }
     setLoading(true);
+    const session = librarySession.id;
     const timer = window.setTimeout(() => {
       void invoke<GlobalSearchReport>("global_search", { root, query }).then((result) => {
-        if (!cancelled) { setReport(result); setLoading(false); }
-      }).catch((e) => { if (!cancelled) { setError(errMsg(e)); setLoading(false); } });
+        if (!cancelled && librarySession.isCurrent(session)) { setReport(result); setLoading(false); }
+      }).catch((e) => { if (!cancelled && librarySession.isCurrent(session)) { setError(errMsg(e)); setLoading(false); } });
     }, 180);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [root, query]);
+  }, [root, query, librarySession]);
   // 类型分组；每组保持扫描次序，与键盘导航使用同一份列表。
   const kinds = [...new Set(report?.hits.map((hit) => hit.kind))];
   const hits = kinds.flatMap((kind) => report?.hits.filter((hit) => hit.kind === kind) ?? []);
@@ -60,9 +66,16 @@ export default function GlobalSearch({ root, onClose, onOpen }: Props) {
   }, [selected]);
   async function openHit(hit: GlobalSearchHit) {
     if (opening) return;
+    const session = librarySession.id;
     setOpening(true); setError(null);
-    try { await onOpen(hit, query); onClose(); }
-    catch (e) { setError(errMsg(e)); setOpening(false); }
+    try {
+      await onOpen(hit, query);
+      if (!librarySession.isCurrent(session)) return;
+      onClose();
+    } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
+      setError(errMsg(e)); setOpening(false);
+    }
   }
   return <div className="dialog-overlay global-search-overlay" onMouseDown={(event) => {
     if (event.target === event.currentTarget && !opening) onClose();

@@ -5,6 +5,7 @@ import { errMsg, tropeSpanLabel } from "./util";
 import { useDisplayMode } from "./displayMode";
 import DisplayToggle from "./DisplayToggle";
 import CoverArt, { pickAndSetCover } from "./CoverArt";
+import { useLibrarySession } from "./librarySession";
 
 /** 与 Rust 侧 search::MAX_HITS 对应，达上限时提示截断。 */
 const MAX_HITS = 200;
@@ -69,12 +70,15 @@ export default function BookLibrary({
 
   // 展示模式（工单 #22）：封面网格（默认）｜书名列表（现有表格）。
   const [display, setDisplay] = useDisplayMode("books");
+  const librarySession = useLibrarySession();
 
   const scan = useCallback(async (path: string) => {
+    const session = librarySession.id;
     setScanning(true);
     setError(null);
     try {
       const list = await invoke<BookEntry[]>("scan_library", { root: path });
+      if (!librarySession.isCurrent(session)) return;
       setBooks(list);
       const wanted = restoreRef.current;
       if (wanted) {
@@ -83,12 +87,13 @@ export default function BookLibrary({
         if (hit) onOpen(hit);
       }
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       setBooks([]);
       setError(`扫描失败：${errMsg(e)}`);
     } finally {
-      setScanning(false);
+      if (librarySession.isCurrent(session)) setScanning(false);
     }
-  }, [onOpen]);
+  }, [librarySession, onOpen]);
 
   useEffect(() => {
     if (libraryPath) void scan(libraryPath);
@@ -97,15 +102,19 @@ export default function BookLibrary({
   async function runSearch() {
     const q = query.trim();
     if (!libraryPath || !q || searching) return;
+    const session = librarySession.id;
     setSearching(true);
     setSearchError(null);
     try {
-      setHits(await invoke<SearchHit[]>("search_library", { root: libraryPath, query: q }));
+      const result = await invoke<SearchHit[]>("search_library", { root: libraryPath, query: q });
+      if (!librarySession.isCurrent(session)) return;
+      setHits(result);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       setHits(null);
       setSearchError(`搜索失败：${errMsg(e)}`);
     } finally {
-      setSearching(false);
+      if (librarySession.isCurrent(session)) setSearching(false);
     }
   }
 

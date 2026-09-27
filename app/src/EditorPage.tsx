@@ -33,6 +33,7 @@ import TropeDialog from "./TropeDialog";
 import HeaderMenu, { type HeaderMenuItem } from "./HeaderMenu";
 import SaveStateChip from "./SaveStateChip";
 import { saveStatusAfterEdit, type SaveStatus } from "./editorHeaderState";
+import { useLibrarySession } from "./librarySession";
 import { ArrowLeft, Icon, ICON_SIZE_DENSE } from "./icons";
 
 /** 六插入块（设计共识 §四＋工单 #30 书档入家族）：Obsidian 风格 callout，
@@ -106,6 +107,7 @@ export default function EditorPage({
   onAiCommand,
   registerBridge,
 }: EditorPageProps) {
+  const librarySession = useLibrarySession();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const prefixRef = useRef("");
@@ -361,7 +363,8 @@ export default function EditorPage({
    *  书库——返回永远不丢内容；冲突裁决没落定（取消）或持续输入未收敛
    *  就留在编辑器。 */
   async function handleBack() {
-    if (!(await settleNow())) return;
+    const session = librarySession.id;
+    if (!(await settleNow()) || !librarySession.isCurrent(session)) return;
     onBack();
   }
 
@@ -372,13 +375,16 @@ export default function EditorPage({
   ) {
     const view = viewRef.current;
     if (!view) return;
+    const session = librarySession.id;
     let chapters: ChapterAnchor[];
     try {
       chapters = await invoke<ChapterAnchor[]>("list_chapters", {
         content: view.state.doc.toString(),
         template: prefixRef.current,
       });
+      if (!librarySession.isCurrent(session)) return;
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`章标题识别失败：${errMsg(e)}`);
       return;
     }
@@ -387,8 +393,10 @@ export default function EditorPage({
     try {
       tropes = await invoke<TropeSpan[]>("read_tropes", { mdPath: book.primaryMd });
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       warning = `已有 .yaml 解析失败：${errMsg(e)}。保存桥段会整文件覆盖，请先确认内容。`;
     }
+    if (!librarySession.isCurrent(session)) return;
     if (prefill) {
       if (chapters.length === 0) {
         // 建议不能静默丢：把结论亮出来，用户知道为什么没预填。
@@ -473,6 +481,8 @@ export default function EditorPage({
   useEffect(() => {
     let cancelled = false;
     let view: EditorView | null = null;
+    const session = librarySession.id;
+    const stale = () => cancelled || !librarySession.isCurrent(session);
 
     void (async () => {
       // 打开书先做书档一次性迁移（工单 #30，spec §五）：yaml 四键搬上纸面。
@@ -482,16 +492,19 @@ export default function EditorPage({
       } catch (e) {
         console.warn("书档迁移跳过（yaml 解析失败）：", e);
       }
+      if (stale()) return;
       let content: string;
       let fingerprint: string;
       try {
         const doc = await invoke<MdContent>("read_book_md", { path: book.primaryMd });
+        if (stale()) return;
         content = doc.content;
         fingerprint = doc.fingerprint;
       } catch (e) {
-        if (!cancelled) setLoadError(`读取拆书稿失败：${errMsg(e)}`);
+        if (!stale()) setLoadError(`读取拆书稿失败：${errMsg(e)}`);
         return;
       }
+      if (stale()) return;
 
       // 章前缀取值（spec §六）：书 yaml 自定义键 > 全局设置（默认 第{n}章）；
       // 空值由 Rust 侧回退默认，单一事实源。yaml 读取失败不拦编辑器。
@@ -501,7 +514,7 @@ export default function EditorPage({
       } catch (e) {
         console.warn("读取书 yaml 失败（章前缀回退全局设置）：", e);
       }
-      if (cancelled || !containerRef.current) return;
+      if (stale() || !containerRef.current) return;
       prefixRef.current = normalizePrefix(meta.chapterPrefix) || chapterPrefixOrDefault();
       fingerprintRef.current = fingerprint;
 

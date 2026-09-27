@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { PendingLine, ProjectEntry } from "./types";
 import { errMsg, formatCount } from "./util";
 import { getCurrentProjectDir } from "./currentProject";
+import { useLibrarySession } from "./librarySession";
 import { Icon, ICON_SIZE_DENSE, PenLine } from "./icons";
 import type { ProjectTab } from "./ProjectPage";
 
@@ -40,6 +41,7 @@ export default function RailProjectPanel({
   const [pending, setPending] = useState<PendingLine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const librarySession = useLibrarySession();
 
   // 键盘可达：面板展开即把焦点收进来（Esc 关、Tab 在面板内走）。
   useEffect(() => {
@@ -50,29 +52,30 @@ export default function RailProjectPanel({
   useEffect(() => {
     if (!libraryPath) return;
     let cancelled = false;
+    const session = librarySession.id;
     void (async () => {
       try {
         const list = await invoke<ProjectEntry[]>("scan_projects", { root: libraryPath });
-        if (cancelled) return;
+        if (cancelled || !librarySession.isCurrent(session)) return;
         const dir = getCurrentProjectDir();
         const hit = dir ? list.find((p) => p.dir === dir) : undefined;
         if (!hit) return;
         setProject(hit);
         try {
           const lines = await invoke<PendingLine[]>("project_pending", { project: hit.dir });
-          if (!cancelled) setPending(lines);
+          if (!cancelled && librarySession.isCurrent(session)) setPending(lines);
         } catch (e) {
           // 线表坏了不吞错误：面板如实报，去构思看板处理。
-          if (!cancelled) setError(`待办读取失败：${errMsg(e)}`);
+          if (!cancelled && librarySession.isCurrent(session)) setError(`待办读取失败：${errMsg(e)}`);
         }
       } catch (e) {
-        if (!cancelled) setError(`项目扫描失败：${errMsg(e)}`);
+        if (!cancelled && librarySession.isCurrent(session)) setError(`项目扫描失败：${errMsg(e)}`);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [libraryPath]);
+  }, [libraryPath, librarySession]);
 
   return (
     <div className="rail-flyout" role="dialog" aria-label="当前项目" tabIndex={-1} ref={dialogRef}>
