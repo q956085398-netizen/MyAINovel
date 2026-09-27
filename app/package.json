@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "test": "node scripts/test-all.mjs",
     "predev": "node scripts/free-port.cjs",
     "dev": "vite",
     "build": "tsc && vite build",
