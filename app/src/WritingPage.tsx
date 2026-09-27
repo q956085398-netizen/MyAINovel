@@ -292,6 +292,7 @@ export default function WritingPage({
   // 三线（工单 #7）：看板视图（未推进章数/超期由 Rust 现算）供侧栏与弹窗用。
   const [expectations, setExpectations] = useState<ExpectationBoard>({
     maxChapter: 0,
+    tableFingerprint: null,
     items: [],
   });
   // 记为期待线：右键菜单一步定类别（期待感/目标，工单 #36），弹窗只填名字＋档位。
@@ -652,7 +653,7 @@ export default function WritingPage({
       setExpectations(await invoke<ExpectationBoard>("expectation_board", { project: project.dir }));
     } catch (e) {
       // 三线.yaml 损坏：显式提示，但不挡写作（三线只是旁路数据）。
-      setExpectations({ maxChapter: 0, items: [] });
+      setExpectations({ maxChapter: 0, tableFingerprint: null, items: [] });
       window.alert(`读取期待线失败：${errMsg(e)}`);
     }
   }

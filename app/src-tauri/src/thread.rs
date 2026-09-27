@@ -1,7 +1,7 @@
 //! 跨章节线索的共享底座（工单 #7，docs/spec/期待感三线.md §一）：
 //! 伏笔（#6）与三线（#7）同构——锚点＝「章序数 ＋ 引文」、单文件整表读写、
 //! 现扫派生（引文失配、未推进章数）。本模块放两边共用的形状（锚点/兑现/
-//! 视图行）、读写与算法；状态值、操作与各自的看板条目留在各自模块。
+//! 视图行）、映射解析与锚点算法；状态值、写入与各自的看板条目留在各自模块。
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
-use crate::book_file::{map_scalar, map_u32, read_text, write_text_atomic};
+use crate::book_file::{map_scalar, map_u32, read_text};
 use crate::chapter::scan_chapters;
 
 // ---------- 数据模型 ----------
@@ -103,6 +103,16 @@ pub fn read_threads<T>(
         return Ok(Vec::new());
     }
     let text = read_text(path)?;
+    parse_threads_text(&text, path, label, parse)
+}
+
+/// 解析已读入内存的线索表；可与原始字节指纹共用同一快照。
+pub fn parse_threads_text<T>(
+    text: &str,
+    path: &Path,
+    label: &str,
+    parse: impl Fn(&Mapping, &Path, usize) -> Result<T, String>,
+) -> Result<Vec<T>, String> {
     if text.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -124,22 +134,6 @@ pub fn read_threads<T>(
             parse(map, path, i + 1)
         })
         .collect()
-}
-
-/// 整表重写（原子写，ADR 0004）；`render` 把一条线索渲染成 yaml 映射。
-pub fn write_threads<T>(
-    path: &Path,
-    list: &[T],
-    render: impl Fn(&T) -> Value,
-) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("无法创建文件夹 {}：{e}", parent.display()))?;
-    }
-    let seq: Vec<Value> = list.iter().map(|item| render(item)).collect();
-    let text = serde_yaml::to_string(&Value::Sequence(seq))
-        .map_err(|e| format!("无法生成 yaml：{e}"))?;
-    write_text_atomic(path, &text)
 }
 
 /// 取「埋设/兑现」列表的原始行（每行必须是映射）；缺键/null 视为空表。

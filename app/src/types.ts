@@ -772,7 +772,7 @@ export interface ExpectationPayoff {
   note: string | null;
 }
 
-/** 期待线条目（项目根 三线.yaml，应用受管、整表重写）。 */
+/** 期待线条目（项目根 三线.yaml 的权威数据）。 */
 export interface Expectation {
   name: string;
   /** 期待｜目标（约定值只提示不校验）。 */
@@ -781,6 +781,8 @@ export interface Expectation {
   horizon: string;
   /** 待埋｜已埋｜部分兑现｜已兑现｜弃用（约定值只提示不校验）。 */
   state: string;
+  /** 独立于兑现状态机的待打磨展示状态。 */
+  pending: boolean;
   planted: ExpectationAnchor[];
   fulfilled: ExpectationPayoff[];
 }
@@ -791,6 +793,7 @@ export interface ExpectationView {
   kind: string;
   horizon: string;
   state: string;
+  pending: boolean;
   planted: (ExpectationAnchor & { stale: boolean })[];
   fulfilled: (ExpectationPayoff & { stale: boolean })[];
   /** 距当前最大章序已过多少章未推进（仅已埋/部分兑现有值）。 */
@@ -802,6 +805,8 @@ export interface ExpectationView {
 export interface ExpectationBoard {
   /** 轴长＝max(全书最大章序, 锚点最大章)。 */
   maxChapter: number;
+  /** 三线.yaml 内容指纹；待打磨状态操作用于拒绝陈旧写入。 */
+  tableFingerprint: string | null;
   items: ExpectationView[];
 }
 

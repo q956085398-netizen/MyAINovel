@@ -3,12 +3,13 @@
 //! （锚点＝章序数＋引文、单文件整表重写、现扫派生），数据落项目根
 //! `三线.yaml`（应用受管；写路径原子，ADR 0004）。正文零污染。
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
-use crate::book_file::map_scalar;
+use crate::book_file::{content_fingerprint, map_scalar, write_text_atomic};
 use crate::thread::{self, Anchor, AnchorView, Payoff, PayoffView};
 
 pub const EXPECTATION_FILE: &str = "三线.yaml";
@@ -70,6 +71,8 @@ pub struct Expectation {
     pub horizon: String,
     /// 五态之一；缺省读作「待埋」。
     pub state: String,
+    /// 独立于五态状态机的待打磨标记；false 不落盘。
+    pub pending: bool,
     pub planted: Vec<Anchor>,
     pub fulfilled: Vec<Payoff>,
 }
@@ -82,6 +85,7 @@ pub struct ExpectationView {
     pub kind: String,
     pub horizon: String,
     pub state: String,
+    pub pending: bool,
     pub planted: Vec<AnchorView>,
     pub fulfilled: Vec<PayoffView>,
     /// 距当前最大章序已过多少章未推进（仅已埋/部分兑现有值）。
@@ -95,6 +99,8 @@ pub struct ExpectationView {
 pub struct ExpectationBoard {
     /// 轴长＝max(全书最大章序, 锚点最大章)——锚点落在已删章上也不越界。
     pub max_chapter: u32,
+    /// 三线.yaml 当前内容指纹，作为待打磨键切换的乐观锁版本。
+    pub table_fingerprint: Option<String>,
     pub items: Vec<ExpectationView>,
 }
 
@@ -104,58 +110,283 @@ pub fn expectation_path(project: &Path) -> PathBuf {
 
 // ---------- 读写 ----------
 
+struct ExpectationSnapshot {
+    items: Vec<Expectation>,
+    raw: Option<String>,
+    fingerprint: Option<String>,
+}
+
+fn parse_expectation(map: &Mapping, path: &Path, index: usize) -> Result<Expectation, String> {
+    let name = map_scalar(map, "名")
+        .filter(|n| !n.trim().is_empty())
+        .ok_or_else(|| format!("{} 第 {index} 项缺「名」", path.display()))?;
+    let pending_key = Value::String("待打磨".into());
+    let pending = match map.get(&pending_key) {
+        None | Some(Value::Bool(false)) => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => {
+            return Err(format!(
+                "{} 第 {index} 项的「待打磨」应为布尔值",
+                path.display()
+            ));
+        }
+    };
+    Ok(Expectation {
+        name,
+        kind: map_scalar(map, "类别").unwrap_or_else(|| KIND_EXPECTATION.to_string()),
+        horizon: map_scalar(map, "档位").unwrap_or_else(|| HORIZON_MID.to_string()),
+        state: map_scalar(map, "状态").unwrap_or_else(|| STATE_PENDING.to_string()),
+        pending,
+        planted: thread::map_anchors(map, "埋设", path, index)?,
+        fulfilled: thread::map_payoffs(map, "兑现", path, index, PAYOFF_STAGE)?,
+    })
+}
+
+fn read_expectation_snapshot(project: &Path) -> Result<ExpectationSnapshot, String> {
+    let path = expectation_path(project);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ExpectationSnapshot {
+                items: Vec::new(),
+                raw: None,
+                fingerprint: None,
+            });
+        }
+        Err(error) => return Err(format!("无法读取文件 {}：{error}", path.display())),
+    };
+    let fingerprint = content_fingerprint(&bytes).to_string();
+    let raw = String::from_utf8(bytes).map_err(|error| {
+        format!(
+            "无法解析 {}：不是有效的 UTF-8 文本（{error}）",
+            path.display()
+        )
+    })?;
+    let items = thread::parse_threads_text(
+        &raw,
+        &path,
+        "期待线条目（名/类别/档位/状态/待打磨/埋设/兑现）",
+        parse_expectation,
+    )?;
+    Ok(ExpectationSnapshot {
+        items,
+        raw: Some(raw),
+        fingerprint: Some(fingerprint),
+    })
+}
+
 pub fn read_expectations(project: &Path) -> Result<Vec<Expectation>, String> {
-    thread::read_threads(
-        &expectation_path(project),
-        "期待线条目（名/类别/档位/状态/埋设/兑现）",
-        |map, path, index| {
-            let name = map_scalar(map, "名")
-                .filter(|n| !n.trim().is_empty())
-                .ok_or_else(|| format!("{} 第 {index} 项缺「名」", path.display()))?;
-            Ok(Expectation {
-                name,
-                kind: map_scalar(map, "类别").unwrap_or_else(|| KIND_EXPECTATION.to_string()),
-                horizon: map_scalar(map, "档位").unwrap_or_else(|| HORIZON_MID.to_string()),
-                state: map_scalar(map, "状态").unwrap_or_else(|| STATE_PENDING.to_string()),
-                planted: thread::map_anchors(map, "埋设", path, index)?,
-                fulfilled: thread::map_payoffs(map, "兑现", path, index, PAYOFF_STAGE)?,
-            })
-        },
-    )
+    Ok(read_expectation_snapshot(project)?.items)
 }
 
 pub fn write_expectations(project: &Path, list: &[Expectation]) -> Result<(), String> {
-    thread::write_threads(&expectation_path(project), list, |item| {
-        let mut map = Mapping::new();
-        map.insert(
-            Value::String("名".into()),
-            Value::String(item.name.trim().to_string()),
-        );
-        map.insert(
-            Value::String("类别".into()),
-            Value::String(non_empty(&item.kind, KIND_EXPECTATION)),
-        );
-        map.insert(
-            Value::String("档位".into()),
-            Value::String(non_empty(&item.horizon, HORIZON_MID)),
-        );
-        map.insert(
-            Value::String("状态".into()),
-            Value::String(non_empty(&item.state, STATE_PENDING)),
-        );
-        if !item.planted.is_empty() {
-            map.insert(
-                Value::String("埋设".into()),
-                thread::anchors_value(&item.planted),
-            );
+    let snapshot = read_expectation_snapshot(project)?;
+    let mut current: Value = match snapshot.raw.as_deref() {
+        Some(raw) if raw.trim().is_empty() => Value::Sequence(Vec::new()),
+        Some(raw) => serde_yaml::from_str(raw).map_err(|error| {
+            format!("无法解析 {}：{error}", expectation_path(project).display())
+        })?,
+        None => Value::Sequence(Vec::new()),
+    };
+    let Value::Sequence(current_rows) = &mut current else {
+        return Err(format!(
+            "{} 顶层应为期待线列表",
+            expectation_path(project).display()
+        ));
+    };
+    if current_rows.len() != snapshot.items.len() {
+        return Err(format!(
+            "{} 条目数发生变化，请重新载入",
+            expectation_path(project).display()
+        ));
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    for item in &snapshot.items {
+        if !seen.insert(item.name.as_str()) {
+            return Err(format!("期待线「{}」重名，无法安全保存", item.name));
         }
-        if !item.fulfilled.is_empty() {
-            map.insert(
-                Value::String("兑现".into()),
-                thread::payoffs_value(&item.fulfilled),
-            );
+    }
+    seen.clear();
+    for item in list {
+        if !seen.insert(item.name.as_str()) {
+            return Err(format!("期待线「{}」重名，无法安全保存", item.name));
         }
-        Value::Mapping(map)
+    }
+
+    let mut rows = Vec::with_capacity(list.len());
+    for item in list {
+        let Some(index) = snapshot
+            .items
+            .iter()
+            .position(|current| current.name == item.name)
+        else {
+            rows.push(Value::Mapping(render_expectation(item)));
+            continue;
+        };
+        let mut map = current_rows[index]
+            .as_mapping()
+            .cloned()
+            .ok_or_else(|| format!("期待线「{}」的数据格式异常", item.name))?;
+        merge_expectation(&mut map, &snapshot.items[index], item);
+        rows.push(Value::Mapping(map));
+    }
+    let text = serde_yaml::to_string(&Value::Sequence(rows))
+        .map_err(|error| format!("无法生成 yaml：{error}"))?;
+    write_text_atomic(&expectation_path(project), &text)
+}
+
+fn render_expectation(item: &Expectation) -> Mapping {
+    let mut map = Mapping::new();
+    map.insert(
+        Value::String("名".into()),
+        Value::String(item.name.trim().to_string()),
+    );
+    map.insert(
+        Value::String("类别".into()),
+        Value::String(non_empty(&item.kind, KIND_EXPECTATION)),
+    );
+    map.insert(
+        Value::String("档位".into()),
+        Value::String(non_empty(&item.horizon, HORIZON_MID)),
+    );
+    map.insert(
+        Value::String("状态".into()),
+        Value::String(non_empty(&item.state, STATE_PENDING)),
+    );
+    if item.pending {
+        map.insert(Value::String("待打磨".into()), Value::Bool(true));
+    }
+    if !item.planted.is_empty() {
+        map.insert(
+            Value::String("埋设".into()),
+            thread::anchors_value(&item.planted),
+        );
+    }
+    if !item.fulfilled.is_empty() {
+        map.insert(
+            Value::String("兑现".into()),
+            thread::payoffs_value(&item.fulfilled),
+        );
+    }
+    map
+}
+
+fn merge_expectation(map: &mut Mapping, current: &Expectation, next: &Expectation) {
+    set_string_if_changed(map, "类别", &current.kind, &next.kind);
+    set_string_if_changed(map, "档位", &current.horizon, &next.horizon);
+    set_string_if_changed(map, "状态", &current.state, &next.state);
+    if next.pending {
+        map.insert(Value::String("待打磨".into()), Value::Bool(true));
+    }
+    merge_rows(
+        map,
+        "埋设",
+        &current.planted,
+        &next.planted,
+        thread::anchors_value,
+    );
+    merge_rows(
+        map,
+        "兑现",
+        &current.fulfilled,
+        &next.fulfilled,
+        thread::payoffs_value,
+    );
+}
+
+fn set_string_if_changed(map: &mut Mapping, key: &str, current: &str, next: &str) {
+    if current != next {
+        map.insert(
+            Value::String(key.to_string()),
+            Value::String(non_empty(next, current)),
+        );
+    }
+}
+
+fn merge_rows<T: PartialEq>(
+    map: &mut Mapping,
+    key: &str,
+    current: &[T],
+    next: &[T],
+    render: impl Fn(&[T]) -> Value,
+) {
+    if current == next {
+        return;
+    }
+    if next.is_empty() {
+        map.remove(Value::String(key.to_string()));
+        return;
+    }
+    if next.len() > current.len() && next.starts_with(current) {
+        let Value::Sequence(additional) = render(&next[current.len()..]) else {
+            return;
+        };
+        let map_key = Value::String(key.to_string());
+        if let Some(Value::Sequence(existing)) = map.get_mut(&map_key) {
+            existing.extend(additional);
+        } else {
+            map.insert(map_key, Value::Sequence(additional));
+        }
+        return;
+    }
+    map.insert(Value::String(key.to_string()), render(next));
+}
+
+/// 只切换原目标条目的「待打磨」键。先比对页面读取时的整表指纹，
+/// 再从当前 YAML 映射上单点修改，保留未知字段、其他条目与条目次序。
+pub fn set_expectation_pending(
+    project: &Path,
+    name: &str,
+    pending: bool,
+    expected_fingerprint: &str,
+) -> Result<crate::book_file::SaveResult, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("期待线名不能为空".to_string());
+    }
+    let path = expectation_path(project);
+    let snapshot = read_expectation_snapshot(project)?;
+    if snapshot.fingerprint.as_deref() != Some(expected_fingerprint) {
+        return Ok(crate::book_file::SaveResult::Conflict);
+    }
+    let Some(raw) = snapshot.raw else {
+        return Err(format!("没有找到期待线「{name}」"));
+    };
+    let mut value: Value = serde_yaml::from_str(&raw)
+        .map_err(|error| format!("无法解析 {}：{error}", path.display()))?;
+    let Value::Sequence(rows) = &mut value else {
+        return Err(format!("{} 顶层应为期待线列表", path.display()));
+    };
+    let matches: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            row.as_mapping()
+                .and_then(|map| map_scalar(map, "名"))
+                .is_some_and(|row_name| row_name == name)
+                .then_some(index)
+        })
+        .collect();
+    let index = match matches.as_slice() {
+        [] => return Err(format!("没有找到期待线「{name}」")),
+        [index] => *index,
+        _ => return Err(format!("期待线「{name}」重名，无法安全定位")),
+    };
+    let Some(map) = rows[index].as_mapping_mut() else {
+        // The table was validated above; this remains a defensive guard if its shape changes.
+        return Err(format!("{} 第 {} 项应为映射", path.display(), index + 1));
+    };
+    let key = Value::String("待打磨".into());
+    if pending {
+        map.insert(key, Value::Bool(true));
+    } else {
+        map.remove(&key);
+    }
+    let text = serde_yaml::to_string(&value).map_err(|error| format!("无法生成 yaml：{error}"))?;
+    write_text_atomic(&path, &text)?;
+    Ok(crate::book_file::SaveResult::Saved {
+        fingerprint: content_fingerprint(text.as_bytes()).to_string(),
     })
 }
 
@@ -210,6 +441,7 @@ pub fn add_expectation(
         kind,
         horizon,
         state: STATE_PENDING.to_string(),
+        pending: false,
         planted: Vec::new(),
         fulfilled: Vec::new(),
     });
@@ -261,6 +493,7 @@ pub fn annotate_expectation(
                 kind,
                 horizon,
                 state: STATE_PLANTED.to_string(),
+                pending: false,
                 planted: vec![anchor],
                 fulfilled: Vec::new(),
             });
@@ -387,7 +620,9 @@ pub fn delete_expectation(project: &Path, name: &str) -> Result<Vec<Expectation>
 /// 时间线网格数据：读三线.yaml ＋ 现扫正文算未推进章数/超期/引文失配。
 /// 未推进＝最大章序 − 最近一次锚点章（埋设或兑现都算推进，与伏笔只算埋设不同）。
 pub fn expectation_board(project: &Path) -> Result<ExpectationBoard, String> {
-    let list = read_expectations(project)?;
+    let snapshot = read_expectation_snapshot(project)?;
+    let table_fingerprint = snapshot.fingerprint;
+    let list = snapshot.items;
     let texts = thread::ChapterTexts::load(project)?;
     let max_ordinal = texts.max_ordinal();
     let mut max_chapter = max_ordinal;
@@ -420,6 +655,7 @@ pub fn expectation_board(project: &Path) -> Result<ExpectationBoard, String> {
                 kind: item.kind,
                 horizon: item.horizon,
                 state: item.state,
+                pending: item.pending,
                 planted: texts.anchor_views(&item.planted),
                 fulfilled: texts.payoff_views(&item.fulfilled),
                 unadvanced_chapters,
@@ -429,6 +665,7 @@ pub fn expectation_board(project: &Path) -> Result<ExpectationBoard, String> {
         .collect();
     Ok(ExpectationBoard {
         max_chapter,
+        table_fingerprint,
         items,
     })
 }
@@ -456,11 +693,16 @@ mod tests {
         write(&project.join(format!("正文/{ordinal:04} {title}.md")), body);
     }
 
+    fn fingerprint(board: &ExpectationBoard) -> &str {
+        board.table_fingerprint.as_deref().unwrap()
+    }
+
     #[test]
     fn 新建待埋_类别档位_重名报错_未知值报错() {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
-        let list = add_expectation(&p, "主角何时亮出金手指", KIND_EXPECTATION, HORIZON_SHORT).unwrap();
+        let list =
+            add_expectation(&p, "主角何时亮出金手指", KIND_EXPECTATION, HORIZON_SHORT).unwrap();
         assert_eq!(list[0].state, STATE_PENDING);
         assert_eq!(list[0].kind, KIND_EXPECTATION);
         assert_eq!(list[0].horizon, HORIZON_SHORT);
@@ -476,39 +718,57 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
 
-        let list =
-            annotate_expectation(&p, "木匣里的东西", 1, "他摸了摸怀里的木匣", KIND_EXPECTATION, HORIZON_SHORT)
-                .unwrap();
+        let list = annotate_expectation(
+            &p,
+            "木匣里的东西",
+            1,
+            "他摸了摸怀里的木匣",
+            KIND_EXPECTATION,
+            HORIZON_SHORT,
+        )
+        .unwrap();
         assert_eq!(list[0].state, STATE_PLANTED);
         assert_eq!(list[0].horizon, HORIZON_SHORT);
 
         // 同章同引文重复标注不重复追加。
-        let list =
-            annotate_expectation(&p, "木匣里的东西", 1, "他摸了摸怀里的木匣", KIND_EXPECTATION, HORIZON_SHORT)
-                .unwrap();
+        let list = annotate_expectation(
+            &p,
+            "木匣里的东西",
+            1,
+            "他摸了摸怀里的木匣",
+            KIND_EXPECTATION,
+            HORIZON_SHORT,
+        )
+        .unwrap();
         assert_eq!(list[0].planted.len(), 1);
 
         // 后续章再标注 → 追加埋设；传别的类别/档位不改已有值。
-        let list =
-            annotate_expectation(&p, "木匣里的东西", 5, "木匣还在怀里", KIND_GOAL, HORIZON_LONG)
-                .unwrap();
+        let list = annotate_expectation(
+            &p,
+            "木匣里的东西",
+            5,
+            "木匣还在怀里",
+            KIND_GOAL,
+            HORIZON_LONG,
+        )
+        .unwrap();
         assert_eq!(list[0].planted.len(), 2);
         assert_eq!(list[0].kind, KIND_EXPECTATION);
         assert_eq!(list[0].horizon, HORIZON_SHORT);
 
         // 先建待埋，再从正文标注 → 升已埋。
         add_expectation(&p, "玉佩", KIND_GOAL, HORIZON_MID).unwrap();
-        let list =
-            annotate_expectation(&p, "玉佩", 2, "腰间的玉佩不见了", KIND_GOAL, HORIZON_MID).unwrap();
+        let list = annotate_expectation(&p, "玉佩", 2, "腰间的玉佩不见了", KIND_GOAL, HORIZON_MID)
+            .unwrap();
         let jade = list.iter().find(|e| e.name == "玉佩").unwrap();
         assert_eq!(jade.state, STATE_PLANTED);
         assert_eq!(jade.planted.len(), 1);
 
         // 新建时校验类别/档位；空引文/空名报错且不落盘。
+        assert!(annotate_expectation(&p, "新的", 1, "引文", "悬念", HORIZON_SHORT).is_err());
         assert!(
-            annotate_expectation(&p, "新的", 1, "引文", "悬念", HORIZON_SHORT).is_err()
+            annotate_expectation(&p, "  ", 1, "引文", KIND_EXPECTATION, HORIZON_SHORT).is_err()
         );
-        assert!(annotate_expectation(&p, "  ", 1, "引文", KIND_EXPECTATION, HORIZON_SHORT).is_err());
         assert!(annotate_expectation(&p, "名", 1, "  ", KIND_EXPECTATION, HORIZON_SHORT).is_err());
     }
 
@@ -578,13 +838,13 @@ mod tests {
     }
 
     #[test]
-    fn 读写_默认值_未知键丢弃_损坏报错() {
+    fn 读写_默认值_未知键保留_损坏报错() {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
-        // 手写条目：缺类别/档位/状态 → 期待/中/待埋；条目内未知键整表重写会丢。
+        // 手写条目：缺类别/档位/状态 → 期待/中/待埋；往返不要求旧文件迁移。
         write(
             &expectation_path(&p),
-            "- 名: 手写的线\n  私货: 会丢\n  埋设:\n  - 章: 2\n    引文: 手写\n",
+            "- 名: 手写的线\n  私货: 保留\n  埋设:\n  - 章: 2\n    引文: 手写\n    锚点私货: 也保留\n",
         );
         let list = read_expectations(&p).unwrap();
         assert_eq!(list[0].kind, KIND_EXPECTATION);
@@ -592,10 +852,9 @@ mod tests {
         assert_eq!(list[0].state, STATE_PENDING);
         write_expectations(&p, &list).unwrap();
         let raw = fs::read_to_string(expectation_path(&p)).unwrap();
-        assert!(!raw.contains("私货"), "条目内未知键整表重写会丢：{raw}");
+        assert!(raw.contains("私货: 保留"), "条目内未知键应保留：{raw}");
+        assert!(raw.contains("锚点私货: 也保留"), "嵌套未知键应保留：{raw}");
         assert!(raw.contains("名: 手写的线"));
-        assert!(raw.contains("类别: 期待"));
-        assert!(raw.contains("档位: 中"));
 
         // 兑现缺「类型」→ 阶段。
         write(
@@ -612,6 +871,121 @@ mod tests {
     }
 
     #[test]
+    fn 待打磨_期待感与目标往返_保留条目字段和原顺序() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        write(
+            &expectation_path(&p),
+            "- 名: 期待线\n  类别: 期待\n  档位: 短\n  状态: 部分兑现\n  私货: 原样留下\n  埋设:\n  - 章: 2\n    引文: 怀里的木匣\n  兑现:\n  - 章: 5\n    引文: 木匣开启\n    类型: 阶段\n    说明: 只露一角\n- 名: 目标线\n  类别: 目标\n  档位: 长\n  状态: 已埋\n  待打磨: false\n  私货: 第二条也留下\n",
+        );
+
+        let initial = expectation_board(&p).unwrap();
+        assert!(initial.items.iter().all(|item| !item.pending));
+        set_expectation_pending(&p, "期待线", true, fingerprint(&initial)).unwrap();
+
+        let after_expectation = expectation_board(&p).unwrap();
+        let expectation = after_expectation
+            .items
+            .iter()
+            .find(|item| item.name == "期待线")
+            .unwrap();
+        assert!(expectation.pending);
+        assert_eq!(expectation.kind, KIND_EXPECTATION);
+        assert_eq!(expectation.horizon, HORIZON_SHORT);
+        assert_eq!(expectation.state, STATE_PARTIAL);
+        assert_eq!(expectation.planted[0].quote, "怀里的木匣");
+        assert_eq!(expectation.fulfilled[0].note.as_deref(), Some("只露一角"));
+        set_expectation_pending(&p, "目标线", true, fingerprint(&after_expectation)).unwrap();
+
+        let both_pending = expectation_board(&p).unwrap();
+        assert!(both_pending.items.iter().all(|item| item.pending));
+        let target = both_pending
+            .items
+            .iter()
+            .find(|item| item.name == "目标线")
+            .unwrap();
+        assert_eq!(target.kind, KIND_GOAL);
+        assert_eq!(target.horizon, HORIZON_LONG);
+        assert_eq!(target.state, STATE_PLANTED);
+        set_expectation_pending(&p, "期待线", false, fingerprint(&both_pending)).unwrap();
+
+        let after_exit = expectation_board(&p).unwrap();
+        let expectation = after_exit
+            .items
+            .iter()
+            .find(|item| item.name == "期待线")
+            .unwrap();
+        assert!(!expectation.pending);
+        assert_eq!(expectation.kind, KIND_EXPECTATION);
+        assert_eq!(expectation.horizon, HORIZON_SHORT);
+        assert_eq!(expectation.state, STATE_PARTIAL);
+        set_expectation_pending(&p, "目标线", false, fingerprint(&after_exit)).unwrap();
+
+        let raw = fs::read_to_string(expectation_path(&p)).unwrap();
+        let rows: Vec<Value> = serde_yaml::from_str(&raw).unwrap();
+        assert_eq!(rows.len(), 2);
+        let first = rows[0].as_mapping().unwrap();
+        let second = rows[1].as_mapping().unwrap();
+        assert_eq!(map_scalar(first, "名").as_deref(), Some("期待线"));
+        assert_eq!(map_scalar(second, "名").as_deref(), Some("目标线"));
+        assert!(!first.contains_key(Value::String("待打磨".into())));
+        assert!(!second.contains_key(Value::String("待打磨".into())));
+        assert_eq!(map_scalar(first, "私货").as_deref(), Some("原样留下"));
+        assert_eq!(map_scalar(second, "私货").as_deref(), Some("第二条也留下"));
+    }
+
+    #[test]
+    fn 待打磨_外部修改或重名时拒绝覆盖() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        write(
+            &expectation_path(&p),
+            "- 名: 唯一线\n  类别: 期待\n  档位: 中\n  状态: 待埋\n  私货: 原值\n",
+        );
+        let before_external_change = expectation_board(&p).unwrap();
+        let external = "- 名: 唯一线\n  类别: 期待\n  档位: 长\n  状态: 待埋\n  私货: 外部更新\n";
+        write(&expectation_path(&p), external);
+        assert!(matches!(
+            set_expectation_pending(&p, "唯一线", true, fingerprint(&before_external_change)),
+            Ok(crate::book_file::SaveResult::Conflict)
+        ));
+        assert_eq!(fs::read_to_string(expectation_path(&p)).unwrap(), external);
+
+        let before_damage = expectation_board(&p).unwrap();
+        let damaged = "- 名: 唯一线\n  待打磨: [\n";
+        write(&expectation_path(&p), damaged);
+        assert!(set_expectation_pending(&p, "唯一线", true, fingerprint(&before_damage)).is_err());
+        assert_eq!(fs::read_to_string(expectation_path(&p)).unwrap(), damaged);
+
+        let duplicate = "- 名: 重名线\n  类别: 期待\n- 名: 重名线\n  类别: 目标\n";
+        write(&expectation_path(&p), duplicate);
+        let current = expectation_board(&p).unwrap();
+        assert!(set_expectation_pending(&p, "重名线", true, fingerprint(&current)).is_err());
+        assert_eq!(fs::read_to_string(expectation_path(&p)).unwrap(), duplicate);
+    }
+
+    #[test]
+    fn 待打磨_编辑业务状态时保留原标记锚点和未知字段() {
+        let tmp = TempDir::new().unwrap();
+        let p = project(tmp.path());
+        write(
+            &expectation_path(&p),
+            "- 名: 去京城\n  类别: 目标\n  档位: 长\n  状态: 已埋\n  待打磨: true\n  私货: 留着\n  埋设:\n  - 章: 3\n    引文: 启程\n    锚点备注: 留着\n",
+        );
+
+        let updated = set_expectation_state(&p, "去京城", STATE_PARTIAL).unwrap();
+        assert!(updated[0].pending);
+        assert_eq!(updated[0].state, STATE_PARTIAL);
+        assert_eq!(updated[0].kind, KIND_GOAL);
+        assert_eq!(updated[0].horizon, HORIZON_LONG);
+        assert_eq!(updated[0].planted[0].quote, "启程");
+        let raw = fs::read_to_string(expectation_path(&p)).unwrap();
+        assert!(raw.contains("待打磨: true"));
+        assert!(raw.contains("私货: 留着"));
+        assert!(raw.contains("锚点备注: 留着"));
+    }
+
+    #[test]
     fn 看板_未推进按最近锚点_超期按档位_失配() {
         let tmp = TempDir::new().unwrap();
         let p = project(tmp.path());
@@ -620,29 +994,80 @@ mod tests {
         chapter(&p, 26, "远行", "主角收拾行囊。");
 
         // 短线：埋于 1、阶段兑现于 10 → 最近锚点 10，最大章序 26 → 16 章未推进 → 超期（阈值 8）。
-        annotate_expectation(&p, "木匣", 1, "他摸了摸怀里的木匣，没敢打开。", KIND_EXPECTATION, HORIZON_SHORT)
-            .unwrap();
-        fulfill_expectation(&p, "木匣", 10, "木匣开了，里面是一枚旧铜钱。", PAYOFF_STAGE, None).unwrap();
+        annotate_expectation(
+            &p,
+            "木匣",
+            1,
+            "他摸了摸怀里的木匣，没敢打开。",
+            KIND_EXPECTATION,
+            HORIZON_SHORT,
+        )
+        .unwrap();
+        fulfill_expectation(
+            &p,
+            "木匣",
+            10,
+            "木匣开了，里面是一枚旧铜钱。",
+            PAYOFF_STAGE,
+            None,
+        )
+        .unwrap();
 
         // 中线：只埋于 26 → 未推进 0，不超期。
         annotate_expectation(&p, "去京城", 26, "主角收拾行囊。", KIND_GOAL, HORIZON_MID).unwrap();
 
         // 长线：埋于 1，未推进 25 → 阈值 50，不超期但记数。
-        annotate_expectation(&p, "主角身世", 1, "他摸了摸怀里的木匣，没敢打开。", KIND_EXPECTATION, HORIZON_LONG)
-            .unwrap();
+        annotate_expectation(
+            &p,
+            "主角身世",
+            1,
+            "他摸了摸怀里的木匣，没敢打开。",
+            KIND_EXPECTATION,
+            HORIZON_LONG,
+        )
+        .unwrap();
 
         // 已兑现/待埋/弃用不算未推进。
-        annotate_expectation(&p, "已还的账", 1, "他摸了摸怀里的木匣，没敢打开。", KIND_GOAL, HORIZON_SHORT)
-            .unwrap();
-        fulfill_expectation(&p, "已还的账", 10, "木匣开了，里面是一枚旧铜钱。", PAYOFF_FINAL, None).unwrap();
+        annotate_expectation(
+            &p,
+            "已还的账",
+            1,
+            "他摸了摸怀里的木匣，没敢打开。",
+            KIND_GOAL,
+            HORIZON_SHORT,
+        )
+        .unwrap();
+        fulfill_expectation(
+            &p,
+            "已还的账",
+            10,
+            "木匣开了，里面是一枚旧铜钱。",
+            PAYOFF_FINAL,
+            None,
+        )
+        .unwrap();
         add_expectation(&p, "还没写", KIND_EXPECTATION, HORIZON_SHORT).unwrap();
-        annotate_expectation(&p, "弃了的", 1, "他摸了摸怀里的木匣，没敢打开。", KIND_EXPECTATION, HORIZON_SHORT)
-            .unwrap();
+        annotate_expectation(
+            &p,
+            "弃了的",
+            1,
+            "他摸了摸怀里的木匣，没敢打开。",
+            KIND_EXPECTATION,
+            HORIZON_SHORT,
+        )
+        .unwrap();
         set_expectation_state(&p, "弃了的", STATE_DROPPED).unwrap();
 
         // 引文失配：章 1 里找不到这句话。
-        annotate_expectation(&p, "失配的线", 1, "这句话已经不在正文里了", KIND_EXPECTATION, HORIZON_SHORT)
-            .unwrap();
+        annotate_expectation(
+            &p,
+            "失配的线",
+            1,
+            "这句话已经不在正文里了",
+            KIND_EXPECTATION,
+            HORIZON_SHORT,
+        )
+        .unwrap();
 
         let board = expectation_board(&p).unwrap();
         assert_eq!(board.max_chapter, 26);

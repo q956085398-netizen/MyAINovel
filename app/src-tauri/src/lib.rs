@@ -939,6 +939,17 @@ fn set_expectation_state(
     expectation::set_expectation_state(Path::new(&project), &name, &state)
 }
 
+/// 切换期待线的独立待打磨状态；以看板载入时的三线.yaml 指纹拒绝陈旧写入。
+#[tauri::command]
+fn set_expectation_pending(
+    project: String,
+    name: String,
+    fingerprint: String,
+    pending: bool,
+) -> Result<SaveResult, String> {
+    expectation::set_expectation_pending(Path::new(&project), &name, pending, &fingerprint)
+}
+
 #[tauri::command]
 fn set_expectation_meta(
     project: String,
@@ -1240,6 +1251,7 @@ pub fn run() {
             annotate_expectation,
             fulfill_expectation,
             set_expectation_state,
+            set_expectation_pending,
             set_expectation_meta,
             delete_expectation,
             load_writing_stats,

@@ -4151,8 +4151,34 @@ button.save-chip {
 .exp-detail-head .card-actions {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-3);
+}
+
+.exp-pending-notes {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.exp-pending-note .card-actions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.exp-pending-note .select {
+  margin-top: 0;
+}
+
+.exp-pending-section {
+  margin-top: var(--sp-4);
+}
+
+.exp-pending-section h4 {
+  margin: 0 0 var(--sp-2);
+  color: var(--ink-soft);
+  font-size: var(--fs-ui);
+  font-weight: 600;
 }
 
 /* ---------- 导出与发布（工单 #14，docs/spec/导出与发布.md） ---------- */
