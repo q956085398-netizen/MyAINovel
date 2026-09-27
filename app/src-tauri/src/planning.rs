@@ -454,6 +454,9 @@ pub struct BridgeDraft {
     pub key_turn: Option<String>,
     pub expectation_hook: Option<String>,
     pub beat_plan: Option<String>,
+    pub prior_desire: Option<String>,
+    pub progression_trigger: Option<String>,
+    pub payoff_image: Option<String>,
     #[serde(default)]
     pub type_solutions: Vec<BridgeTypeSolution>,
     #[serde(default)]
@@ -686,6 +689,9 @@ fn read_bridge(path: &Path) -> Bridge {
     draft.key_turn = crate::book_file::map_scalar(&map, "关键转折");
     draft.expectation_hook = crate::book_file::map_scalar(&map, "期待钩子");
     draft.beat_plan = crate::book_file::map_scalar(&map, "章节拍安排");
+    draft.prior_desire = crate::book_file::map_scalar(&map, "前置欲望或理由");
+    draft.progression_trigger = crate::book_file::map_scalar(&map, "递进触发");
+    draft.payoff_image = crate::book_file::map_scalar(&map, "兑现画面");
     draft.type_solutions = read_bridge_type_solutions(&map).unwrap_or_default();
     if let Some(value) = map.get(Value::String("类型解法".into())) {
         draft.type_solutions_fingerprint = pair_fingerprint(value).ok();
@@ -825,6 +831,9 @@ fn apply_bridge_draft(map: &mut Mapping, draft: &BridgeDraft) {
     crate::book_file::set_map_scalar(map, "关键转折", draft.key_turn.as_deref());
     crate::book_file::set_map_scalar(map, "期待钩子", draft.expectation_hook.as_deref());
     crate::book_file::set_map_scalar(map, "章节拍安排", draft.beat_plan.as_deref());
+    crate::book_file::set_map_scalar(map, "前置欲望或理由", draft.prior_desire.as_deref());
+    crate::book_file::set_map_scalar(map, "递进触发", draft.progression_trigger.as_deref());
+    crate::book_file::set_map_scalar(map, "兑现画面", draft.payoff_image.as_deref());
 }
 
 fn draft_from_bridge(bridge: &Bridge) -> BridgeDraft {
@@ -915,6 +924,9 @@ mod tests {
         fs::write(&path, "---\n待打磨: true\n手补: 保留\n---\n原正文").unwrap();
         let mut input = serde_json::to_value(BridgeDraft::new("夜探")).unwrap();
         input["body"] = serde_json::json!("原正文");
+        input["priorDesire"] = serde_json::json!("想向旧友隐瞒身份");
+        input["progressionTrigger"] = serde_json::json!("旧友认出信物");
+        input["payoffImage"] = serde_json::json!("当众亮出证据");
         input["typeSolutions"] = serde_json::json!([
             {"kind": "自定义爽点", "solution": "借对手之口揭晓"},
             {"kind": "掉马甲", "solution": ""}
@@ -928,6 +940,9 @@ mod tests {
         assert_eq!(reopened["typeSolutions"][1]["solution"], "");
         assert_eq!(reopened["pending"], true);
         assert_eq!(reopened["body"], "原正文");
+        assert_eq!(reopened["priorDesire"], "想向旧友隐瞒身份");
+        assert_eq!(reopened["progressionTrigger"], "旧友认出信物");
+        assert_eq!(reopened["payoffImage"], "当众亮出证据");
         assert!(fs::read_to_string(&path).unwrap().contains("手补: 保留"));
         let before = fs::metadata(&path).unwrap().modified().unwrap();
         crate::book_file::set_pending(&path, false).unwrap();
@@ -935,10 +950,16 @@ mod tests {
         assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before);
         assert_eq!(scan_bridges(project).unwrap()[0].body, "原正文");
         let mut cleared = draft.clone();
+        cleared.prior_desire = None;
+        cleared.progression_trigger = None;
+        cleared.payoff_image = None;
         cleared.type_solutions.clear();
         save_bridge(project, &cleared, Some(&path)).unwrap();
         assert!(scan_bridges(project).unwrap()[0].type_solutions.is_empty());
         assert!(!fs::read_to_string(&path).unwrap().contains("类型解法:"));
+        assert!(scan_bridges(project).unwrap()[0].prior_desire.is_none());
+        assert!(!fs::read_to_string(&path).unwrap().contains("递进触发:"));
+        assert!(!fs::read_to_string(&path).unwrap().contains("兑现画面:"));
     }
 
     #[test]

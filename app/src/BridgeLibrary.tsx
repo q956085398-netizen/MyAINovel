@@ -167,7 +167,7 @@ export default function BridgeLibrary({ project, units, vocab, onChanged }: Brid
   );
 }
 
-function BridgeCard({
+export function BridgeCard({
   bridge,
   units,
   allBridges,
@@ -240,6 +240,9 @@ function BridgeCard({
       {bridge.keyTurn && <p className="card-core">关键转折：{bridge.keyTurn}</p>}
       {bridge.expectationHook && <p className="card-core">期待钩子：{bridge.expectationHook}</p>}
       {bridge.beatPlan && <p className="card-meta">章节拍安排：{bridge.beatPlan}</p>}
+      {bridge.priorDesire && <p className="card-meta">前置欲望或理由：{bridge.priorDesire}</p>}
+      {bridge.progressionTrigger && <p className="card-meta">递进触发：{bridge.progressionTrigger}</p>}
+      {bridge.payoffImage && <p className="card-meta">兑现画面：{bridge.payoffImage}</p>}
       {(bridge.typeSolutions ?? []).map((pair, index) => <p className="card-meta" key={index}>{pair.kind ? `类型：${pair.kind}` : ""}{pair.solution ? `${pair.kind ? " → " : ""}解法：${pair.solution}` : ""}</p>)}
       {(bridge.startChapter !== null || bridge.endChapter !== null) && (
         <p className="card-meta">
@@ -281,7 +284,7 @@ function rangeWarnings(
   return warnings;
 }
 
-function BridgeDialog({
+export function BridgeDialog({
   project,
   vocab,
   initial,
@@ -343,6 +346,13 @@ function BridgeDialog({
         <label>章节区间（可晚补）<span className="range-inputs"><input value={draft.startChapter ?? ""} onChange={(e) => set("startChapter", number(e.target.value))} placeholder="起章" inputMode="numeric" /><span className="range-sep">~</span><input value={draft.endChapter ?? ""} onChange={(e) => set("endChapter", number(e.target.value))} placeholder="止章" inputMode="numeric" /></span></label>
         {draft.startChapter && draft.endChapter && draft.startChapter > draft.endChapter && <p className="soft-warning">章节区间倒置：会保存为提示，不会阻止写作。</p>}
         <label>自由备注、片段和待解决问题<MarkdownEditor value={draft.body} onChange={(body) => set("body", body)} height="220px" /></label>
+        <details>
+          <summary>情绪构思提示（可留空）</summary>
+          <label>前置欲望或理由<input value={draft.priorDesire ?? ""} onChange={(e) => set("priorDesire", e.target.value || null)} /></label>
+          <label>递进触发<input value={draft.progressionTrigger ?? ""} onChange={(e) => set("progressionTrigger", e.target.value || null)} /></label>
+          <label>兑现画面<input value={draft.payoffImage ?? ""} onChange={(e) => set("payoffImage", e.target.value || null)} /></label>
+          <button className="btn small" onClick={() => setDraft((current) => ({ ...current, priorDesire: null, progressionTrigger: null, payoffImage: null }))}>清空情绪提示</button>
+        </details>
         <p className="hint">所属单元和次序由「安排进单元」操作维护；这里的提示均可留空。</p>
         <div className="dialog-actions"><button className="btn" disabled={busy} onClick={onClose}>取消</button><button className="btn primary" disabled={busy} onClick={() => void save()}>{busy ? "保存中…" : "保存桥段"}</button></div>
       </div>
