@@ -124,11 +124,14 @@ export default function MapSemanticCanvas(props: Props) {
   const [relationDialog, setRelationDialog] = useState<RelationDraft | null>(null);
   const [backgroundFailed, setBackgroundFailed] = useState(false);
   const drag = useRef<DragState | null>(null);
+  const saving = useRef(false);
   const markerId = useId().replace(/:/g, "");
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLayout(null);
+    setDragPreview(null);
     setError(null);
     setUndo(null);
     invoke<MapCanvasLayout>("read_map_canvas_layout", { project, mapName })
@@ -268,7 +271,8 @@ export default function MapSemanticCanvas(props: Props) {
   }
 
   async function savePositions(next: MapCanvasPlacement[], previous: MapCanvasPlacement[] | null = null) {
-    if (busy || !layout) return;
+    if (saving.current || loading || !layout) return;
+    saving.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -277,18 +281,21 @@ export default function MapSemanticCanvas(props: Props) {
       });
       setLayout(saved);
       setUndo(previous);
+      setMode("常规");
       onStructureChanged({ ...structure, fingerprint: saved.fingerprint });
     } catch (e) {
       setError(`未保存：${errMsg(e)}。刷新画布后可重新操作。`);
       throw e;
     } finally {
+      saving.current = false;
       setBusy(false);
       setDragPreview(null);
     }
   }
 
   async function arrange(all: boolean) {
-    if (busy || !layout) return;
+    if (saving.current || loading || !layout) return;
+    saving.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -297,16 +304,19 @@ export default function MapSemanticCanvas(props: Props) {
       });
       setLayout(result);
       setUndo(layout.placements);
+      setMode("常规");
       onStructureChanged({ ...structure, fingerprint: result.fingerprint });
     } catch (e) {
       setError(`整理失败：${errMsg(e)}。刷新画布后可重新操作。`);
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   }
 
   async function changeRelation(index: number | null, next: MapRelation | RegionRelation | null) {
-    if (busy || !layout) return;
+    if (saving.current || loading || !layout) throw new Error("画布尚未载入或正在保存，请稍后重试");
+    saving.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -321,6 +331,7 @@ export default function MapSemanticCanvas(props: Props) {
       setError(`关系未保存：${errMsg(e)}。刷新画布后可重新操作。`);
       throw e;
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   }
@@ -333,7 +344,7 @@ export default function MapSemanticCanvas(props: Props) {
   }
 
   function startDrag(e: ReactPointerEvent<SVGGElement>, position: MapCanvasPlacement) {
-    if (busy || !layout || e.button !== 0 || mode === "莲花" || drag.current) return;
+    if (saving.current || loading || !layout || e.button !== 0 || mode === "莲花" || drag.current) return;
     const start = point(e);
     if (!start) return;
     e.currentTarget.focus();
@@ -426,7 +437,7 @@ export default function MapSemanticCanvas(props: Props) {
           ))}
         </div>
         {mode === "莲花" && (
-          <button className="btn small" disabled={busy || !nodes.length} title="采用前只预览位置，不会保存坐标" onClick={() => run(savePositions(visiblePositions, placements))}>采用此布局</button>
+          <button className="btn small" disabled={busy || loading || !layout || !nodes.length} title="采用前只预览位置，不会保存坐标" onClick={() => run(savePositions(arrangedPositions, placements))}>采用此布局</button>
         )}
         {mode === "千层饼" && (
           <label className="map-canvas-era">时代

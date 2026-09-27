@@ -862,9 +862,20 @@ pub fn save_map_canvas_layout(
         return Err("地图结构.yaml 已在应用外发生变化，请刷新画布后重新操作。".into());
     }
     let mut root = assert_structure_version(&path, expected)?;
+    let live: HashSet<&str> = snapshot
+        .placements
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
     let mut names = HashSet::new();
     for placement in placements {
         validate_map_placement(placement)?;
+        if !live.contains(placement.name.as_str()) {
+            return Err(format!(
+                "画布节点「{}」不属于当前地图层，请刷新画布后重新操作。",
+                placement.name
+            ));
+        }
         if !names.insert(placement.name.as_str()) {
             return Err("画布位置包含重复节点".into());
         }
@@ -2339,6 +2350,75 @@ mod tests {
             all.placements, repeated.placements,
             "同一输入的完整重排应稳定"
         );
+    }
+
+    #[test]
+    fn 地图画布布局_拒绝保存失效预览节点且保留原有失效位置() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《山河》");
+        save_map(
+            &project,
+            &MapDraft {
+                name: "人间".into(),
+                ..MapDraft::default()
+            },
+            None,
+        )
+        .unwrap();
+        let path = super::map_structure_path(&project);
+        fs::write(
+            &path,
+            "布局:\n  全书:\n    旧地图: {x: 780, y: 620, 固定: true, 备注: 保留}\n",
+        )
+        .unwrap();
+        let original = fs::read(&path).unwrap();
+        let layout = read_map_canvas_layout(&project, None).unwrap();
+        let mut preview = layout.placements.clone();
+        preview.push(MapCanvasPlacement {
+            name: "失效引用".into(),
+            x: 180.0,
+            y: 560.0,
+            pinned: false,
+        });
+        assert!(
+            save_map_canvas_layout(&project, None, &preview, layout.fingerprint.as_deref())
+                .is_err()
+        );
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            original,
+            "拒绝预览节点时不改写文件"
+        );
+
+        save_map_canvas_layout(
+            &project,
+            None,
+            &layout.placements,
+            layout.fingerprint.as_deref(),
+        )
+        .unwrap();
+        let structure = read_map_structure(&project).unwrap();
+        let book = structure
+            .layout
+            .get(super::key("全书"))
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        let old = book
+            .get(super::key("旧地图"))
+            .unwrap()
+            .as_mapping()
+            .unwrap();
+        assert_eq!(
+            old.get(super::key("x")).and_then(serde_yaml::Value::as_i64),
+            Some(780)
+        );
+        assert_eq!(
+            old.get(super::key("备注"))
+                .and_then(serde_yaml::Value::as_str),
+            Some("保留")
+        );
+        assert!(!book.contains_key(super::key("失效引用")));
     }
 
     #[test]
