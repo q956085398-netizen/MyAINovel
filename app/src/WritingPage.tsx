@@ -227,6 +227,8 @@ export default function WritingPage({
   onChapterActive,
 }: WritingPageProps) {
   const librarySession = useLibrarySession();
+  const librarySessionId = librarySession.id;
+  const isCurrentLibrarySession = () => librarySession.isCurrent(librarySessionId);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const extensionsRef = useRef<Extension[] | null>(null);
@@ -337,6 +339,7 @@ export default function WritingPage({
   }
 
   function handlePaste(event: ClipboardEvent, view: EditorView): boolean {
+    if (!isCurrentLibrarySession()) return false;
     const files = Array.from(event.clipboardData?.files ?? []).filter((f) =>
       f.type.startsWith("image/"),
     );
@@ -346,12 +349,14 @@ export default function WritingPage({
       for (const file of files) {
         const ext = file.type.split("/")[1] || "png";
         const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+        if (!isCurrentLibrarySession()) return;
         try {
           const rel = await invoke<string>("save_chapter_paste_image", {
             project: project.dir,
             ext,
             bytes,
           });
+          if (!isCurrentLibrarySession()) return;
           const pos = view.state.selection.main.head;
           const insert = `\n\n![](${rel})\n`;
           view.dispatch({
@@ -480,6 +485,7 @@ export default function WritingPage({
     const chapter = currentRef.current;
     if (!libraryPath || !chapter || !quickNoteText.trim() || quickNoteBusy) return;
     const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     setQuickNoteBusy(true);
     setQuickNoteError(null);
     try {
@@ -526,12 +532,16 @@ export default function WritingPage({
   // ---------- 伏笔（工单 #6，docs/spec/伏笔系统.md） ----------
 
   async function loadForeshadows(): Promise<Foreshadow[]> {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return [];
     try {
       const list = await invoke<Foreshadow[]>("read_foreshadows", { project: project.dir });
+      if (!librarySession.isCurrent(session)) return [];
       foreshadowsRef.current = list;
       setForeshadows(list);
       return list;
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return [];
       // 伏笔.yaml 损坏：显式提示，但不挡写作（伏笔只是旁路数据）。
       foreshadowsRef.current = [];
       setForeshadows([]);
@@ -618,6 +628,7 @@ export default function WritingPage({
   }
 
   async function annotateForeshadow(name: string) {
+    if (!isCurrentLibrarySession()) return;
     const ordinal = requireOrdinal();
     const view = viewRef.current;
     if (ordinal === null || !view || !annotate) return;
@@ -629,18 +640,21 @@ export default function WritingPage({
         chapter: ordinal,
         quote: annotate.quote,
       });
+      if (!isCurrentLibrarySession()) return;
       foreshadowsRef.current = list;
       setForeshadows(list);
       setAnnotate(null);
       applyForeshadowMarks();
     } catch (e) {
+      if (!isCurrentLibrarySession()) return;
       window.alert(`设为伏笔失败：${errMsg(e)}`);
     } finally {
-      setForeshadowBusy(false);
+      if (isCurrentLibrarySession()) setForeshadowBusy(false);
     }
   }
 
   async function recoverForeshadow(name: string, kind: string, note: string) {
+    if (!isCurrentLibrarySession()) return;
     const ordinal = requireOrdinal();
     if (ordinal === null || !collect) return;
     setForeshadowBusy(true);
@@ -653,23 +667,30 @@ export default function WritingPage({
         kind,
         note: note.trim() || null,
       });
+      if (!isCurrentLibrarySession()) return;
       foreshadowsRef.current = list;
       setForeshadows(list);
       setCollect(null);
       applyForeshadowMarks();
     } catch (e) {
+      if (!isCurrentLibrarySession()) return;
       window.alert(`回收伏笔失败：${errMsg(e)}`);
     } finally {
-      setForeshadowBusy(false);
+      if (isCurrentLibrarySession()) setForeshadowBusy(false);
     }
   }
 
   // ---------- 三线（工单 #7，docs/spec/期待感三线.md） ----------
 
   async function loadExpectations(): Promise<void> {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     try {
-      setExpectations(await invoke<ExpectationBoard>("expectation_board", { project: project.dir }));
+      const board = await invoke<ExpectationBoard>("expectation_board", { project: project.dir });
+      if (!librarySession.isCurrent(session)) return;
+      setExpectations(board);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       // 三线.yaml 损坏：显式提示，但不挡写作（三线只是旁路数据）。
       setExpectations({ maxChapter: 0, tableFingerprint: null, items: [] });
       window.alert(`读取期待线失败：${errMsg(e)}`);
@@ -677,6 +698,7 @@ export default function WritingPage({
   }
 
   async function annotateExpectation(name: string, kind: string, horizon: string) {
+    if (!isCurrentLibrarySession()) return;
     const ordinal = requireOrdinal();
     if (ordinal === null || !expAnnotate) return;
     setExpectationBusy(true);
@@ -689,16 +711,19 @@ export default function WritingPage({
         kind,
         horizon,
       });
+      if (!isCurrentLibrarySession()) return;
       setExpAnnotate(null);
       await loadExpectations();
     } catch (e) {
+      if (!isCurrentLibrarySession()) return;
       window.alert(`记为期待线失败：${errMsg(e)}`);
     } finally {
-      setExpectationBusy(false);
+      if (isCurrentLibrarySession()) setExpectationBusy(false);
     }
   }
 
   async function fulfillExpectation(name: string, kind: string, note: string) {
+    if (!isCurrentLibrarySession()) return;
     const ordinal = requireOrdinal();
     if (ordinal === null || !expFulfill) return;
     setExpectationBusy(true);
@@ -711,12 +736,14 @@ export default function WritingPage({
         kind,
         note: note.trim() || null,
       });
+      if (!isCurrentLibrarySession()) return;
       setExpFulfill(null);
       await loadExpectations();
     } catch (e) {
+      if (!isCurrentLibrarySession()) return;
       window.alert(`兑现期待线失败：${errMsg(e)}`);
     } finally {
-      setExpectationBusy(false);
+      if (isCurrentLibrarySession()) setExpectationBusy(false);
     }
   }
 
@@ -814,6 +841,8 @@ export default function WritingPage({
   }
 
   async function saveNow(force: boolean, quiet = false): Promise<boolean> {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return false;
     const view = viewRef.current;
     const entry = currentRef.current;
     if (!view || !entry) return true;
@@ -833,6 +862,7 @@ export default function WritingPage({
           base: fingerprintRef.current,
           force,
         });
+        if (!librarySession.isCurrent(session)) return result.status === "saved";
         // 保存响应绑定发起时的对象（工单 #77）：往返期间已换章的话，写盘
         // 本身按旧路径完成/被拒，指纹/脏标/统计不得套到新章上。
         if (currentRef.current?.path !== entry.path) return result.status === "saved";
@@ -865,6 +895,7 @@ export default function WritingPage({
         );
         return true;
       } catch (e) {
+        if (!librarySession.isCurrent(session)) return false;
         // 往返期间已换章/删章：失败属于旧对象，不再惊扰新章（记日志即可）。
         if (currentRef.current?.path !== entry.path) {
           console.error("旧章保存响应迟到失败（已忽略）：", e);
@@ -885,16 +916,21 @@ export default function WritingPage({
   }
 
   async function reloadFromDisk() {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     if (!entry) return;
     if (!window.confirm("重新加载会放弃编辑器里未保存的修改，确定吗？")) return;
+    if (!librarySession.isCurrent(session)) return;
     try {
       const doc = await invoke<MdContent>("read_book_md", { path: entry.path });
+      if (!librarySession.isCurrent(session)) return;
       fingerprintRef.current = doc.fingerprint;
       conflictRef.current = false;
       setConflict(false);
       loadContent(doc.content);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`重新加载失败：${errMsg(e)}`);
     }
   }
@@ -913,57 +949,73 @@ export default function WritingPage({
   // ---------- 章节动作 ----------
 
   async function openNextChapter() {
-    if (!(await settleNow())) return;
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
+    if (!(await settleNow()) || !librarySession.isCurrent(session)) return;
     try {
       const created = await invoke<ChapterEntry>("create_chapter", {
         project: project.dir,
         title: "",
       });
+      if (!librarySession.isCurrent(session)) return;
       await rescan();
+      if (!librarySession.isCurrent(session)) return;
       await openChapter(created);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`新建下一章失败：${errMsg(e)}`);
     }
   }
 
   async function createChapter(title: string) {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     try {
       const created = await invoke<ChapterEntry>("create_chapter", {
         project: project.dir,
         title,
       });
+      if (!librarySession.isCurrent(session)) return;
       setDialog(null);
       await rescan();
+      if (!librarySession.isCurrent(session)) return;
       await openChapter(created);
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`新建章节失败：${errMsg(e)}`);
     }
   }
 
   async function renameCurrent(title: string) {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     if (!entry) return;
-    if (!(await settleNow())) return;
+    if (!(await settleNow()) || !librarySession.isCurrent(session)) return;
     try {
       const renamed = await invoke<ChapterEntry>("rename_chapter", {
         path: entry.path,
         title,
       });
+      if (!librarySession.isCurrent(session)) return;
       currentRef.current = renamed;
       setCurrent(renamed);
       localStorage.setItem(chapterKey(project.dir), renamed.path);
       setDialog(null);
       await rescan();
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`重命名失败：${errMsg(e)}`);
     }
   }
 
   async function buildSplitPreview(title: string, cursorUtf16?: number) {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     const view = viewRef.current;
     if (!entry || entry.ordinal === null || !view) return;
-    if (!(await settleNow())) return;
+    if (!(await settleNow()) || !librarySession.isCurrent(session)) return;
     try {
       const preview = await invoke<ChapterSplitPreview>("preview_chapter_split", {
         project: project.dir,
@@ -971,14 +1023,18 @@ export default function WritingPage({
         cursorUtf16: cursorUtf16 ?? view.state.selection.main.head,
         title,
       });
+      if (!librarySession.isCurrent(session)) return;
       setSplitDialog({ preview, title: preview.title, busy: false });
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`无法预览拆章：${errMsg(e)}`);
       view.focus();
     }
   }
 
   async function confirmSplit() {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     if (!splitDialog || splitDialog.title !== splitDialog.preview.title) return;
     setSplitDialog({ ...splitDialog, busy: true });
     try {
@@ -986,20 +1042,25 @@ export default function WritingPage({
         project: project.dir,
         preview: splitDialog.preview,
       });
+      if (!librarySession.isCurrent(session)) return;
       setSplitDialog(null);
       const list = await rescan();
+      if (!librarySession.isCurrent(session)) return;
       const created = list.find((chapter) => chapter.path === result.created.path) ?? result.created;
       await openChapter(created);
       viewRef.current?.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
       viewRef.current?.focus();
       onChanged();
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       setSplitDialog((dialog) => (dialog ? { ...dialog, busy: false } : dialog));
       window.alert(`拆章失败：${errMsg(e)}`);
     }
   }
 
   async function deleteCurrent() {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     if (!entry) return;
     if (
@@ -1009,6 +1070,7 @@ export default function WritingPage({
     ) {
       return;
     }
+    if (!librarySession.isCurrent(session)) return;
     if (autosaveRef.current !== null) {
       window.clearTimeout(autosaveRef.current);
       autosaveRef.current = null;
@@ -1016,19 +1078,24 @@ export default function WritingPage({
     const index = chapters.findIndex((c) => c.path === entry.path);
     try {
       await invoke("delete_chapter", { path: entry.path });
+      if (!librarySession.isCurrent(session)) return;
       currentRef.current = null;
       setCurrent(null);
       setIntent(null);
       const list = await rescan();
+      if (!librarySession.isCurrent(session)) return;
       const next = list.length > 0 ? list[Math.min(Math.max(index, 0), list.length - 1)] : null;
       if (next) await openChapter(next);
       else loadContent("");
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`删除失败：${errMsg(e)}`);
     }
   }
 
   async function renumber() {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     if (
       !window.confirm(
         "把合规章节按当前顺序重排为 1..N（文件名会变，未编号文件不动）？",
@@ -1036,12 +1103,15 @@ export default function WritingPage({
     ) {
       return;
     }
+    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     if (entry && !(await settleNow())) return;
+    if (!librarySession.isCurrent(session)) return;
     const numbered = chapters.filter((c) => c.ordinal !== null);
     const position = entry ? numbered.findIndex((c) => c.path === entry.path) : -1;
     try {
       const list = await invoke<ChapterEntry[]>("renumber_chapters", { project: project.dir });
+      if (!librarySession.isCurrent(session)) return;
       setChapters(list);
       if (position >= 0) {
         const target = list.find((c) => c.ordinal === position + 1);
@@ -1052,11 +1122,13 @@ export default function WritingPage({
         }
       }
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`重编号失败：${errMsg(e)}`);
     }
   }
 
   function changeStatus(next: string) {
+    if (!isCurrentLibrarySession()) return;
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({ changes: upsertFrontmatterStatus(view.state.doc.toString(), next) });
@@ -1077,6 +1149,8 @@ export default function WritingPage({
   }
 
   async function openHistory() {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     if (!entry) return;
     try {
@@ -1084,28 +1158,37 @@ export default function WritingPage({
         project: project.dir,
         path: entry.path,
       });
+      if (!librarySession.isCurrent(session)) return;
       setHistory({ list, selected: null, preview: "" });
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`读取历史版本失败：${errMsg(e)}`);
     }
   }
 
   async function selectSnapshot(path: string) {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     try {
       const preview = await invoke<string>("read_chapter_snapshot", { path });
+      if (!librarySession.isCurrent(session)) return;
       setHistory((h) => (h ? { ...h, selected: path, preview } : h));
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`读取历史版本失败：${errMsg(e)}`);
     }
   }
 
   async function restoreSnapshot() {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     if (!history?.selected) return;
     if (dirtyRef.current && !window.confirm("当前有未保存的修改，恢复历史版本会覆盖它们，确定吗？")) {
       return;
     }
     try {
       const content = await invoke<string>("read_chapter_snapshot", { path: history.selected });
+      if (!librarySession.isCurrent(session)) return;
       loadContent(content);
       dirtyRef.current = true;
       setSaveStatus("dirty");
@@ -1113,6 +1196,7 @@ export default function WritingPage({
       setHistory(null);
       viewRef.current?.focus();
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`恢复失败：${errMsg(e)}`);
     }
   }
@@ -1144,6 +1228,8 @@ export default function WritingPage({
   /** AI 陪看本章：材料只含正文与可用的本章意图，由作者显式发起，只出建议。
    *  读的是盘上正文——先把未保存的改动落盘，冲突没裁决就不跑。 */
   async function runChapterCompanion() {
+    const session = librarySession.id;
+    if (!librarySession.isCurrent(session)) return;
     const entry = currentRef.current;
     const view = viewRef.current;
     if (!entry || entry.ordinal === null || !view) {
@@ -1155,6 +1241,7 @@ export default function WritingPage({
       window.alert("本章还有未落盘的修改（或保存冲突未裁决），先处理再请 AI 陪看。");
       return;
     }
+    if (!librarySession.isCurrent(session)) return;
     const chapterContent = view.state.doc.toString();
     try {
       const text = await invoke<string>("build_ai_context", {
@@ -1164,14 +1251,17 @@ export default function WritingPage({
         subjects: null,
         chapterContent,
       });
+      if (!librarySession.isCurrent(session)) return;
       onAiCommand({ kind: AI_CHAPTER_COMPANION, bookName: project.title, text });
     } catch (e) {
+      if (!librarySession.isCurrent(session)) return;
       window.alert(`AI 陪看材料读取失败：${errMsg(e)}`);
     }
   }
 
   /** 润色：只把选中的那段正文交给 AI；采纳（替换选中）在面板里点。 */
   function runPolish() {
+    if (!isCurrentLibrarySession()) return;
     const view = viewRef.current;
     const entry = currentRef.current;
     if (!view || !entry) return;
