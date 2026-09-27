@@ -76,8 +76,8 @@ pub struct StoryLine {
     pub name: String,
     pub is_main: bool,
     pub milestones: Vec<Milestone>,
-    /// Obsidian 手补字段只在磁盘往返，不成为应用表单字段。
-    #[serde(skip, default)]
+    /// 未知字段穿过界面保存往返，再由主线 YAML 序列化器写回。
+    #[serde(default)]
     pub extra: Mapping,
 }
 
@@ -89,8 +89,20 @@ pub struct Milestone {
     pub reader_feeling: Option<String>,
     pub units: Vec<String>,
     pub note: Option<String>,
-    #[serde(skip, default)]
+    #[serde(default)]
+    pub pending: bool,
+    /// 当前主线表里的原始位置，只用于本次操作定位，不是持久身份。
+    #[serde(default)]
+    pub source: Option<MilestoneSource>,
+    #[serde(default)]
     pub extra: Mapping,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MilestoneSource {
+    pub line_index: usize,
+    pub milestone_index: usize,
 }
 
 fn mainlines_path(project: &Path) -> std::path::PathBuf {
@@ -121,6 +133,14 @@ pub fn read_mainlines(project: &Path) -> Result<MainlinePlan, String> {
     // 外部手写文件也遵循同一展示纪律：有内容时总高亮第一条主线，
     // 不在读取时回写，仍由作者下一次保存时落盘确认。
     ensure_one_mainline(&mut lines);
+    for (line_index, line) in lines.iter_mut().enumerate() {
+        for (milestone_index, milestone) in line.milestones.iter_mut().enumerate() {
+            milestone.source = Some(MilestoneSource {
+                line_index,
+                milestone_index,
+            });
+        }
+    }
     Ok(MainlinePlan {
         lines,
         fingerprint: Some(crate::book_file::content_fingerprint(&bytes).to_string()),
@@ -175,8 +195,22 @@ fn milestone_from_value(
         reader_feeling: take_scalar(&mut map, "读者感受"),
         units: take_list(&mut map, "单元"),
         note: take_scalar(&mut map, "备注"),
+        pending: take_pending(&mut map),
+        source: None,
         extra: map,
     })
+}
+
+fn take_pending(map: &mut Mapping) -> bool {
+    let key = Value::String("待打磨".into());
+    match map.get(&key) {
+        Some(Value::Bool(pending)) => {
+            let pending = *pending;
+            map.remove(&key);
+            pending
+        }
+        _ => false,
+    }
 }
 
 fn take_scalar(map: &mut Mapping, key: &str) -> Option<String> {
@@ -259,6 +293,69 @@ pub fn save_mainlines(
     })
 }
 
+/// 只切换既有里程碑上的待打磨键。整表内容指纹保证传来的原始位置仍
+/// 指向同一条目；外部编辑或重排后返回冲突，绝不按陈旧索引写入。
+pub fn set_milestone_pending(
+    project: &Path,
+    source: &MilestoneSource,
+    expected_fingerprint: &str,
+    pending: bool,
+) -> Result<crate::book_file::SaveResult, String> {
+    let path = mainlines_path(project);
+    let bytes = fs::read(&path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("{} 已不存在，请重新载入主线图", path.display())
+        } else {
+            format!("无法读取文件 {}：{error}", path.display())
+        }
+    })?;
+    let disk_fingerprint = crate::book_file::content_fingerprint(&bytes).to_string();
+    if disk_fingerprint != expected_fingerprint {
+        return Ok(crate::book_file::SaveResult::Conflict);
+    }
+
+    let mut value: Value = serde_yaml::from_slice(&bytes)
+        .map_err(|error| format!("无法解析 {}，请修复后重新载入：{error}", path.display()))?;
+    let Value::Sequence(lines) = &mut value else {
+        return Err(format!("{} 应为主线列表，请重新载入", path.display()));
+    };
+    let line = lines
+        .get_mut(source.line_index)
+        .ok_or_else(|| format!("里程碑定位已失效，请重新载入 {}", path.display()))?;
+    let Value::Mapping(line) = line else {
+        return Err(format!("目标情节线格式异常，请重新载入 {}", path.display()));
+    };
+    let milestones_key = Value::String("里程碑".into());
+    let milestones = line
+        .get_mut(&milestones_key)
+        .ok_or_else(|| format!("目标里程碑已不存在，请重新载入 {}", path.display()))?;
+    let Value::Sequence(milestones) = milestones else {
+        return Err(format!(
+            "目标情节线的里程碑列表损坏，请重新载入 {}",
+            path.display()
+        ));
+    };
+    let milestone = milestones
+        .get_mut(source.milestone_index)
+        .ok_or_else(|| format!("里程碑定位已失效，请重新载入 {}", path.display()))?;
+    let Value::Mapping(milestone) = milestone else {
+        return Err(format!("目标里程碑格式异常，请重新载入 {}", path.display()));
+    };
+
+    let pending_key = Value::String("待打磨".into());
+    if pending {
+        milestone.insert(pending_key, Value::Bool(true));
+    } else {
+        milestone.remove(&pending_key);
+    }
+    let text =
+        serde_yaml::to_string(&value).map_err(|error| format!("无法生成主线.yaml：{error}"))?;
+    crate::book_file::write_text_atomic(&path, &text)?;
+    Ok(crate::book_file::SaveResult::Saved {
+        fingerprint: crate::book_file::content_fingerprint(text.as_bytes()).to_string(),
+    })
+}
+
 fn ensure_one_mainline(lines: &mut [StoryLine]) {
     let Some(first_main) = lines
         .iter()
@@ -312,6 +409,12 @@ fn milestone_to_value(milestone: &Milestone) -> Result<Value, String> {
         map.remove(Value::String("单元".into()));
     } else {
         map.insert(Value::String("单元".into()), Value::Sequence(units));
+    }
+    let pending_key = Value::String("待打磨".into());
+    if milestone.pending {
+        map.insert(pending_key, Value::Bool(true));
+    } else if matches!(map.get(&pending_key), Some(Value::Bool(_))) {
+        map.remove(&pending_key);
     }
     Ok(Value::Mapping(map))
 }
@@ -918,6 +1021,8 @@ mod tests {
                         reader_feeling: None,
                         units: vec!["初入京城".into()],
                         note: None,
+                        pending: false,
+                        source: None,
                         extra: serde_yaml::Mapping::from_iter([(
                             serde_yaml::Value::String("手补说明".into()),
                             serde_yaml::Value::String("保留".into()),
@@ -929,6 +1034,8 @@ mod tests {
                         reader_feeling: Some("痛快".into()),
                         units: vec!["大朝会".into()],
                         note: Some("终局".into()),
+                        pending: false,
+                        source: None,
                         extra: serde_yaml::Mapping::new(),
                     },
                 ],
@@ -942,8 +1049,218 @@ mod tests {
 
         save_mainlines(&project, &plan, false).unwrap();
         let loaded = read_mainlines(&project).unwrap();
-        assert_eq!(loaded.lines, plan.lines);
+        assert_eq!(loaded.lines[0].name, plan.lines[0].name);
+        assert_eq!(
+            loaded.lines[0].milestones[0].title,
+            plan.lines[0].milestones[0].title
+        );
+        assert_eq!(
+            loaded.lines[0].milestones[0].extra,
+            plan.lines[0].milestones[0].extra
+        );
+        assert_eq!(
+            loaded.lines[0].milestones[0].source,
+            Some(MilestoneSource {
+                line_index: 0,
+                milestone_index: 0
+            })
+        );
         assert_eq!(loaded.lines[0].milestones[0].title, "得知冤案");
+    }
+
+    #[test]
+    fn 主线里程碑待打磨_同名精确定位保存退出恢复次序与未知字段() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let path = mainlines_path(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "- 名称: 主线甲\n  主线: true\n  线手补: 甲线字段\n  里程碑:\n    - 标题: 重复标题\n      变化: 从避祸转为追查\n      待打磨: false\n      碑手补: 第一条字段\n    - 标题: 重复标题\n      待打磨: true\n      碑手补: 第二条字段\n- 名称: 支线乙\n  线手补: 乙线字段\n  里程碑:\n    - 标题: 重复标题\n      变化: 找到旧账\n      读者感受: 期待\n      单元: [单元乙]\n      备注: 证据仍有缺口\n      碑手补: 支线字段\n",
+        )
+        .unwrap();
+
+        let loaded = read_mainlines(&project).unwrap();
+        assert!(
+            !loaded.lines[0].milestones[0].pending,
+            "缺失或 false 都是普通状态"
+        );
+        assert!(loaded.lines[0].milestones[1].pending);
+        assert!(!loaded.lines[1].milestones[0].pending);
+        assert_eq!(
+            loaded.lines[0].milestones[0].source,
+            Some(MilestoneSource {
+                line_index: 0,
+                milestone_index: 0
+            })
+        );
+        assert_eq!(
+            loaded.lines[0].milestones[1].source,
+            Some(MilestoneSource {
+                line_index: 0,
+                milestone_index: 1
+            })
+        );
+        assert_eq!(
+            loaded.lines[1].milestones[0].source,
+            Some(MilestoneSource {
+                line_index: 1,
+                milestone_index: 0
+            })
+        );
+
+        let source = loaded.lines[1].milestones[0].source.clone().unwrap();
+        let first_write = set_milestone_pending(
+            &project,
+            &source,
+            loaded.fingerprint.as_deref().unwrap(),
+            true,
+        )
+        .unwrap();
+        assert!(matches!(
+            first_write,
+            crate::book_file::SaveResult::Saved { .. }
+        ));
+        let pending = read_mainlines(&project).unwrap();
+        assert!(
+            pending.lines[1].milestones[0].pending,
+            "只切换支线里的同名里程碑"
+        );
+        assert!(
+            pending.lines[0].milestones[1].pending,
+            "其他同名里程碑保持原状态"
+        );
+        assert_eq!(pending.lines[0].name, "主线甲");
+        assert_eq!(pending.lines[1].name, "支线乙");
+        assert_eq!(pending.lines[1].milestones[0].units, vec!["单元乙"]);
+        assert_eq!(
+            pending.lines[1].milestones[0].note.as_deref(),
+            Some("证据仍有缺口")
+        );
+
+        let wire = serde_json::to_value(&pending).unwrap();
+        let mut edited: MainlinePlan = serde_json::from_value(wire).unwrap();
+        edited.lines[1].milestones[0].note = Some("补齐证人来历".into());
+        save_mainlines(&project, &edited, false).unwrap();
+        let edited = read_mainlines(&project).unwrap();
+        assert!(
+            edited.lines[1].milestones[0].pending,
+            "编辑后仍保留待打磨状态"
+        );
+        assert_eq!(
+            edited.lines[1].milestones[0].note.as_deref(),
+            Some("补齐证人来历")
+        );
+        assert_eq!(
+            edited.lines[0].extra[Value::String("线手补".into())],
+            "甲线字段"
+        );
+        assert_eq!(
+            edited.lines[1].extra[Value::String("线手补".into())],
+            "乙线字段"
+        );
+        assert_eq!(
+            edited.lines[0].milestones[0].extra[Value::String("碑手补".into())],
+            "第一条字段"
+        );
+        assert_eq!(
+            edited.lines[0].milestones[1].extra[Value::String("碑手补".into())],
+            "第二条字段"
+        );
+        assert_eq!(
+            edited.lines[1].milestones[0].extra[Value::String("碑手补".into())],
+            "支线字段"
+        );
+
+        let source = edited.lines[1].milestones[0].source.clone().unwrap();
+        set_milestone_pending(
+            &project,
+            &source,
+            edited.fingerprint.as_deref().unwrap(),
+            false,
+        )
+        .unwrap();
+        let restored = read_mainlines(&project).unwrap();
+        assert!(!restored.lines[1].milestones[0].pending);
+        assert!(restored.lines[0].milestones[1].pending);
+        assert_eq!(restored.lines[0].milestones[0].title, "重复标题");
+        assert_eq!(restored.lines[0].milestones[1].title, "重复标题");
+        assert_eq!(restored.lines[1].milestones[0].title, "重复标题");
+        let value: Value = serde_yaml::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let lines = value.as_sequence().unwrap();
+        let second_line = lines[1].as_mapping().unwrap();
+        let milestones = second_line[Value::String("里程碑".into())]
+            .as_sequence()
+            .unwrap();
+        assert!(!milestones[0]
+            .as_mapping()
+            .unwrap()
+            .contains_key(Value::String("待打磨".into())));
+        assert_eq!(
+            crate::book_file::count_files_recursive(&project),
+            1,
+            "状态操作不建立副本"
+        );
+    }
+
+    #[test]
+    fn 主线里程碑待打磨_表指纹过期时外部重排拒写() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let path = mainlines_path(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "- 名称: 同名线\n  主线: true\n  里程碑:\n    - 标题: 重复标题\n      变化: 第一条\n- 名称: 同名线\n  里程碑:\n    - 标题: 重复标题\n      变化: 第二条\n",
+        )
+        .unwrap();
+        let loaded = read_mainlines(&project).unwrap();
+        let source = loaded.lines[0].milestones[0].source.clone().unwrap();
+        let mut external: Value = serde_yaml::from_slice(&fs::read(&path).unwrap()).unwrap();
+        external.as_sequence_mut().unwrap().swap(0, 1);
+        let external_text = serde_yaml::to_string(&external).unwrap();
+        fs::write(&path, &external_text).unwrap();
+
+        assert!(matches!(
+            set_milestone_pending(
+                &project,
+                &source,
+                loaded.fingerprint.as_deref().unwrap(),
+                true,
+            )
+            .unwrap(),
+            crate::book_file::SaveResult::Conflict
+        ));
+        assert_eq!(fs::read_to_string(&path).unwrap(), external_text);
+        let reloaded = read_mainlines(&project).unwrap();
+        assert_eq!(
+            reloaded.lines[0].milestones[0].change.as_deref(),
+            Some("第二条")
+        );
+        assert!(!reloaded.lines[0].milestones[0].pending);
+    }
+
+    #[test]
+    fn 主线里程碑待打磨_损坏_yaml拒写并保持原文件() {
+        let root = tempdir().unwrap();
+        let project = root.path().join("项目/《空书》");
+        let path = mainlines_path(&project);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let damaged = "- 名称: [损坏的 YAML";
+        fs::write(&path, damaged).unwrap();
+        let fingerprint = crate::book_file::content_fingerprint(damaged.as_bytes()).to_string();
+
+        assert!(set_milestone_pending(
+            &project,
+            &MilestoneSource {
+                line_index: 0,
+                milestone_index: 0
+            },
+            &fingerprint,
+            true,
+        )
+        .is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), damaged);
     }
 
     #[test]
@@ -960,6 +1277,8 @@ mod tests {
                     reader_feeling: None,
                     units: vec![],
                     note: None,
+                    pending: false,
+                    source: None,
                     extra: Mapping::new(),
                 }],
                 extra: Mapping::new(),

@@ -9,9 +9,12 @@
     "build": "tsc && vite build",
     "test:content-surface": "node --test tests/contentSurface.test.ts",
     "test:content-details": "node --test tests/contentDetailRows.test.ts",
+    "test:expectation-board": "node --test tests/expectationBoardView.test.ts",
     "test:editor-header": "node --test tests/editorHeader.test.ts",
     "test:rail-project": "node --test tests/railProjectPanel.test.ts",
     "test:region-save": "node --test tests/regionSaveFlow.test.ts",
+    "test:milestone-display": "node --test tests/milestoneDisplay.test.ts",
+    "test:milestone-planning-page": "node --import ./tests/helpers/register-tsx-loader.mjs --test tests/milestonePlanning.page.test.ts",
     "test:settings": "node --test tests/settingsState.test.ts",
     "test:presets": "node --test tests/presets.test.ts",
     "test:session-preset": "node --test tests/sessionPreset.test.ts",
@@ -38,6 +41,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
+    "happy-dom": "^20.14.5",
     "typescript": "~6.0.3",
     "vite": "^8.0.16"
   }

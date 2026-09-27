@@ -330,6 +330,8 @@ export interface StoryLine {
   name: string;
   isMain: boolean;
   milestones: Milestone[];
+  /** 未知 YAML 字段随 IPC 往返保存，不由表单编辑。 */
+  extra?: Record<string, unknown>;
 }
 
 export interface Milestone {
@@ -338,10 +340,28 @@ export interface Milestone {
   readerFeeling: string | null;
   units: string[];
   note: string | null;
+  pending: boolean;
+  /** 原主线表中的位置，随条目移动；只用于受表指纹保护的状态操作。 */
+  source: MilestoneSource | null;
+  /** 未知 YAML 字段随 IPC 往返保存，不由表单编辑。 */
+  extra?: Record<string, unknown>;
+}
+
+export interface MilestoneSource {
+  lineIndex: number;
+  milestoneIndex: number;
 }
 
 export function emptyMilestone(): Milestone {
-  return { title: "", change: null, readerFeeling: null, units: [], note: null };
+  return {
+    title: "",
+    change: null,
+    readerFeeling: null,
+    units: [],
+    note: null,
+    pending: false,
+    source: null,
+  };
 }
 
 export function emptyStoryLine(): StoryLine {

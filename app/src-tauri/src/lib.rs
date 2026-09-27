@@ -40,7 +40,7 @@ use map::{
     RegionRelation,
 };
 use pending::PendingLine;
-use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, Outline};
+use planning::{Bridge, BridgeDraft, ChapterIntent, MainlinePlan, MilestoneSource, Outline};
 use presets::{PresetSave, PresetState};
 use project::{
     ArrangementCheck, ArrangementItem, Circle, NoteDraft, NoteEntry, NoteKind, ProjectEntry,
@@ -487,6 +487,17 @@ fn read_mainlines(project: String) -> Result<MainlinePlan, String> {
 #[tauri::command]
 fn save_mainlines(project: String, plan: MainlinePlan, force: bool) -> Result<SaveResult, String> {
     planning::save_mainlines(Path::new(&project), &plan, force)
+}
+
+/// 切换主线里程碑的独立待打磨状态；依赖载入时的主线表指纹与原始位置。
+#[tauri::command]
+fn set_milestone_pending(
+    project: String,
+    source: MilestoneSource,
+    fingerprint: String,
+    pending: bool,
+) -> Result<SaveResult, String> {
+    planning::set_milestone_pending(Path::new(&project), &source, &fingerprint, pending)
 }
 
 /// 项目内桥段库（工单 #43）：每张桥段卡只在 构思/桥段/ 保存一份。
@@ -1167,6 +1178,7 @@ pub fn run() {
             save_outline,
             read_mainlines,
             save_mainlines,
+            set_milestone_pending,
             scan_bridges,
             save_bridge,
             arrange_bridge,

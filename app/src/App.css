@@ -3002,6 +3002,15 @@ button.save-chip {
   box-shadow: var(--sh-1);
 }
 
+.pending-zone .milestone-card {
+  border-left: 3px dashed var(--accent-line);
+}
+
+.milestone-context {
+  align-self: flex-end;
+  margin-bottom: var(--sp-2);
+}
+
 .milestone-summary {
   display: flex;
   align-items: center;
