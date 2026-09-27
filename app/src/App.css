@@ -2876,6 +2876,15 @@ button.save-chip {
   margin-bottom: calc(-1 * var(--line-w));
 }
 
+.note-card-grid.unit-flow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.unit-bridges {
+  display: grid;
+  gap: var(--sp-3);
+}
+
 .bridge-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), min(100%, 440px)));

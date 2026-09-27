@@ -381,6 +381,9 @@ export interface BridgeDraft {
   beatPlan: string | null;
   typeSolutions: { kind: string; solution: string; source?: { index: number; fingerprint: string } | null }[];
   typeSolutionsFingerprint?: string | null;
+  priorDesire?: string | null;
+  progressionTrigger?: string | null;
+  payoffImage?: string | null;
   body: string;
 }
 

@@ -1,7 +1,8 @@
 import { useRevealSearchResult } from "./globalSearchNavigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { NoteDraft, NoteEntry, NoteKind, Vocabulary } from "./types";
+import type { Bridge, NoteDraft, NoteEntry, NoteKind, Vocabulary } from "./types";
+import { BridgeCard, BridgeDialog } from "./BridgeLibrary";
 import { emptyNoteDraft } from "./types";
 import { errMsg } from "./util";
 import NoteDialog from "./NoteDialog";
@@ -121,6 +122,8 @@ export default function NoteList({
 }: NoteListProps) {
   const categoryFilter = kind === "世界观" ? worldviewCategory ?? "" : "";
   const [notes, setNotes] = useState<NoteEntry[]>([]);
+  const [bridges, setBridges] = useState<Bridge[]>([]);
+  const [editingBridge, setEditingBridge] = useState<Bridge | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ draft: NoteDraft; prevPath: string | null } | null>(
@@ -140,8 +143,10 @@ export default function NoteList({
     setError(null);
     try {
       setNotes(await invoke<NoteEntry[]>("scan_notes", { project, kind }));
+      setBridges(kind === "单元" ? await invoke<Bridge[]>("scan_bridges", { project }) : []);
     } catch (e) {
       setNotes([]);
+      setBridges([]);
       setError(`读取${kind}失败：${errMsg(e)}`);
     } finally {
       setLoading(false);
@@ -223,6 +228,35 @@ export default function NoteList({
     return shouldExpandContentCard(note.path, collapsedCards, false);
   }
 
+  async function changeBridge(bridge: Bridge, command: "move_bridge" | "unarrange_bridge", direction?: -1 | 1) {
+    try {
+      await invoke(command, { project, path: bridge.path, direction });
+      await scan();
+      onChanged();
+    } catch (e) {
+      window.alert(`调整桥段失败：${errMsg(e)}`);
+    }
+  }
+
+  function unitBridges(note: NoteEntry) {
+    if (kind !== "单元") return null;
+    const arranged = bridges.filter((bridge) => bridge.unit === note.name)
+      .sort((left, right) => (left.order ?? Infinity) - (right.order ?? Infinity));
+    if (!arranged.length) return null;
+    return <section className="unit-bridges" aria-label={`${note.name}的桥段`}>
+      <h4>桥段安排</h4>
+      {arranged.map((bridge) => <BridgeCard key={bridge.path} bridge={bridge} units={notes} allBridges={bridges}
+        expanded={bridge.pending || shouldExpandContentCard(bridge.path, collapsedCards, false)}
+        onToggleExpanded={() => toggleCollapsed(bridge.path)}
+        switching={switching !== null}
+        onTogglePending={() => void togglePending(bridge.path, !bridge.pending)}
+        onEdit={() => setEditingBridge(bridge)}
+        onArrange={() => {}}
+        onMove={(direction) => void changeBridge(bridge, "move_bridge", direction)}
+        onUnarrange={() => void changeBridge(bridge, "unarrange_bridge")} />)}
+    </section>;
+  }
+
   const selectedStatus =
     kind === "开头" && notes.filter((n) => n.status === "选定").length > 1
       ? notes.filter((n) => n.status === "选定").length
@@ -284,14 +318,14 @@ export default function NoteList({
         count={polishing.length}
         hint="还在发酵；整理完成后回到下面的原位置。"
       >
-        <div className="note-card-grid">
+        <div className={`note-card-grid ${kind === "单元" ? "unit-flow" : ""}`}>
           {polishing.map((note) => (
             <ContentSurface
               key={note.path}
               identity={note.path}
               className={note.name === focusName ? "rail-task-target" : undefined}
               title={note.name}
-              badges={<NoteBadges kind={kind} note={note} />}
+              badges={<>{kind === "单元" && orderedNames?.includes(note.name) && <span className="tag">第 {orderedNames.indexOf(note.name) + 1} 单元</span>}<NoteBadges kind={kind} note={note} /></>}
               expanded={isExpanded(note)}
               pending
               onEdit={() => setEditing({ draft: note, prevPath: note.path })}
@@ -317,6 +351,7 @@ export default function NoteList({
             >
               <NoteCoreLines kind={kind} note={note} />
               {note.body && <div className="card-body">{note.body}</div>}
+              {unitBridges(note)}
             </ContentSurface>
           ))}
         </div>
@@ -335,14 +370,14 @@ export default function NoteList({
         </div>
       )}
 
-      <div className="note-card-grid">
+      <div className={`note-card-grid ${kind === "单元" ? "unit-flow" : ""}`}>
         {listedNotes.map((note) => (
           <ContentSurface
             key={note.path}
             identity={note.path}
             className={note.name === focusName ? "rail-task-target" : undefined}
             title={note.name}
-            badges={<NoteBadges kind={kind} note={note} />}
+            badges={<>{kind === "单元" && orderedNames?.includes(note.name) && <span className="tag">第 {orderedNames.indexOf(note.name) + 1} 单元</span>}<NoteBadges kind={kind} note={note} /></>}
             expanded={isExpanded(note)}
             onEdit={() => setEditing({ draft: note, prevPath: note.path })}
             onToggleExpanded={() => toggleCollapsed(note.path)}
@@ -380,6 +415,7 @@ export default function NoteList({
           >
             <NoteCoreLines kind={kind} note={note} />
             {note.body && <div className="card-body">{note.body}</div>}
+            {unitBridges(note)}
           </ContentSurface>
         ))}
       </div>
@@ -404,6 +440,9 @@ export default function NoteList({
           }}
         />
       )}
+      {editingBridge && <BridgeDialog project={project} initial={editingBridge} prevPath={editingBridge.path}
+        vocab={vocab} onClose={() => setEditingBridge(null)}
+        onSaved={() => { setEditingBridge(null); void scan(); onChanged(); }} />}
       {upgrading && (
         <GeoUpgradeDialog
           project={project}
