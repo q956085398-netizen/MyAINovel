@@ -5,9 +5,9 @@
 - 应用代码：`app/`（Tauri 2 + React + TypeScript；`npm run tauri dev` 运行，`src-tauri/` 下 `cargo test`）
 - 启动脚本：仓库根 `启动工笔.vbs`、`建桌面快捷方式.vbs`（**必须存为 UTF-16LE+BOM**——WSH 不认 UTF-8，写成 UTF-8 会报「未结束的字符串常量」）
 - 领域词汇表：[CONTEXT.md](./CONTEXT.md)（只记录概念与术语）
-- 设计总览：[docs/设计共识.md](./docs/设计共识.md)
+- 设计总览：[docs/总设计方案-2026-10.md](./docs/总设计方案-2026-10.md)（10-03 定稿；取代 `docs/设计共识.md`、`docs/产品设计补遗.md` 中冲突的部分）
 - 重大决策：[docs/adr/](./docs/adr/)
-- 实现级规格：`docs/spec/`（wayfinder 地图产出）
+- 实现级规格：`docs/spec/`（wayfinder 地图产出；与总设计方案冲突时以方案为准）
 
 ## Agent skills
 
