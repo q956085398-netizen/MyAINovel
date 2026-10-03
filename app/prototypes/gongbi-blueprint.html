@@ -1447,7 +1447,7 @@ RENDER.desk = () => {
           <div class="rule eyebrow">其他的书 · ${others.length} 本</div>
           ${others.map(B => B.writing
             ? `<button class="brew-line tone-${B.tone}" data-act="w-open" data-id="${B.id}"><b>《${esc(B.title)}》</b><span class="tag tone-zhe">在写 · 第${cn(B.write.ch)}章</span><small>${wUnitLabel(B)}「${esc(wUnit(B).t)}」· 这一章是${wBeats(B).join('+')}：${esc(B.write.intent || '')}</small></button>`
-            : `<button class="brew-line tone-${B.tone}" data-act="mb-think" data-id="${B.id}"><b>《${esc(B.title)}》</b><span class="tag tone-${B.tone}">长到「${STAGES[Math.max(0, stageOf(B) - 1)][0]}」</span><small>下一步：${esc(STAGES[Math.min(stageOf(B), STAGES.length - 1)][2](B))}</small></button>`).join('')}
+            : `<button class="brew-line tone-${B.tone}" data-act="mb-think" data-id="${B.id}"><b>《${esc(B.title)}》</b><span class="tag tone-${B.tone}">长到「${STAGES[Math.max(0, reachOf(B) - 1)][0]}」</span><small>下一步：${esc(STAGES[Math.min(stageOf(B), STAGES.length - 1)][2](B))}</small></button>`).join('')}
           <div style="text-align:right"><button class="btn sm ghost" data-go="mybooks">我的书 ${ic('arrow', 14)}</button></div>
         </article>` : ''}
       </div>
@@ -2997,8 +2997,11 @@ const STAGES = [
   ['排布', P => P.units.length >= 1, P => freeSeeds(P).length ? `池里有 ${freeSeeds(P).length} 颗种子——哪一颗最适合放在开篇？` : `${heroOf(P)}遇到的第一个麻烦是什么？`, 'plot'],
   ['开写', P => !!P.writing, P => P.write ? `第${cn(P.write.ch)}章还等着你。` : '排好了第一个单元，可以开写了。', 'plot'],
 ];
-const stageOf = P => { let k = 0; while (k < STAGES.length && STAGES[k][1](P)) k++; return k; };
-const growHTML = P => { const k = stageOf(P); return `<div class="gl tone-${P.tone}">${STAGES.map(([l], i) => `<div class="${i < k ? 'done' : i === k ? 'cur' : ''}"><i></i>${l}</div>`).join('')}</div>`; };
+/* 生长线只标位置：每一格各自判断，不要求按顺序；开写只看有没有排好第一个单元 */
+const stageOf = P => { const k = STAGES.findIndex(s => !s[1](P)); return k < 0 ? STAGES.length : k; };
+const reachOf = P => STAGES.reduce((m, s, i) => s[1](P) ? i + 1 : m, 0);
+const canStart = P => P.units.length >= 1;
+const growHTML = P => { const k = stageOf(P); return `<div class="gl tone-${P.tone}">${STAGES.map(([l, ok], i) => `<div class="${ok(P) ? 'done' : i === k ? 'cur' : ''}"><i></i>${l}</div>`).join('')}</div>`; };
 RENDER.mybooks = () => {
   const W = writingBooks(), brew = S.myBooks.filter(b => !b.writing);
   $('#sc-mybooks').innerHTML = `<div class="page">
@@ -3018,12 +3021,12 @@ RENDER.mybooks = () => {
   </div>`;
 };
 function mbCardHTML(B){
-  const k = stageOf(B), notes = bookNotes(B).length;
+  const k = stageOf(B), r = reachOf(B), notes = bookNotes(B).length;
   return `<article class="card mb-card tone-${B.tone}" data-act="open-book" data-id="${B.id}" data-seal="${esc(B.title[0])}">
-    <div><div class="eyebrow">${k ? `长到「${STAGES[k - 1][0]}」` : '刚起了个头'}</div><h3 class="display">《${esc(B.title)}》</h3></div>
+    <div><div class="eyebrow">${r ? `长到「${STAGES[r - 1][0]}」` : '刚起了个头'}</div><h3 class="display">《${esc(B.title)}》</h3></div>
     <p class="one">${esc(B.premise)}</p>
     ${growHTML(B)}
-    <div class="mb-next"><span>${esc(STAGES[Math.min(k, STAGES.length - 1)][2](B))}</span>${k >= 4
+    <div class="mb-next"><span>${esc(STAGES[Math.min(k, STAGES.length - 1)][2](B))}</span>${canStart(B)
       ? `<button class="btn sm primary" data-act="mb-start" data-id="${B.id}">${B.write ? '接着写' : '开写'} ${ic('arrow', 13)}</button>`
       : `<button class="btn sm" data-act="mb-think" data-id="${B.id}">去想 ${ic('arrow', 13)}</button>`}</div>
     <div class="born">${ic('dot', 10)} ${esc(B.born || '')}${notes ? ` · 随身本里有 ${notes} 条给它的` : ''}</div>
